@@ -28,42 +28,42 @@ jobs:
 
             const TYPE_DEFAULTS = {
               feature: {
-                Type: 'Feature',
+                'Task type': 'Feature',
                 Priority: 'Medium',
                 Size: 'M',
                 Area: 'General',
                 Module: 'Non-module',
               },
               bug: {
-                Type: 'Bug',
+                'Task type': 'Bug',
                 Priority: 'High',
                 Size: 'S',
                 Area: 'General',
                 Module: 'Non-module',
               },
               research: {
-                Type: 'Research',
+                'Task type': 'Research',
                 Priority: 'Low',
                 Size: 'S',
                 Area: 'General',
                 Module: 'Non-module',
               },
               refactor: {
-                Type: 'Refactor',
+                'Task type': 'Refactor',
                 Priority: 'Medium',
                 Size: 'M',
                 Area: 'General',
                 Module: 'Non-module',
               },
               documentation: {
-                Type: 'Documentation',
+                'Task type': 'Documentation',
                 Priority: 'Low',
                 Size: 'S',
                 Area: 'Documentation',
                 Module: 'Non-module',
               },
               chore: {
-                Type: 'Chore',
+                'Task type': 'Chore',
                 Priority: 'Low',
                 Size: 'S',
                 Area: 'General',
@@ -116,8 +116,6 @@ jobs:
 
             const values = { ...TYPE_DEFAULTS[typeLabel] };
 
-            // Optional explicit override labels. These are supported now, even if
-            // you decide to create them later.
             const getOverride = (prefix) => {
               const match = labels.find((label) =>
                 label.toLowerCase().startsWith(`${prefix}:`)
@@ -238,8 +236,6 @@ jobs:
                 );
                 item = added.addProjectV2ItemById.item;
               } catch (error) {
-                // The built-in GitHub Project auto-add workflow can race with this
-                // action. Re-read the item once before failing.
                 await new Promise((resolve) => setTimeout(resolve, 2000));
                 item = await itemQuery();
                 if (!item) throw error;
