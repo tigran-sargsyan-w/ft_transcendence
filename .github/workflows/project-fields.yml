@@ -1,0 +1,300 @@
+name: Sync issue labels to project fields
+
+on:
+  issues:
+    types: [opened, labeled, unlabeled, reopened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to sync
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  sync-project-fields:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Sync labels to project fields
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const PROJECT_TITLE = 'ft_transcendence — Development';
+
+            const TYPE_DEFAULTS = {
+              feature: {
+                Type: 'Feature',
+                Priority: 'Medium',
+                Size: 'M',
+                Area: 'General',
+                Module: 'Non-module',
+              },
+              bug: {
+                Type: 'Bug',
+                Priority: 'High',
+                Size: 'S',
+                Area: 'General',
+                Module: 'Non-module',
+              },
+              research: {
+                Type: 'Research',
+                Priority: 'Low',
+                Size: 'S',
+                Area: 'General',
+                Module: 'Non-module',
+              },
+              refactor: {
+                Type: 'Refactor',
+                Priority: 'Medium',
+                Size: 'M',
+                Area: 'General',
+                Module: 'Non-module',
+              },
+              documentation: {
+                Type: 'Documentation',
+                Priority: 'Low',
+                Size: 'S',
+                Area: 'Documentation',
+                Module: 'Non-module',
+              },
+              chore: {
+                Type: 'Chore',
+                Priority: 'Low',
+                Size: 'S',
+                Area: 'General',
+                Module: 'Non-module',
+              },
+            };
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = context.eventName === 'workflow_dispatch'
+              ? Number(context.payload.inputs.issue_number)
+              : context.payload.issue.number;
+
+            const normalize = (value) => String(value)
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, '');
+
+            const { data: issue } = await github.rest.issues.get({
+              owner,
+              repo,
+              issue_number: issueNumber,
+            });
+
+            const labels = issue.labels.map((label) =>
+              typeof label === 'string' ? label : label.name
+            );
+
+            const canonicalType = (label) => {
+              const value = label.toLowerCase().replace(/^type:/, '');
+              return Object.hasOwn(TYPE_DEFAULTS, value) ? value : null;
+            };
+
+            let typeLabel = null;
+
+            if (context.eventName === 'issues' && context.payload.action === 'labeled') {
+              typeLabel = canonicalType(context.payload.label.name);
+            }
+
+            if (!typeLabel) {
+              for (const label of labels) {
+                typeLabel = canonicalType(label);
+                if (typeLabel) break;
+              }
+            }
+
+            if (!typeLabel) {
+              core.notice(`Issue #${issueNumber}: no type label found; nothing to sync.`);
+              return;
+            }
+
+            const values = { ...TYPE_DEFAULTS[typeLabel] };
+
+            // Optional explicit override labels. These are supported now, even if
+            // you decide to create them later.
+            const getOverride = (prefix) => {
+              const match = labels.find((label) =>
+                label.toLowerCase().startsWith(`${prefix}:`)
+              );
+              return match ? match.slice(prefix.length + 1).trim() : null;
+            };
+
+            const priorityOverride = getOverride('priority');
+            if (priorityOverride) {
+              const map = { high: 'High', medium: 'Medium', low: 'Low' };
+              values.Priority = map[priorityOverride.toLowerCase()] ?? values.Priority;
+            }
+
+            const sizeOverride = getOverride('size');
+            if (sizeOverride && ['xs', 's', 'm', 'l', 'xl'].includes(sizeOverride.toLowerCase())) {
+              values.Size = sizeOverride.toUpperCase();
+            }
+
+            const areaOverride = getOverride('area');
+            if (areaOverride) {
+              const map = {
+                general: 'General',
+                frontend: 'Frontend',
+                backend: 'Backend',
+                database: 'Database',
+                game: 'Game',
+                security: 'Security',
+                devops: 'DevOps',
+                'ui-ux': 'UI/UX',
+                documentation: 'Documentation',
+              };
+              values.Area = map[areaOverride.toLowerCase()] ?? values.Area;
+            }
+
+            const moduleOverride = getOverride('module');
+            if (moduleOverride) {
+              const map = {
+                mandatory: 'Mandatory',
+                major: 'Major Module',
+                minor: 'Minor Module',
+                'non-module': 'Non-module',
+                none: 'Non-module',
+              };
+              values.Module = map[moduleOverride.toLowerCase()] ?? values.Module;
+            }
+
+            const projectData = await github.graphql(
+              `query($login: String!) {
+                user(login: $login) {
+                  projectsV2(first: 100) {
+                    nodes {
+                      id
+                      title
+                      fields(first: 100) {
+                        nodes {
+                          ... on ProjectV2SingleSelectField {
+                            id
+                            name
+                            options {
+                              id
+                              name
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }`,
+              { login: owner }
+            );
+
+            const project = projectData.user.projectsV2.nodes.find(
+              (candidate) => candidate.title === PROJECT_TITLE
+            );
+
+            if (!project) {
+              core.setFailed(`Project "${PROJECT_TITLE}" was not found for ${owner}.`);
+              return;
+            }
+
+            const itemQuery = async () => {
+              const data = await github.graphql(
+                `query($id: ID!) {
+                  node(id: $id) {
+                    ... on Issue {
+                      projectItems(first: 100) {
+                        nodes {
+                          id
+                          project { id }
+                        }
+                      }
+                    }
+                  }
+                }`,
+                { id: issue.node_id }
+              );
+
+              return data.node.projectItems.nodes.find(
+                (item) => item.project.id === project.id
+              );
+            };
+
+            let item = await itemQuery();
+
+            if (!item) {
+              try {
+                const added = await github.graphql(
+                  `mutation($project: ID!, $content: ID!) {
+                    addProjectV2ItemById(input: {
+                      projectId: $project,
+                      contentId: $content
+                    }) {
+                      item { id }
+                    }
+                  }`,
+                  { project: project.id, content: issue.node_id }
+                );
+                item = added.addProjectV2ItemById.item;
+              } catch (error) {
+                // The built-in GitHub Project auto-add workflow can race with this
+                // action. Re-read the item once before failing.
+                await new Promise((resolve) => setTimeout(resolve, 2000));
+                item = await itemQuery();
+                if (!item) throw error;
+              }
+            }
+
+            const fields = project.fields.nodes.filter(Boolean);
+
+            const findField = (fieldName) => fields.find(
+              (field) => normalize(field.name) === normalize(fieldName)
+            );
+
+            const findOption = (field, optionName) => field.options.find(
+              (option) => normalize(option.name) === normalize(optionName)
+            );
+
+            for (const [fieldName, optionName] of Object.entries(values)) {
+              const field = findField(fieldName);
+
+              if (!field) {
+                core.warning(`Project field "${fieldName}" was not found. Skipping.`);
+                continue;
+              }
+
+              const option = findOption(field, optionName);
+
+              if (!option) {
+                core.warning(
+                  `Option "${optionName}" was not found in field "${fieldName}". Skipping.`
+                );
+                continue;
+              }
+
+              await github.graphql(
+                `mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $project,
+                    itemId: $item,
+                    fieldId: $field,
+                    value: { singleSelectOptionId: $option }
+                  }) {
+                    projectV2Item { id }
+                  }
+                }`,
+                {
+                  project: project.id,
+                  item: item.id,
+                  field: field.id,
+                  option: option.id,
+                }
+              );
+
+              core.info(`${fieldName} -> ${optionName}`);
+            }
+
+            core.notice(
+              `Issue #${issueNumber} synced from label "${typeLabel}".`
+            );
