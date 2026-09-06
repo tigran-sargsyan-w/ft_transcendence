@@ -2,6 +2,8 @@ services:
   backend:
     build:
       context: ./backend
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public"
     ports:
       - "3000:3000"
     develop:
@@ -9,6 +11,9 @@ services:
         - action: sync+restart
           path: ./backend/src
           target: /app/src
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   frontend:
     build:
