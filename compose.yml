@@ -4,6 +4,11 @@ services:
       context: ./backend
     ports:
       - "3000:3000"
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend/src
+          target: /app/src
 
   frontend:
     build:
@@ -12,5 +17,10 @@ services:
       BACKEND_URL: http://backend:3000
     ports:
       - "5173:5173"
+    develop:
+      watch:
+        - action: sync
+          path: ./frontend/src
+          target: /app/src
     depends_on:
       - backend
