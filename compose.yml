@@ -1,1 +1,16 @@
-services: {}
+services:
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "3000:3000"
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      BACKEND_URL: http://backend:3000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
