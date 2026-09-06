@@ -24,3 +24,16 @@ services:
           target: /app/src
     depends_on:
       - backend
+
+  postgres:
+    build:
+      context: ./infra/docker/postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+volumes:
+  postgres_data:
