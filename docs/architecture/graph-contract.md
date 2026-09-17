@@ -6,13 +6,32 @@ Nest sends a JSON snapshot of the infrastructure graph to the Graph Engine; the 
 
 ## Who uses it
 
-- NestJS backend — sends topology snapshots, may cache or forward results
+- NestJS backend — builds topology as `nodes`/`edges`, sends snapshots to the Graph Engine, may cache or forward results
 - Graph Engine (Python) — computes analyses
 - Frontend (React Flow) — usually via Nest, not by calling the Graph Engine directly
 
 Transport between Nest and the Graph Engine is plain HTTP/JSON (see ADR 0001). Response envelopes follow [API conventions](./api-conventions.md) (`data` / `error`).
 
 This document describes the **v0** contract. Fields can grow; renames of existing required fields should be avoided without a version bump.
+
+## Boundaries (team agreement)
+
+These rules keep ownership clear between collector, Nest, Graph Engine, and frontend:
+
+| Responsibility | Owner |
+|----------------|--------|
+| Talk to Docker / emit normalized infra events | Collector (infra) |
+| Build and maintain topology as `nodes` / `edges` | Nest |
+| Run blast radius, attack paths, critical nodes, scoring | Graph Engine (Python) |
+| Live graph to the browser + reconnect recovery | Nest (WebSocket) |
+| Call Graph Engine analyze API | Nest (HTTP); browser talks to Nest only |
+
+Additional rules:
+
+- The Graph Engine is **analysis only**. It does not discover Docker state and does not turn raw events into a graph by itself. The team may still co-define the event → node/edge mapping in docs.
+- Nest → Graph Engine analyze uses a **full topology snapshot** per request (this contract).
+- Frontend live updates: **full topology snapshot on connect/reconnect**, then **small deltas** for live changes. Nest owns recovery so the UI never keeps a silent outdated graph. Delta shapes for the socket can live under realtime docs; they are not part of the Graph Engine HTTP API.
+- **REST vs WebSocket:** auth, history, pagination, and analyze go over HTTP. Live topology/incident updates go over the WebSocket. Analyze is never done over the socket (frontend → Nest → Graph Engine over HTTP).
 
 ## Plain-language terms
 
@@ -270,4 +289,4 @@ React Flow can map `nodes[].id/label/status/kind` to custom nodes and `edges[].s
 - Auth on the Graph Engine (internal network only at first)
 - Persistence inside the Graph Engine
 - Streaming/WebSocket analysis
-- Partial topology diffs (full snapshot per request)
+- Partial topology diffs on the Graph Engine HTTP API (analyze uses a full snapshot per request; frontend live deltas are Nest ↔ browser)
