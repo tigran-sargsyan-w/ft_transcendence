@@ -1,8 +1,8 @@
 # Architecture
 
-This directory contains the framework-agnostic architecture foundation for the project.
+This directory holds shared architecture rules, API/realtime conventions, and links to ADRs.
 
-The goal of Architecture v0 is to define stable engineering rules before the final product concept and technology stack are selected. It intentionally avoids premature implementation details.
+Documents here should stay short and stable. Concrete stack and product decisions are recorded under **Current status** and in ADRs when they become firm.
 
 ## Documents
 
@@ -21,7 +21,7 @@ The goal of Architecture v0 is to define stable engineering rules before the fin
 
 - final product/domain concept — Infrastructure Intelligence / real-time incident platform
 - frontend framework — React + Vite (TypeScript)
-- backend framework — NestJS (TypeScript), modular monolith first
+- backend framework — NestJS (TypeScript) as the main app API, with a **small set of services** (e.g. Docker collector, Python Graph Engine) rather than one single process for everything
 - database/ORM — PostgreSQL + Prisma
 - Graph Engine (product-specific) — Python FastAPI + NetworkX, plain HTTP/JSON — [ADR 0001](../adr/0001-python-graph-engine.md), [graph contract](./graph-contract.md)
 
