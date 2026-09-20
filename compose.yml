@@ -6,6 +6,8 @@ services:
       DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public"
     ports:
       - "3000:3000"
+    volumes:
+      - ./backend/prisma:/app/prisma
     develop:
       watch:
         - action: sync+restart
