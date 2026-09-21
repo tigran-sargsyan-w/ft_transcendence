@@ -34,28 +34,40 @@ Expected shape:
 }
 ```
 
-## Analyze (stub)
+## Analyze
 
-`POST /api/v1/analyze` validates the graph-contract request and returns empty result shells.
-Real algorithms are not implemented yet.
+`POST /api/v1/analyze` validates the graph-contract request.
+
+- `blast_radius` — implemented (who depends on the seed service, via reversed dependency edges)
+- `attack_paths` / `critical_nodes` — still stub empty results
+
+Example (seed = `svc_db` → expects `svc_api` and `svc_worker` in the blast radius):
 
 ```bash
 curl -s http://localhost:8000/api/v1/analyze \
   -H 'Content-Type: application/json' \
-  -d '{
-    "topology": {
-      "schemaVersion": 1,
-      "environmentId": "env_local_compose",
-      "capturedAt": "2026-09-14T10:00:00Z",
-      "nodes": [
-        {"id": "svc_api", "kind": "service", "label": "api", "status": "down"},
-        {"id": "svc_db", "kind": "service", "label": "db", "status": "healthy"}
-      ],
-      "edges": [
-        {"id": "edge_api_db", "source": "svc_api", "target": "svc_db", "kind": "depends_on"}
-      ]
-    },
-    "analyses": ["blast_radius"],
-    "options": {"seedNodeIds": ["svc_api"]}
-  }'
+  -d @- <<'EOF'
+{
+  "topology": {
+    "schemaVersion": 1,
+    "environmentId": "env_local_compose",
+    "capturedAt": "2026-09-14T10:00:00Z",
+    "nodes": [
+      {"id": "svc_api", "kind": "service", "label": "api", "status": "down"},
+      {"id": "svc_worker", "kind": "service", "label": "worker", "status": "healthy"},
+      {"id": "svc_db", "kind": "service", "label": "db", "status": "healthy"},
+      {"id": "svc_cache", "kind": "service", "label": "cache", "status": "healthy"}
+    ],
+    "edges": [
+      {"id": "edge_api_db", "source": "svc_api", "target": "svc_db", "kind": "depends_on"},
+      {"id": "edge_api_cache", "source": "svc_api", "target": "svc_cache", "kind": "depends_on"},
+      {"id": "edge_worker_api", "source": "svc_worker", "target": "svc_api", "kind": "depends_on"}
+    ]
+  },
+  "analyses": ["blast_radius"],
+  "options": {"seedNodeIds": ["svc_db"]}
+}
+EOF
 ```
+
+A copy of this topology lives in `fixtures/sample_topology.json`.
