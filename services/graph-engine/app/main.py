@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.blast_radius import build_digraph, compute_blast_radius
 from app.schemas import (
     ALLOWED_ANALYSES,
     ALLOWED_EDGE_KINDS,
@@ -88,7 +89,12 @@ def analyze(body: AnalyzeRequest) -> Any:
                 f"Unknown analysis id: {analysis_id}",
             )
 
-    seed_node_ids = list(body.options.seedNodeIds) if body.options and body.options.seedNodeIds else []
+    seed_node_ids = (
+        list(body.options.seedNodeIds)
+        if body.options and body.options.seedNodeIds
+        else []
+    )
+    max_depth: Optional[int] = body.options.maxDepth if body.options else None
 
     for analysis_id in body.analyses:
         if analysis_id in ANALYSES_REQUIRING_SEEDS and not seed_node_ids:
@@ -106,15 +112,15 @@ def analyze(body: AnalyzeRequest) -> Any:
                 f"Unknown seed node id: {seed_id}",
             )
 
-    # Stub results: validated request only. Real algorithms come next.
-    results: dict = {}
+    graph = build_digraph(topology)
+    results: Dict[str, Any] = {}
+
     if "blast_radius" in body.analyses:
-        results["blastRadius"] = {
-            "seedNodeIds": seed_node_ids,
-            "affectedNodeIds": [],
-            "affectedEdgeIds": [],
-            "depthByNodeId": {},
-        }
+        results["blastRadius"] = compute_blast_radius(
+            graph,
+            seed_node_ids,
+            max_depth=max_depth,
+        )
     if "attack_paths" in body.analyses:
         results["attackPaths"] = {
             "seedNodeIds": seed_node_ids,
@@ -126,7 +132,9 @@ def analyze(body: AnalyzeRequest) -> Any:
         }
 
     analyzed_at = (
-        datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        datetime.now(timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
     )
 
     return {
