@@ -186,3 +186,109 @@ One run of a small Compose project, `demo`: `db` (healthcheck, volume), `api` (d
   }
 }
 ```
+
+### Events of the `up`
+
+`GET /api/v1/events?after=0`: events 1 to 12. Replaying them from an empty state gives exactly the snapshot above. A container just created has `state: "created"`, `health: "none"` and a network entry with an empty `networkId`; `db` goes `starting`, then `healthy` (event 8); `network.connected` only carries the container id.
+
+```json
+{
+  "data": {
+    "events": [
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0001", "sequence": 1,
+        "occurredAt": "2026-09-23T15:38:44.353Z", "type": "network.created",
+        "resource": { "kind": "network", "id": "e5b899c59c6a" },
+        "data": { "network": { "id": "e5b899c59c6a", "name": "demo_default", "driver": "bridge", "internal": false, "labels": {} } }
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0002", "sequence": 2,
+        "occurredAt": "2026-09-23T15:38:44.357Z", "type": "volume.created",
+        "resource": { "kind": "volume", "id": "demo_db_data" },
+        "data": { "volume": { "name": "demo_db_data", "driver": "local", "labels": {} } }
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0003", "sequence": 3,
+        "occurredAt": "2026-09-23T15:38:44.442Z", "type": "container.created",
+        "resource": { "kind": "container", "id": "6c28d5dff0b8" },
+        "data": { "container": { "id": "6c28d5dff0b8", "name": "demo-db-1", "image": "busybox:1.37", "state": "created", "health": "none", "labels": {},
+          "compose": { "project": "demo", "service": "db", "dependsOn": [] }, "ports": [],
+          "networks": [{ "networkId": "", "name": "demo_default", "ipv4Address": "" }],
+          "mounts": [{ "type": "volume", "source": "demo_db_data", "destination": "/data", "readOnly": false }] } }
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0004", "sequence": 4,
+        "occurredAt": "2026-09-23T15:38:44.542Z", "type": "container.created",
+        "resource": { "kind": "container", "id": "4589c1f3ac3c" },
+        "data": { "container": { "id": "4589c1f3ac3c", "name": "demo-api-1", "image": "busybox:1.37", "state": "created", "health": "none", "labels": {},
+          "compose": { "project": "demo", "service": "api", "dependsOn": ["db"] }, "ports": [],
+          "networks": [{ "networkId": "", "name": "demo_default", "ipv4Address": "" }],
+          "mounts": [] } }
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0005", "sequence": 5,
+        "occurredAt": "2026-09-23T15:38:44.620Z", "type": "container.created",
+        "resource": { "kind": "container", "id": "b183ed94a57c" },
+        "data": { "container": { "id": "b183ed94a57c", "name": "demo-web-1", "image": "busybox:1.37", "state": "created", "health": "none", "labels": {},
+          "compose": { "project": "demo", "service": "web", "dependsOn": ["api"] }, "ports": [{ "containerPort": 80, "protocol": "tcp", "hostIp": "0.0.0.0", "hostPort": 8080 }],
+          "networks": [{ "networkId": "", "name": "demo_default", "ipv4Address": "" }],
+          "mounts": [] } }
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0006", "sequence": 6,
+        "occurredAt": "2026-09-23T15:38:44.902Z", "type": "network.connected",
+        "resource": { "kind": "network", "id": "e5b899c59c6a" },
+        "data": { "containerId": "6c28d5dff0b8" }
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0007", "sequence": 7,
+        "occurredAt": "2026-09-23T15:38:44.928Z", "type": "container.started",
+        "resource": { "kind": "container", "id": "6c28d5dff0b8" },
+        "data": { "container": { "id": "6c28d5dff0b8", "name": "demo-db-1", "image": "busybox:1.37", "state": "running", "health": "starting", "labels": {},
+          "compose": { "project": "demo", "service": "db", "dependsOn": [] }, "ports": [],
+          "networks": [{ "networkId": "e5b899c59c6a", "name": "demo_default", "ipv4Address": "172.18.0.2" }],
+          "mounts": [{ "type": "volume", "source": "demo_db_data", "destination": "/data", "readOnly": false }] } }
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0008", "sequence": 8,
+        "occurredAt": "2026-09-23T15:38:46.976Z", "type": "container.health_changed",
+        "resource": { "kind": "container", "id": "6c28d5dff0b8" },
+        "data": { "container": { "id": "6c28d5dff0b8", "name": "demo-db-1", "image": "busybox:1.37", "state": "running", "health": "healthy", "labels": {},
+          "compose": { "project": "demo", "service": "db", "dependsOn": [] }, "ports": [],
+          "networks": [{ "networkId": "e5b899c59c6a", "name": "demo_default", "ipv4Address": "172.18.0.2" }],
+          "mounts": [{ "type": "volume", "source": "demo_db_data", "destination": "/data", "readOnly": false }] } }
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0009", "sequence": 9,
+        "occurredAt": "2026-09-23T15:38:47.610Z", "type": "network.connected",
+        "resource": { "kind": "network", "id": "e5b899c59c6a" },
+        "data": { "containerId": "4589c1f3ac3c" }
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0010", "sequence": 10,
+        "occurredAt": "2026-09-23T15:38:47.628Z", "type": "container.started",
+        "resource": { "kind": "container", "id": "4589c1f3ac3c" },
+        "data": { "container": { "id": "4589c1f3ac3c", "name": "demo-api-1", "image": "busybox:1.37", "state": "running", "health": "none", "labels": {},
+          "compose": { "project": "demo", "service": "api", "dependsOn": ["db"] }, "ports": [],
+          "networks": [{ "networkId": "e5b899c59c6a", "name": "demo_default", "ipv4Address": "172.18.0.3" }],
+          "mounts": [] } }
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0011", "sequence": 11,
+        "occurredAt": "2026-09-23T15:38:47.902Z", "type": "network.connected",
+        "resource": { "kind": "network", "id": "e5b899c59c6a" },
+        "data": { "containerId": "b183ed94a57c" }
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0012", "sequence": 12,
+        "occurredAt": "2026-09-23T15:38:47.923Z", "type": "container.started",
+        "resource": { "kind": "container", "id": "b183ed94a57c" },
+        "data": { "container": { "id": "b183ed94a57c", "name": "demo-web-1", "image": "busybox:1.37", "state": "running", "health": "none", "labels": {},
+          "compose": { "project": "demo", "service": "web", "dependsOn": ["api"] }, "ports": [{ "containerPort": 80, "protocol": "tcp", "hostIp": "0.0.0.0", "hostPort": 8080 }],
+          "networks": [{ "networkId": "e5b899c59c6a", "name": "demo_default", "ipv4Address": "172.18.0.4" }],
+          "mounts": [] } }
+      }
+    ]
+  }
+}
+```
