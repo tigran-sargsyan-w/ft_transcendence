@@ -115,3 +115,42 @@ Limits: a container outside Compose has `compose: null` (Nest falls back to `nam
 The final mapping and edge direction belong to the topology module, with Camille (decision 0.4).
 
 `depends_on` is read from the label `com.docker.compose.depends_on`: on Compose 5.1.1 a comma-separated list of `service:condition:restart`, empty when there is none (`db:service_healthy:false,cache:service_started:true`). The collector keeps the names only (`["db", "cache"]`). Older Compose versions may lack the label: `dependsOn` is then `[]`, the same as "no dependency" (accepted for the POC).
+
+## Order, gaps and resynchronization
+
+Nest ignores an event whose `sequence` is lower than or equal to the last applied one. A gap (an event that is not `lastApplied + 1`, or a response that does not start at `after + 1`) or a `COLLECTOR_SEQUENCE_EXPIRED` triggers a resynchronization. So does a Nest start (no state) or a collector restart (its sequence starts again at `1`, see [Open questions](#open-questions)).
+
+```text
+1. GET /api/v1/snapshot
+2. replace the whole in-memory state with it
+3. lastApplied = snapshot.sequence
+4. loop: GET /api/v1/events?after=lastApplied, apply each event in order
+```
+
+## HTTP surface (v0)
+
+Internal only, base path `/api/v1`.
+
+| Method | Path | Answer |
+|--------|------|--------|
+| `GET` | `/health` | Liveness |
+| `GET` | `/snapshot` | `{ "data": <snapshot> }` |
+| `GET` | `/events?after=<sequence>` | `{ "data": { "events": [] } }`: the events with a `sequence` greater than `after` (integer, `0` or more) |
+
+`/events` is a **long poll**: with nothing new, the collector waits about 25 s and answers with an empty list. Nest's HTTP timeout must be longer (for example 35 s) and Nest calls again right after each answer. The collector keeps a bounded in-memory buffer of its latest events (size: its choice, documented in its README).
+
+### Errors
+
+| Code | HTTP | When |
+|------|------|------|
+| `COLLECTOR_SEQUENCE_EXPIRED` | `409` | `after` is older than the buffer, **or greater than the latest sequence** (for example a collector that restarted) |
+| `COLLECTOR_INVALID_REQUEST` | `400` | Missing or malformed `after` |
+| `COLLECTOR_DOCKER_UNAVAILABLE` | `503` | The collector cannot reach Docker |
+
+**Why Nest reads (proposal):** Nest sets its own pace, restarting is trivial, the collector does not need to know Nest, and Nest exposes no extra internal endpoint. Alternative: the collector **pushes** each event to an internal endpoint of Nest. It is more reactive, but the collector must handle retries and ordering, and that endpoint must never be routed by Nginx.
+
+## Security
+
+- **Docker access (decided):** read-only socket proxy, no direct `docker.sock` mount. Docker Engine calls needed (`GET` only, so the proxy can be tight): `/_ping`, `/version`, `/containers/json?all=1`, `/containers/{id}/json`, `/networks`, `/networks/{id}`, `/volumes`, `/events`.
+- The collector sits on the internal Compose network only: no published port, never routed by Nginx. Nest is its only client. No authentication between them in v0 (see [Open questions](#open-questions)).
+- Environment variables and command lines are never forwarded.
