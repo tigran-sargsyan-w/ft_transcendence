@@ -95,3 +95,23 @@ Captured with `docker events` on Docker 29.3.0 and Compose 5.1.1 (`demo` project
 | Crash | network `disconnect`, then `die` (no `stop`) |
 | `stop`, `compose down` | `kill`, network `disconnect`, `stop`, `die`, `destroy`: `stop` comes before `die` |
 | `up --force-recreate` | `create` (temporary name `<oldId12>_<name>`), `destroy` (old), `rename` (ignored: the temporary name stays until the next container event), network `connect`, `start`. Two instances of the service coexist for a moment |
+
+## Stable service identity
+
+A container id changes each time Compose recreates it, and a graph node must not vanish at each redeploy. So a service is identified by **`compose.project` + `compose.service`** (labels `com.docker.compose.project` and `.service`); the container `id` only identifies one instance. Nest keys its nodes by service, and a service can have several instances at once (see the recreation).
+
+Limits: a container outside Compose has `compose: null` (Nest falls back to `name`); scaled services and one-off containers (`docker compose run`) are not distinguished in v0, they look like one more instance.
+
+## Visible dependencies
+
+| Data | Where | Edge kind (graph contract) |
+|------|-------|----------------------------|
+| Shared network | `container.networks[].name` | `connects_to` |
+| Published port | `container.ports[]` | `exposes` |
+| Mount | `container.mounts[]` | `mounts` |
+| Compose dependency | `container.compose.dependsOn` | `depends_on` |
+| The host | nothing: one host per `environmentId` | `runs_on`, created by Nest |
+
+The final mapping and edge direction belong to the topology module, with Camille (decision 0.4).
+
+`depends_on` is read from the label `com.docker.compose.depends_on`: on Compose 5.1.1 a comma-separated list of `service:condition:restart`, empty when there is none (`db:service_healthy:false,cache:service_started:true`). The collector keeps the names only (`["db", "cache"]`). Older Compose versions may lack the label: `dependsOn` is then `[]`, the same as "no dependency" (accepted for the POC).
