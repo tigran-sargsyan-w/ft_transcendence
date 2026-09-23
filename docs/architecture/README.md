@@ -10,6 +10,7 @@ Documents here should stay short and stable. Concrete stack and product decision
 - [Authentication and users](./auth-and-users.md)
 - [API conventions](./api-conventions.md)
 - [Graph contract](./graph-contract.md) (topology snapshot and analyze API v0)
+- [Collector contract](./collector-contract.md) (Docker collector snapshot and events, draft v0)
 - [Security baseline](./security-baseline.md)
 - [Testing strategy](./testing-strategy.md)
 - [Real-time conventions](./realtime-conventions.md)
