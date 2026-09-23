@@ -44,3 +44,54 @@ The full state at one moment: `{ schemaVersion, environmentId, capturedAt, seque
 **Network:** `id`, `name`, `driver`, `internal`, `labels`. **Volume:** `name` (Docker volumes have no id), `driver`, `labels`.
 
 Environment variables and command lines are never forwarded: they routinely contain secrets.
+
+## Events
+
+| Field | Notes |
+|-------|-------|
+| `schemaVersion`, `environmentId` | As in the snapshot |
+| `eventId` | Opaque, unique while the collector runs. For logs: Nest deduplicates on `sequence` |
+| `sequence` | Starts at `1` when the collector starts, `+1` per event, **no gaps** (ignored Docker events use no number) |
+| `occurredAt` | ISO 8601 UTC, from Docker |
+| `type` | See below |
+| `resource` | `{ kind, id }`: `container`, `network` or `volume` (its id is its name). For `network.connected` / `network.disconnected` it is the network |
+| `data` | Depends on `type` |
+
+Nest ignores an unknown `type` (and still records its `sequence`), so types can be added without a version bump.
+
+| Type | Docker `Type` / `Action` | `data` |
+|------|--------------------------|--------|
+| `container.created` | container / `create` | `{ container }` |
+| `container.started` | container / `start` | `{ container }` |
+| `container.stopped` | container / `stop` | `{ container }` |
+| `container.died` | container / `die` | `{ exitCode, container }` |
+| `container.destroyed` | container / `destroy` | `{}` |
+| `container.health_changed` | container / `health_status: healthy` and `health_status: unhealthy` | `{ container }` |
+| `network.created` | network / `create` | `{ network }` |
+| `network.removed` | network / `destroy` | `{}` |
+| `network.connected` | network / `connect` | `{ containerId }` |
+| `network.disconnected` | network / `disconnect` | `{ containerId }` |
+| `volume.created` | volume / `create` | `{ volume }` |
+| `volume.removed` | volume / `destroy` | `{}` |
+
+`exitCode` is an integer (Docker sends a string).
+
+**Every container event carries the whole container object** (snapshot format), inspected by the collector right after the Docker event, except `destroyed`. So:
+
+- Nest simply replaces its copy (upsert), with no merge.
+- Nest derives the status from `data.container` (`state`, `health`), never from `type` alone: at `stop` the container is already `exited` or `removing`.
+- An ignored Docker event leaves no wrong state for long: the next container event brings the current object.
+- If the container is already gone when the collector inspects it (`docker rm -f`, fast `compose down`: `die` and `destroy` come about 20 ms apart), the collector emits nothing for that event. `container.died` is therefore not guaranteed; `container.destroyed` is enough.
+
+Everything else Docker emits is ignored (`kill`, `rename`, `pause`, `exec_*`, volume `mount` / `unmount`…). Match `Action` exactly, as it can carry a suffix (`health_status: healthy`, `exec_create: true `). A healthcheck emits `exec_*` at every run, so the collector must filter them.
+
+### What Docker really emits
+
+Captured with `docker events` on Docker 29.3.0 and Compose 5.1.1 (`demo` project: `db` with a healthcheck and a volume, `api` that crashes after 10 s, `web` that publishes a port).
+
+| Scenario | Docker events, in order |
+|----------|-------------------------|
+| `compose up` | network `create`, volume `create`, container `create` ×3, then per container (following `depends_on`): network `connect`, `start`. A healthcheck adds `health_status: healthy` once, when the status changes |
+| Crash | network `disconnect`, then `die` (no `stop`) |
+| `stop`, `compose down` | `kill`, network `disconnect`, `stop`, `die`, `destroy`: `stop` comes before `die` |
+| `up --force-recreate` | `create` (temporary name `<oldId12>_<name>`), `destroy` (old), `rename` (ignored: the temporary name stays until the next container event), network `connect`, `start`. Two instances of the service coexist for a moment |
