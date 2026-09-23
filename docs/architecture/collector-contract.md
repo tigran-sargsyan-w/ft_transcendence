@@ -292,3 +292,74 @@ One run of a small Compose project, `demo`: `db` (healthcheck, volume), `api` (d
   }
 }
 ```
+
+### The crash and the recreation
+
+`GET /api/v1/events?after=12`: events 13 to 18.
+
+- 13-14: `api` crashes with exit code 1: the network is disconnected, then the container dies (`state: "exited"`, network still listed, without IP).
+- 15-18: `docker compose up -d --force-recreate api`: the new container (new `id`) is created under a temporary name, the old one is destroyed, then the new one is connected and started. Only the last object has the final name. The service `demo` / `api` is the same throughout.
+
+```json
+{
+  "data": {
+    "events": [
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0013", "sequence": 13,
+        "occurredAt": "2026-09-23T15:38:57.830Z", "type": "network.disconnected",
+        "resource": { "kind": "network", "id": "e5b899c59c6a" },
+        "data": { "containerId": "4589c1f3ac3c" }
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0014", "sequence": 14,
+        "occurredAt": "2026-09-23T15:38:57.839Z", "type": "container.died",
+        "resource": { "kind": "container", "id": "4589c1f3ac3c" },
+        "data": { "exitCode": 1, "container": { "id": "4589c1f3ac3c", "name": "demo-api-1", "image": "busybox:1.37", "state": "exited", "health": "none", "labels": {},
+          "compose": { "project": "demo", "service": "api", "dependsOn": ["db"] }, "ports": [],
+          "networks": [{ "networkId": "e5b899c59c6a", "name": "demo_default", "ipv4Address": "" }],
+          "mounts": [] } }
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0015", "sequence": 15,
+        "occurredAt": "2026-09-23T15:39:07.184Z", "type": "container.created",
+        "resource": { "kind": "container", "id": "ea2201557210" },
+        "data": { "container": { "id": "ea2201557210", "name": "4589c1f3ac3c_demo-api-1", "image": "busybox:1.37", "state": "created", "health": "none", "labels": {},
+          "compose": { "project": "demo", "service": "api", "dependsOn": ["db"] }, "ports": [],
+          "networks": [{ "networkId": "", "name": "demo_default", "ipv4Address": "" }],
+          "mounts": [] } }
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0016", "sequence": 16,
+        "occurredAt": "2026-09-23T15:39:07.209Z", "type": "container.destroyed",
+        "resource": { "kind": "container", "id": "4589c1f3ac3c" },
+        "data": {}
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0017", "sequence": 17,
+        "occurredAt": "2026-09-23T15:39:07.954Z", "type": "network.connected",
+        "resource": { "kind": "network", "id": "e5b899c59c6a" },
+        "data": { "containerId": "ea2201557210" }
+      },
+      {
+        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0018", "sequence": 18,
+        "occurredAt": "2026-09-23T15:39:07.976Z", "type": "container.started",
+        "resource": { "kind": "container", "id": "ea2201557210" },
+        "data": { "container": { "id": "ea2201557210", "name": "demo-api-1", "image": "busybox:1.37", "state": "running", "health": "none", "labels": {},
+          "compose": { "project": "demo", "service": "api", "dependsOn": ["db"] }, "ports": [],
+          "networks": [{ "networkId": "e5b899c59c6a", "name": "demo_default", "ipv4Address": "172.18.0.3" }],
+          "mounts": [] } }
+      }
+    ]
+  }
+}
+```
+
+## Open questions
+
+1. **Flow direction.** Nest pulls (proposed here) or the collector pushes. To validate with Tigran, then record in an ADR.
+2. **Collector restart.** Its sequence starts again at `1`. If it has already emitted more events than Nest's `after`, Nest cannot notice and mixes two streams. A `streamId` (random at each collector start, returned in the snapshot and the events, sent back by Nest) would fix it. Worth it only if restarts are expected to be common.
+3. **Authentication between services.** None in v0: internal network only. Does that hold?
+4. **Scaled services and one-off containers.** The `container-number` and `oneoff` labels are not exposed. Do they need to be?
+5. **Stale data after ignored events.** `docker rename` and a standalone `docker network connect` / `disconnect` leave Nest with old data until the next container event, because network events only carry `containerId`.
+6. **`network.disconnected`** fires on every stop or crash while the inspect still lists the network. Proposal: graph edges follow `container.networks`, not these events (topology mapping).
+7. **Forwarded as is:** bind mount sources (host paths) and non-Compose labels. Redact them?
