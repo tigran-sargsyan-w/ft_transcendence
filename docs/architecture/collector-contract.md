@@ -154,3 +154,35 @@ Internal only, base path `/api/v1`.
 - **Docker access (decided):** read-only socket proxy, no direct `docker.sock` mount. Docker Engine calls needed (`GET` only, so the proxy can be tight): `/_ping`, `/version`, `/containers/json?all=1`, `/containers/{id}/json`, `/networks`, `/networks/{id}`, `/volumes`, `/events`.
 - The collector sits on the internal Compose network only: no published port, never routed by Nginx. Nest is its only client. No authentication between them in v0 (see [Open questions](#open-questions)).
 - Environment variables and command lines are never forwarded.
+
+## Examples
+
+One run of a small Compose project, `demo`: `db` (healthcheck, volume), `api` (depends on `db`, crashes after 10 s) and `web` (depends on `api`, publishes port 8080). Names and timestamps come from a real run, and the container objects follow what `docker inspect` returned after each event. Ids are shortened to 12 characters (Docker sends 64). They can be used as fixtures for the topology module.
+
+### Snapshot after `docker compose up`
+
+`GET /api/v1/snapshot`, right after event 12:
+
+```json
+{
+  "data": {
+    "schemaVersion": 1, "environmentId": "env_local_compose", "capturedAt": "2026-09-23T15:38:47.960Z", "sequence": 12,
+    "containers": [
+      { "id": "6c28d5dff0b8", "name": "demo-db-1", "image": "busybox:1.37", "state": "running", "health": "healthy", "labels": {},
+        "compose": { "project": "demo", "service": "db", "dependsOn": [] }, "ports": [],
+        "networks": [{ "networkId": "e5b899c59c6a", "name": "demo_default", "ipv4Address": "172.18.0.2" }],
+        "mounts": [{ "type": "volume", "source": "demo_db_data", "destination": "/data", "readOnly": false }] },
+      { "id": "4589c1f3ac3c", "name": "demo-api-1", "image": "busybox:1.37", "state": "running", "health": "none", "labels": {},
+        "compose": { "project": "demo", "service": "api", "dependsOn": ["db"] }, "ports": [],
+        "networks": [{ "networkId": "e5b899c59c6a", "name": "demo_default", "ipv4Address": "172.18.0.3" }],
+        "mounts": [] },
+      { "id": "b183ed94a57c", "name": "demo-web-1", "image": "busybox:1.37", "state": "running", "health": "none", "labels": {},
+        "compose": { "project": "demo", "service": "web", "dependsOn": ["api"] }, "ports": [{ "containerPort": 80, "protocol": "tcp", "hostIp": "0.0.0.0", "hostPort": 8080 }],
+        "networks": [{ "networkId": "e5b899c59c6a", "name": "demo_default", "ipv4Address": "172.18.0.4" }],
+        "mounts": [] }
+    ],
+    "networks": [{ "id": "e5b899c59c6a", "name": "demo_default", "driver": "bridge", "internal": false, "labels": {} }],
+    "volumes": [{ "name": "demo_db_data", "driver": "local", "labels": {} }]
+  }
+}
+```
