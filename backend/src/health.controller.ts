@@ -15,7 +15,10 @@ export class HealthController {
         database: 'ok',
       };
     } catch {
-      throw new ServiceUnavailableException('Database is unavailable');
+      throw new ServiceUnavailableException({
+        message: 'Service unavailable',
+        details: { database: 'unavailable' },
+      });
     }
   }
 }

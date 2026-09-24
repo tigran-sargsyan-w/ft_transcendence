@@ -34,7 +34,7 @@ describe('API response format (e2e)', () => {
     expect(response.body).toEqual({ data: { status: 'ok', database: 'ok' } });
   });
 
-  it('formats the health error when the database is down', async () => {
+  it('names the failing dependency in the health error details', async () => {
     vi.spyOn(app.get(PrismaService), '$queryRaw').mockRejectedValueOnce(
       new Error('connection refused'),
     );
@@ -46,7 +46,8 @@ describe('API response format (e2e)', () => {
     expect(response.body).toEqual({
       error: {
         code: 'SERVICE_UNAVAILABLE',
-        message: 'Database is unavailable',
+        message: 'Service unavailable',
+        details: { database: 'unavailable' },
       },
     });
   });
