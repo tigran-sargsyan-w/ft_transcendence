@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.attack_paths import compute_attack_paths
 from app.blast_radius import build_digraph, compute_blast_radius
 from app.schemas import (
     ALLOWED_ANALYSES,
@@ -95,6 +96,7 @@ def analyze(body: AnalyzeRequest) -> Any:
         else []
     )
     max_depth: Optional[int] = body.options.maxDepth if body.options else None
+    max_paths: Optional[int] = body.options.maxPaths if body.options else None
 
     for analysis_id in body.analyses:
         if analysis_id in ANALYSES_REQUIRING_SEEDS and not seed_node_ids:
@@ -122,10 +124,12 @@ def analyze(body: AnalyzeRequest) -> Any:
             max_depth=max_depth,
         )
     if "attack_paths" in body.analyses:
-        results["attackPaths"] = {
-            "seedNodeIds": seed_node_ids,
-            "paths": [],
-        }
+        results["attackPaths"] = compute_attack_paths(
+            graph,
+            seed_node_ids,
+            max_depth=max_depth,
+            max_paths=max_paths,
+        )
     if "critical_nodes" in body.analyses:
         results["criticalNodes"] = {
             "nodes": [],
