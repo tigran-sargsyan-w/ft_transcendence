@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.attack_paths import compute_attack_paths
 from app.blast_radius import build_digraph, compute_blast_radius
+from app.critical_nodes import compute_critical_nodes
 from app.schemas import (
     ALLOWED_ANALYSES,
     ALLOWED_EDGE_KINDS,
@@ -131,9 +132,7 @@ def analyze(body: AnalyzeRequest) -> Any:
             max_paths=max_paths,
         )
     if "critical_nodes" in body.analyses:
-        results["criticalNodes"] = {
-            "nodes": [],
-        }
+        results["criticalNodes"] = compute_critical_nodes(graph)
 
     analyzed_at = (
         datetime.now(timezone.utc)
