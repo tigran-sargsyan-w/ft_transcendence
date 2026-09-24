@@ -8,36 +8,36 @@ import { RegisterDto } from './dto/register.dto.js';
 export class AuthService {
   constructor(private readonly prisma: PrismaService) {}
 
-    async register(dto: RegisterDto) {
+  async register(dto: RegisterDto) {
     const passwordHash = await argon2.hash(dto.password, {
-        type: argon2.argon2id,
+      type: argon2.argon2id,
     });
 
     try {
-        return await this.prisma.user.create({
+      return await this.prisma.user.create({
         data: {
-            email: dto.email,
-            passwordHash,
+          email: dto.email,
+          passwordHash,
         },
         select: {
-            id: true,
-            email: true,
-            createdAt: true,
-            updatedAt: true,
+          id: true,
+          email: true,
+          createdAt: true,
+          updatedAt: true,
         },
-        });
+      });
     } catch (error) {
-        if (
+      if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
-        ) {
+      ) {
         throw new ConflictException({
-            code: 'EMAIL_ALREADY_EXISTS',
-            message: 'Email is already registered',
+          code: 'EMAIL_ALREADY_EXISTS',
+          message: 'Email is already registered',
         });
-        }
+      }
 
-        throw error;
+      throw error;
     }
-    }
+  }
 }
