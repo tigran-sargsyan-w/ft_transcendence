@@ -122,8 +122,10 @@ describe('User registration (e2e)', () => {
       .expect(409);
 
     expect(response.body).toEqual({
-      code: 'EMAIL_ALREADY_EXISTS',
-      message: 'Email is already registered',
+      error: {
+        code: 'EMAIL_ALREADY_EXISTS',
+        message: 'Email is already registered',
+      },
     });
   });
 });

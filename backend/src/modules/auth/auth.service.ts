@@ -31,9 +31,8 @@ export class AuthService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        throw new ConflictException({
-          code: 'EMAIL_ALREADY_EXISTS',
-          message: 'Email is already registered',
+        throw new ConflictException('Email is already registered', {
+          errorCode: 'EMAIL_ALREADY_EXISTS',
         });
       }
 
