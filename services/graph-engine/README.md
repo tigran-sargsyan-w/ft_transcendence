@@ -40,7 +40,7 @@ Expected shape:
 
 - `blast_radius` — implemented (who depends on the seed service, via reversed dependency edges)
 - `attack_paths` — implemented (forward paths from a compromised seed)
-- `critical_nodes` — still a stub (empty results)
+- `critical_nodes` — implemented (betweenness + dependents ranking; no seeds required)
 
 ### Blast radius example
 
@@ -100,6 +100,36 @@ curl -s http://localhost:8000/api/v1/analyze \
   },
   "analyses": ["attack_paths"],
   "options": {"seedNodeIds": ["svc_api"]}
+}
+EOF
+```
+
+### Critical nodes example
+
+Same topology, no seeds → ranked nodes with `score` and `reasons` (often `svc_api` near the top):
+
+```bash
+curl -s http://localhost:8000/api/v1/analyze \
+  -H 'Content-Type: application/json' \
+  -d @- <<'EOF'
+{
+  "topology": {
+    "schemaVersion": 1,
+    "environmentId": "env_local_compose",
+    "capturedAt": "2026-09-14T10:00:00Z",
+    "nodes": [
+      {"id": "svc_api", "kind": "service", "label": "api", "status": "down"},
+      {"id": "svc_worker", "kind": "service", "label": "worker", "status": "healthy"},
+      {"id": "svc_db", "kind": "service", "label": "db", "status": "healthy"},
+      {"id": "svc_cache", "kind": "service", "label": "cache", "status": "healthy"}
+    ],
+    "edges": [
+      {"id": "edge_api_db", "source": "svc_api", "target": "svc_db", "kind": "depends_on"},
+      {"id": "edge_api_cache", "source": "svc_api", "target": "svc_cache", "kind": "depends_on"},
+      {"id": "edge_worker_api", "source": "svc_worker", "target": "svc_api", "kind": "depends_on"}
+    ]
+  },
+  "analyses": ["critical_nodes"]
 }
 EOF
 ```
