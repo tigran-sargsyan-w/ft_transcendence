@@ -53,6 +53,7 @@ A topology is a directed graph of infrastructure entities at a point in time.
   "schemaVersion": 1,
   "environmentId": "env_local_compose",
   "capturedAt": "2026-09-14T10:00:00Z",
+  "topologyRevision": "rev_42",
   "nodes": [],
   "edges": []
 }
@@ -63,6 +64,7 @@ A topology is a directed graph of infrastructure entities at a point in time.
 | `schemaVersion` | yes | Integer; start at `1` |
 | `environmentId` | yes | Opaque id of the monitored environment |
 | `capturedAt` | yes | ISO 8601 UTC |
+| `topologyRevision` | no | Opaque revision id from Nest; echoed in the analyze response so Nest can ignore stale results |
 | `nodes` | yes | Array of nodes |
 | `edges` | yes | Array of edges |
 
@@ -147,6 +149,7 @@ The browser should not call these endpoints in production; Nest is the gateway.
     "schemaVersion": 1,
     "environmentId": "env_local_compose",
     "capturedAt": "2026-09-14T10:00:00Z",
+    "topologyRevision": "rev_42",
     "nodes": [],
     "edges": []
   },
@@ -182,6 +185,7 @@ The browser should not call these endpoints in production; Nest is the gateway.
   "data": {
     "schemaVersion": 1,
     "environmentId": "env_local_compose",
+    "topologyRevision": "rev_42",
     "analyzedAt": "2026-09-14T10:00:01Z",
     "results": {
       "blastRadius": {
@@ -219,6 +223,8 @@ The browser should not call these endpoints in production; Nest is the gateway.
 ```
 
 Only requested analyses appear under `results`. Scores are floats in `[0, 1]` unless a later version documents otherwise.
+
+If the request topology included `topologyRevision`, the success response must echo the same value under `data.topologyRevision`. If it was omitted, the response omits the field.
 
 **`affectedEdgeIds` (blast radius):** only edges that were **used during the traversal** (the blast tree: parent → child links discovered while walking). Do **not** include every edge that merely connects two affected nodes. This keeps UI highlights aligned with the actual impact path.
 
@@ -272,6 +278,7 @@ interface TopologySnapshot {
   schemaVersion: 1;
   environmentId: string;
   capturedAt: string;
+  topologyRevision?: string;
   nodes: GraphNode[];
   edges: GraphEdge[];
 }
