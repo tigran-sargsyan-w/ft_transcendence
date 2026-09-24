@@ -172,11 +172,11 @@ The browser should not call these endpoints in production; Nest is the gateway.
 
 **Analysis ids (v0):**
 
-| Id | Needs `seedNodeIds` | Result key |
-|----|---------------------|------------|
-| `blast_radius` | yes | `blastRadius` |
-| `attack_paths` | yes | `attackPaths` |
-| `critical_nodes` | no | `criticalNodes` |
+| Id | Needs `seedNodeIds` | Result key | Status |
+|----|---------------------|------------|--------|
+| `blast_radius` | yes | `blastRadius` | Implemented |
+| `attack_paths` | yes | `attackPaths` | Implemented |
+| `critical_nodes` | no | `criticalNodes` | Stub (empty `nodes` until implemented) |
 
 ### Analyze success response
 
