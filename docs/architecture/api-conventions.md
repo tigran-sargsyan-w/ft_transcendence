@@ -44,9 +44,40 @@ Errors should have a stable machine-readable code and a user/developer-readable 
 
 Do not expose stack traces, secrets, SQL details, password hashes, or internal infrastructure information to clients.
 
+`error.details` is optional. It is only present for the codes below that define it, and its shape depends on the code.
+
+## Error codes
+
+The `code` is stable and machine-readable. An error that defines its own code uses it; any other error uses the name of its HTTP status (`404` gives `NOT_FOUND`). A change that adds a code adds it to this table.
+
+| Code | Status | When | `details` |
+|------|--------|------|-----------|
+| `VALIDATION_ERROR` | 400 | Invalid body, or a property the endpoint does not accept | `{ "<field>": ["<message>"] }` |
+| `EMAIL_ALREADY_EXISTS` | 409 | Registration with an email already in use | none |
+| `SERVICE_UNAVAILABLE` | 503 | `GET /health` cannot reach a dependency | `{ "<dependency>": "unavailable" }` |
+| `INTERNAL_ERROR` | 500 | Unexpected server error. The message is always `Internal server error`; the real error is only logged | none |
+| `BAD_REQUEST` | 400 | Malformed request, such as invalid JSON | none |
+| `NOT_FOUND` | 404 | Unknown route | none |
+| `PAYLOAD_TOO_LARGE` | 413 | Request body over the size limit | none |
+
 ## Validation errors
 
-Field validation errors should be structured rather than returned as an unparseable text blob. The concrete schema can evolve with the chosen validation library, but must remain predictable for the frontend.
+Field validation errors should be structured rather than returned as an unparseable text blob. A validation failure returns `VALIDATION_ERROR`, with `error.details` mapping each invalid field to the list of its messages:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Request validation failed",
+    "details": {
+      "email": ["email must be an email"],
+      "password": ["password must be longer than or equal to 8 characters"]
+    }
+  }
+}
+```
+
+Known limit: only flat request bodies are supported. A nested object that fails validation appears under its top-level field with an empty list (`"address": []`); its inner messages are not reported. This will be extended with the first nested DTO.
 
 ## HTTP status expectations
 
