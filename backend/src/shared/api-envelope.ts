@@ -24,6 +24,10 @@ export class ResponseEnvelopeInterceptor implements NestInterceptor {
   }
 }
 
+// What body-parser throws (413 too large...): a plain Error with a 4xx `status`.
+// `expose` is true only when the message is safe to show to the client.
+type HttpError = Error & { status?: number; expose?: boolean };
+
 // Every error leaves as { error: { code, message } }. The code is the
 // exception's `errorCode`, else its HTTP status name (404 -> NOT_FOUND).
 @Catch()
@@ -46,6 +50,17 @@ export class ApiExceptionFilter implements ExceptionFilter {
         },
       });
       return;
+    }
+
+    if (exception instanceof Error) {
+      const { status, expose } = exception as HttpError;
+
+      if (expose && status) {
+        response.status(status).json({
+          error: { code: HttpStatus[status], message: exception.message },
+        });
+        return;
+      }
     }
 
     // Unknown error: log the real one, send nothing that could leak.

@@ -71,6 +71,15 @@ describe('API response format (e2e)', () => {
     expect(response.body.error.code).toBe('BAD_REQUEST');
   });
 
+  it('keeps the status of body-parser errors, such as a 413', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send({ email: 'big-e2e@example.com', password: 'x'.repeat(200_000) })
+      .expect(413);
+
+    expect(response.body.error.code).toBe('PAYLOAD_TOO_LARGE');
+  });
+
   it('hides unexpected errors behind a generic 500 and logs them', async () => {
     const failure = new Error('secret db detail');
     const logError = vi
