@@ -141,11 +141,13 @@ def analyze(body: AnalyzeRequest) -> Any:
         .replace("+00:00", "Z")
     )
 
-    return {
-        "data": {
-            "schemaVersion": 1,
-            "environmentId": topology.environmentId,
-            "analyzedAt": analyzed_at,
-            "results": results,
-        }
+    data: Dict[str, Any] = {
+        "schemaVersion": 1,
+        "environmentId": topology.environmentId,
+        "analyzedAt": analyzed_at,
+        "results": results,
     }
+    if topology.topologyRevision is not None:
+        data["topologyRevision"] = topology.topologyRevision
+
+    return {"data": data}

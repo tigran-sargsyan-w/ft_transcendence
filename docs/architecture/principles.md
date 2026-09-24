@@ -2,15 +2,9 @@
 
 ## Architecture direction
 
-Start as a modular application, not as a collection of tightly coupled files and not as premature microservices. Modules represent business or platform capabilities and should be independently understandable.
+Prefer a modular NestJS application as the main backend, with clear module boundaries. Initial Nest modules include `auth`, `users`, and `realtime`. Additional Nest modules are introduced only when a real capability appears.
 
-Initial backend modules:
-
-- `auth`
-- `users`
-- `realtime`
-
-Additional modules are introduced only when a real capability appears.
+A **small set of separate services** is allowed when there is a clear reason (language fit, isolation, or ownership). Today that includes the Python Graph Engine (analysis-only, HTTP/JSON — see ADR 0001). Do not split into many services by default; keep inter-service communication simple.
 
 ## Module ownership
 

@@ -53,6 +53,7 @@ A topology is a directed graph of infrastructure entities at a point in time.
   "schemaVersion": 1,
   "environmentId": "env_local_compose",
   "capturedAt": "2026-09-14T10:00:00Z",
+  "topologyRevision": "rev_42",
   "nodes": [],
   "edges": []
 }
@@ -63,6 +64,7 @@ A topology is a directed graph of infrastructure entities at a point in time.
 | `schemaVersion` | yes | Integer; start at `1` |
 | `environmentId` | yes | Opaque id of the monitored environment |
 | `capturedAt` | yes | ISO 8601 UTC |
+| `topologyRevision` | no | Opaque revision id from Nest; echoed in the analyze response so Nest can ignore stale results |
 | `nodes` | yes | Array of nodes |
 | `edges` | yes | Array of edges |
 
@@ -119,6 +121,11 @@ Unknown kinds/statuses should be rejected or normalized by the receiver; do not 
 
 Direction matters for blast radius and attack-path analysis (`source` → `target`).
 
+For v0 analysis direction:
+
+- `blast_radius` walks the **reversed** dependency graph (if `db` fails, who depends on it?)
+- `attack_paths` walks edges **forward** from a compromised seed (what can it reach?)
+
 ## Graph Engine HTTP surface (v0)
 
 Base path on the Graph Engine service (internal):
@@ -142,6 +149,7 @@ The browser should not call these endpoints in production; Nest is the gateway.
     "schemaVersion": 1,
     "environmentId": "env_local_compose",
     "capturedAt": "2026-09-14T10:00:00Z",
+    "topologyRevision": "rev_42",
     "nodes": [],
     "edges": []
   },
@@ -164,11 +172,11 @@ The browser should not call these endpoints in production; Nest is the gateway.
 
 **Analysis ids (v0):**
 
-| Id | Needs `seedNodeIds` | Result key |
-|----|---------------------|------------|
-| `blast_radius` | yes | `blastRadius` |
-| `attack_paths` | yes | `attackPaths` |
-| `critical_nodes` | no | `criticalNodes` |
+| Id | Needs `seedNodeIds` | Result key | Status |
+|----|---------------------|------------|--------|
+| `blast_radius` | yes | `blastRadius` | Implemented |
+| `attack_paths` | yes | `attackPaths` | Implemented |
+| `critical_nodes` | no | `criticalNodes` | Stub (empty `nodes` until implemented) |
 
 ### Analyze success response
 
@@ -177,16 +185,17 @@ The browser should not call these endpoints in production; Nest is the gateway.
   "data": {
     "schemaVersion": 1,
     "environmentId": "env_local_compose",
+    "topologyRevision": "rev_42",
     "analyzedAt": "2026-09-14T10:00:01Z",
     "results": {
       "blastRadius": {
-        "seedNodeIds": ["svc_api"],
-        "affectedNodeIds": ["svc_api", "svc_worker", "svc_db"],
-        "affectedEdgeIds": ["edge_api_worker", "edge_api_db"],
+        "seedNodeIds": ["svc_db"],
+        "affectedNodeIds": ["svc_db", "svc_api", "svc_worker"],
+        "affectedEdgeIds": ["edge_api_db", "edge_worker_api"],
         "depthByNodeId": {
-          "svc_api": 0,
-          "svc_worker": 1,
-          "svc_db": 1
+          "svc_db": 0,
+          "svc_api": 1,
+          "svc_worker": 2
         }
       },
       "attackPaths": {
@@ -214,6 +223,10 @@ The browser should not call these endpoints in production; Nest is the gateway.
 ```
 
 Only requested analyses appear under `results`. Scores are floats in `[0, 1]` unless a later version documents otherwise.
+
+If the request topology included `topologyRevision`, the success response must echo the same value under `data.topologyRevision`. If it was omitted, the response omits the field.
+
+**`affectedEdgeIds` (blast radius):** only edges that were **used during the traversal** (the blast tree: parent → child links discovered while walking). Do **not** include every edge that merely connects two affected nodes. This keeps UI highlights aligned with the actual impact path.
 
 ### Analyze error response
 
@@ -265,6 +278,7 @@ interface TopologySnapshot {
   schemaVersion: 1;
   environmentId: string;
   capturedAt: string;
+  topologyRevision?: string;
   nodes: GraphNode[];
   edges: GraphEdge[];
 }

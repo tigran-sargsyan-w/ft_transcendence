@@ -32,6 +32,7 @@ def compute_blast_radius(
     """
     reversed_graph = graph.reverse(copy=False)
     depth_by_node_id: Dict[str, int] = {}
+    affected_edge_ids: List[str] = []
     queue: List[str] = []
 
     for seed_id in seed_node_ids:
@@ -50,17 +51,13 @@ def compute_blast_radius(
                 continue
             depth_by_node_id[neighbor] = current_depth + 1
             queue.append(neighbor)
+            # Edge attribute id is preserved on the reversed graph.
+            affected_edge_ids.append(reversed_graph.edges[current, neighbor]["id"])
 
     affected_node_ids = sorted(
         depth_by_node_id.keys(),
         key=lambda node_id: (depth_by_node_id[node_id], node_id),
     )
-    affected_set = set(affected_node_ids)
-
-    affected_edge_ids: List[str] = []
-    for source, target, data in graph.edges(data=True):
-        if source in affected_set and target in affected_set:
-            affected_edge_ids.append(data["id"])
 
     return {
         "seedNodeIds": list(seed_node_ids),
