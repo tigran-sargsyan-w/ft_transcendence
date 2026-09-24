@@ -1,4 +1,8 @@
-import { type INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  BadRequestException,
+  type INestApplication,
+  ValidationPipe,
+} from '@nestjs/common';
 import {
   ApiExceptionFilter,
   ResponseEnvelopeInterceptor,
@@ -15,6 +19,21 @@ export function configureApp(app: INestApplication) {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      // details = { field: [messages] }.
+      // Limit: flat DTOs only, a nested field is listed with no messages.
+      exceptionFactory: (errors) =>
+        new BadRequestException(
+          {
+            message: 'Request validation failed',
+            details: Object.fromEntries(
+              errors.map((e) => [
+                e.property,
+                Object.values(e.constraints ?? {}),
+              ]),
+            ),
+          },
+          { errorCode: 'VALIDATION_ERROR' },
+        ),
     }),
   );
 }

@@ -35,11 +35,14 @@ export class ApiExceptionFilter implements ExceptionFilter {
 
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
+      // Only the validation factory in app.setup.ts sets `details`.
+      const { details } = exception.getResponse() as { details?: unknown };
 
       response.status(status).json({
         error: {
           code: exception.errorCode ?? HttpStatus[status],
           message: exception.message,
+          details,
         },
       });
       return;
