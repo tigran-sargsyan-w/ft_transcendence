@@ -52,13 +52,13 @@ describe('User registration (e2e)', () => {
       })
       .expect(201);
 
-    expect(response.body.email).toBe(email);
-    expect(response.body).toHaveProperty('id');
-    expect(response.body).toHaveProperty('createdAt');
-    expect(response.body).toHaveProperty('updatedAt');
+    expect(response.body.data.email).toBe(email);
+    expect(response.body.data).toHaveProperty('id');
+    expect(response.body.data).toHaveProperty('createdAt');
+    expect(response.body.data).toHaveProperty('updatedAt');
 
-    expect(response.body).not.toHaveProperty('password');
-    expect(response.body).not.toHaveProperty('passwordHash');
+    expect(response.body.data).not.toHaveProperty('password');
+    expect(response.body.data).not.toHaveProperty('passwordHash');
 
     const storedUser = await prisma.user.findUnique({
       where: { email },
