@@ -38,6 +38,7 @@ class TopologySnapshot(BaseModel):
     schemaVersion: int
     environmentId: str
     capturedAt: str
+    topologyRevision: Optional[str] = None
     nodes: List[GraphNode]
     edges: List[GraphEdge]
 
