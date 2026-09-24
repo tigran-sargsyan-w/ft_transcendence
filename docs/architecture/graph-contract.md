@@ -220,6 +220,8 @@ The browser should not call these endpoints in production; Nest is the gateway.
 
 Only requested analyses appear under `results`. Scores are floats in `[0, 1]` unless a later version documents otherwise.
 
+**`affectedEdgeIds` (blast radius):** only edges that were **used during the traversal** (the blast tree: parent → child links discovered while walking). Do **not** include every edge that merely connects two affected nodes. This keeps UI highlights aligned with the actual impact path.
+
 ### Analyze error response
 
 ```json
