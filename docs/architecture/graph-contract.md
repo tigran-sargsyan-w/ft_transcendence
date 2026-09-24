@@ -119,6 +119,11 @@ Unknown kinds/statuses should be rejected or normalized by the receiver; do not 
 
 Direction matters for blast radius and attack-path analysis (`source` → `target`).
 
+For v0 analysis direction:
+
+- `blast_radius` walks the **reversed** dependency graph (if `db` fails, who depends on it?)
+- `attack_paths` walks edges **forward** from a compromised seed (what can it reach?)
+
 ## Graph Engine HTTP surface (v0)
 
 Base path on the Graph Engine service (internal):
@@ -180,13 +185,13 @@ The browser should not call these endpoints in production; Nest is the gateway.
     "analyzedAt": "2026-09-14T10:00:01Z",
     "results": {
       "blastRadius": {
-        "seedNodeIds": ["svc_api"],
-        "affectedNodeIds": ["svc_api", "svc_worker", "svc_db"],
-        "affectedEdgeIds": ["edge_api_worker", "edge_api_db"],
+        "seedNodeIds": ["svc_db"],
+        "affectedNodeIds": ["svc_db", "svc_api", "svc_worker"],
+        "affectedEdgeIds": ["edge_api_db", "edge_worker_api"],
         "depthByNodeId": {
-          "svc_api": 0,
-          "svc_worker": 1,
-          "svc_db": 1
+          "svc_db": 0,
+          "svc_api": 1,
+          "svc_worker": 2
         }
       },
       "attackPaths": {
