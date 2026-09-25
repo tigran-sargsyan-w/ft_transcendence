@@ -1,23 +1,28 @@
 import type { Edge, Node } from '@xyflow/react'
+
+import type { ServiceNodeData } from './ServiceNode'
 import type { TopologySnapshot } from './types'
 
 /** Map contract topology ids to React Flow elements (stable backend ids). */
 export function topologyToFlowElements(topology: TopologySnapshot): {
-  nodes: Node[]
+  nodes: Node<ServiceNodeData, 'service'>[]
   edges: Edge[]
 } {
-  const nodes: Node[] = topology.nodes.map((node, index) => ({
-    id: node.id,
-    position: {
-      x: (index % 3) * 220,
-      y: Math.floor(index / 3) * 120,
-    },
-    data: {
-      label: `${node.label} · ${node.status}`,
-      kind: node.kind,
-      status: node.status,
-    },
-  }))
+  const nodes: Node<ServiceNodeData, 'service'>[] = topology.nodes.map(
+    (node, index) => ({
+      id: node.id,
+      type: 'service',
+      position: {
+        x: (index % 3) * 220,
+        y: Math.floor(index / 3) * 120,
+      },
+      data: {
+        label: node.label,
+        kind: node.kind,
+        status: node.status,
+      },
+    }),
+  )
 
   const edges: Edge[] = topology.edges.map((edge) => ({
     id: edge.id,
