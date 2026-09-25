@@ -9,8 +9,13 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
+import { ServiceNode } from './ServiceNode'
 import { topologyToFlowElements } from './topologyToFlowElements'
 import type { TopologySnapshot } from './types'
+
+const nodeTypes = {
+  service: ServiceNode,
+}
 
 type TopologyCanvasProps = {
   topology: TopologySnapshot
@@ -25,6 +30,7 @@ export function TopologyCanvas({ topology }: TopologyCanvasProps) {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges)
 
   useEffect(() => {
+    // Replace from topology snapshot ids -> avoids duplicate nodes/edges on refresh
     setNodes(initial.nodes)
     setEdges(initial.edges)
   }, [initial, setNodes, setEdges])
@@ -34,6 +40,7 @@ export function TopologyCanvas({ topology }: TopologyCanvasProps) {
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         fitView
