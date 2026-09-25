@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { TopologyCanvas } from './features/topology/TopologyCanvas'
+import { sampleTopology } from './features/topology/sampleTopology'
 import { getBackendHealth } from './services/health'
 
 type BackendStatus = 'loading' | 'healthy' | 'unavailable'
@@ -23,9 +25,11 @@ function App() {
   return (
     <main>
       <h1>Infrastructure Intelligence Platform</h1>
-      <p>Frontend is running.</p>
-
       <p>Backend status: {backendStatus}</p>
+
+      <h2>Infrastructure topology</h2>
+      <p>Sample fixture (React Flow POC).</p>
+      <TopologyCanvas topology={sampleTopology} />
     </main>
   )
 }
