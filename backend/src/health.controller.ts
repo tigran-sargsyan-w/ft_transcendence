@@ -1,8 +1,4 @@
-import {
-  Controller,
-  Get,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from './shared/prisma/prisma.service.js';
 
 @Controller('health')
@@ -20,8 +16,8 @@ export class HealthController {
       };
     } catch {
       throw new ServiceUnavailableException({
-        status: 'unavailable',
-        database: 'unavailable',
+        message: 'Service unavailable',
+        details: { database: 'unavailable' },
       });
     }
   }

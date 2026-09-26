@@ -39,7 +39,7 @@ describe('User registration (e2e)', () => {
 
   afterAll(async () => {
     if (app) {
-        await app.close();
+      await app.close();
     }
   });
 
@@ -52,13 +52,13 @@ describe('User registration (e2e)', () => {
       })
       .expect(201);
 
-    expect(response.body.email).toBe(email);
-    expect(response.body).toHaveProperty('id');
-    expect(response.body).toHaveProperty('createdAt');
-    expect(response.body).toHaveProperty('updatedAt');
+    expect(response.body.data.email).toBe(email);
+    expect(response.body.data).toHaveProperty('id');
+    expect(response.body.data).toHaveProperty('createdAt');
+    expect(response.body.data).toHaveProperty('updatedAt');
 
-    expect(response.body).not.toHaveProperty('password');
-    expect(response.body).not.toHaveProperty('passwordHash');
+    expect(response.body.data).not.toHaveProperty('password');
+    expect(response.body.data).not.toHaveProperty('passwordHash');
 
     const storedUser = await prisma.user.findUnique({
       where: { email },
@@ -77,24 +77,33 @@ describe('User registration (e2e)', () => {
   });
 
   it('rejects invalid registration input', async () => {
-    await request(app.getHttpServer())
+    const response = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
       .send({
         email: 'not-an-email',
         password: '123',
       })
       .expect(400);
+
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    expect(response.body.error.message).toBe('Request validation failed');
+    expect(response.body.error.details).toHaveProperty('email');
+    expect(response.body.error.details).toHaveProperty('password');
   });
 
   it('rejects missing required fields', async () => {
-    await request(app.getHttpServer())
+    const response = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
       .send({})
       .expect(400);
+
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    expect(response.body.error.details).toHaveProperty('email');
+    expect(response.body.error.details).toHaveProperty('password');
   });
 
   it('rejects unknown registration fields', async () => {
-    await request(app.getHttpServer())
+    const response = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
       .send({
         email,
@@ -102,6 +111,11 @@ describe('User registration (e2e)', () => {
         isAdmin: true,
       })
       .expect(400);
+
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    expect(response.body.error.details).toEqual({
+      isAdmin: ['property isAdmin should not exist'],
+    });
   });
 
   it('rejects a duplicate normalized email', async () => {
@@ -122,8 +136,10 @@ describe('User registration (e2e)', () => {
       .expect(409);
 
     expect(response.body).toEqual({
-      code: 'EMAIL_ALREADY_EXISTS',
-      message: 'Email is already registered',
+      error: {
+        code: 'EMAIL_ALREADY_EXISTS',
+        message: 'Email is already registered',
+      },
     });
   });
 });
