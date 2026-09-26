@@ -1,4 +1,30 @@
 services:
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    environment:
+      CONTAINERS: 1
+      NETWORKS: 1
+      VOLUMES: 1
+      EVENTS: 1
+      PING: 1
+      VERSION: 1
+      POST: 0
+    ports: # TODO: Remove on production
+      - "127.0.0.1:2375:2375"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  collector:
+    build:
+      context: ./services/collector
+    environment:
+      PORT: 3001
+      DOCKER_API_URL: http://docker-proxy:2375
+    depends_on:
+      - docker-proxy
+    ports: # TODO: Remove on production
+      - "127.0.0.1:3001:3001"
+
   backend:
     build:
       context: ./backend
