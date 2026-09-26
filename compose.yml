@@ -20,6 +20,7 @@ services:
     environment:
       PORT: 3001
       DOCKER_API_URL: http://docker-proxy:2375
+      ENVIRONMENT_ID: env_local_compose
     depends_on:
       - docker-proxy
     ports: # TODO: Remove on production
