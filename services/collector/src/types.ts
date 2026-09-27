@@ -70,3 +70,37 @@ export type CollectorSnapshot = {
   networks: CollectorNetwork[];
   volumes: CollectorVolume[];
 };
+
+export type CollectorResourceKind =
+  | 'container'
+  | 'network'
+  | 'volume';
+
+export type CollectorEventType =
+  | 'container.created'
+  | 'container.started'
+  | 'container.stopped'
+  | 'container.died'
+  | 'container.destroyed'
+  | 'container.health_changed'
+  | 'network.created'
+  | 'network.removed'
+  | 'network.connected'
+  | 'network.disconnected'
+  | 'volume.created'
+  | 'volume.removed';
+
+export type CollectorEvent = {
+  schemaVersion: number;
+  streamId: string;
+  environmentId: string;
+  eventId: string;
+  sequence: number;
+  occurredAt: string;
+  type: CollectorEventType;
+  resource: {
+    kind: CollectorResourceKind;
+    id: string;
+  };
+  data: Record<string, unknown>;
+};
