@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto';
-
+import { EventStore } from './event-store.js';
 import { DockerClient } from './docker-client.js';
 
 import {
@@ -11,17 +10,18 @@ import {
 import type { CollectorSnapshot } from './types.js';
 
 export class SnapshotService {
-  private readonly streamId = randomUUID();
   private readonly environmentId: string;
 
   constructor(
     private readonly docker: DockerClient,
+    private readonly events: EventStore,
     environmentId: string,
   ) {
     this.environmentId = environmentId;
   }
 
   async create(): Promise<CollectorSnapshot> {
+    const sequence = this.events.currentSequence();
     const containerSummaries = await this.docker.listContainers();
 
     const inspectedContainers = await Promise.all(
@@ -37,10 +37,10 @@ export class SnapshotService {
 
     return {
       schemaVersion: 1,
-      streamId: this.streamId,
+      streamId: this.events.streamId,
       environmentId: this.environmentId,
       capturedAt: new Date().toISOString(),
-      sequence: 0,
+      sequence,
       containers: inspectedContainers.map(normalizeContainer),
       networks: networks.map(normalizeNetwork),
       volumes: volumes.map(normalizeVolume),
