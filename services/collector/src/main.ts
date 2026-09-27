@@ -117,16 +117,13 @@ server.get<{
   }
 
   try {
-    const collected = await events.waitForEvents(
+    const batch = await events.waitForEvents(
       after,
       25_000,
     );
 
     return {
-      data: {
-        streamId: events.streamId,
-        events: collected,
-      },
+      data: batch,
     };
   } catch (error) {
     if (error instanceof SequenceExpiredError) {
