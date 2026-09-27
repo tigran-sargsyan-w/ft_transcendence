@@ -64,6 +64,17 @@ export type DockerVolume = {
   Labels: Record<string, string> | null;
 };
 
+export type DockerEvent = {
+  Type: string;
+  Action: string;
+  Actor: {
+    ID: string;
+    Attributes: Record<string, string>;
+  };
+  time: number;
+  timeNano: number;
+};
+
 type DockerVolumeList = {
   Volumes: DockerVolume[] | null;
 };
@@ -153,5 +164,50 @@ export class DockerClient {
     }
 
     return response.json() as Promise<T>;
+  }
+
+  async inspectNetwork(id: string): Promise<DockerNetwork> {
+    return this.request<DockerNetwork>(
+      `/networks/${encodeURIComponent(id)}`,
+    );
+  }
+
+  async inspectVolume(name: string): Promise<DockerVolume> {
+    return this.request<DockerVolume>(
+      `/volumes/${encodeURIComponent(name)}`,
+    );
+  }
+
+  async eventStream(): Promise<
+    ReadableStream<Uint8Array>
+  > {
+    const apiVersion = await this.ensureApiVersion();
+
+    const filters = encodeURIComponent(
+      JSON.stringify({
+        type: ['container', 'network', 'volume'],
+      }),
+    );
+
+    const response = await fetch(
+      `${this.baseUrl}/v${apiVersion}/events?filters=${filters}`,
+      {
+        headers: {
+          Accept: 'application/x-ndjson',
+        },
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Docker events request failed with HTTP ${response.status}`,
+      );
+    }
+
+    if (response.body === null) {
+      throw new Error('Docker events response has no body');
+    }
+
+    return response.body;
   }
 }
