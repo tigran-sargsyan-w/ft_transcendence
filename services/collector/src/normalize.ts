@@ -85,10 +85,14 @@ function normalizePorts(
     for (const binding of hostBindings) {
       const hostPort = Number(binding.HostPort);
 
+      const hostIp =
+        binding.HostIp || '0.0.0.0';
+
       const alreadyPresent = result.some(
         (entry) =>
           entry.containerPort === containerPort &&
           entry.protocol === protocol &&
+          entry.hostIp === hostIp &&
           entry.hostPort === hostPort,
       );
 
@@ -99,7 +103,7 @@ function normalizePorts(
       result.push({
         containerPort,
         protocol,
-        hostIp: binding.HostIp || '0.0.0.0',
+        hostIp,
         hostPort,
       });
     }
