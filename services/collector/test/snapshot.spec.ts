@@ -112,4 +112,92 @@ describe('SnapshotService', () => {
       originalCheckpoint.sequence,
     );
   });
+
+  it('collects and normalizes Docker resources into the snapshot', async () => {
+    const events = new EventStore('env-test');
+
+    const docker = makeDockerMock({
+      listContainers: async () => [
+        {
+          Id: 'container-1',
+        },
+      ],
+
+      inspectContainer: async () => ({
+        Id: 'container-1',
+        Name: '/api',
+        Config: {
+          Image: 'example/api:latest',
+          Labels: null,
+        },
+        State: {
+          Status: 'running',
+        },
+        NetworkSettings: {
+          Ports: null,
+          Networks: null,
+        },
+        Mounts: [],
+      }),
+
+      listNetworks: async () => [
+        {
+          Id: 'network-1',
+          Name: 'app-network',
+          Driver: 'bridge',
+          Internal: false,
+          Labels: null,
+        },
+      ],
+
+      listVolumes: async () => [
+        {
+          Name: 'postgres-data',
+          Driver: 'local',
+          Labels: null,
+        },
+      ],
+    });
+
+    const service = new SnapshotService(
+      docker,
+      events,
+      'env-test',
+    );
+
+    const snapshot = await service.create();
+
+    expect(snapshot.containers).toEqual([
+      {
+        id: 'container-1',
+        name: 'api',
+        image: 'example/api:latest',
+        state: 'running',
+        health: 'none',
+        labels: {},
+        compose: null,
+        ports: [],
+        networks: [],
+        mounts: [],
+      },
+    ]);
+
+    expect(snapshot.networks).toEqual([
+      {
+        id: 'network-1',
+        name: 'app-network',
+        driver: 'bridge',
+        internal: false,
+        labels: {},
+      },
+    ]);
+
+    expect(snapshot.volumes).toEqual([
+      {
+        name: 'postgres-data',
+        driver: 'local',
+        labels: {},
+      },
+    ]);
+  });
 });
