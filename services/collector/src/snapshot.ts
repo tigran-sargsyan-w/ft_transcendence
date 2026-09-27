@@ -21,7 +21,7 @@ export class SnapshotService {
   }
 
   async create(): Promise<CollectorSnapshot> {
-    const sequence = this.events.currentSequence();
+    const checkpoint = this.events.checkpoint();
     const containerSummaries = await this.docker.listContainers();
 
     const inspectedContainers = await Promise.all(
@@ -40,7 +40,7 @@ export class SnapshotService {
       streamId: this.events.streamId,
       environmentId: this.environmentId,
       capturedAt: new Date().toISOString(),
-      sequence,
+      sequence: checkpoint.sequence,
       containers: inspectedContainers.map(normalizeContainer),
       networks: networks.map(normalizeNetwork),
       volumes: volumes.map(normalizeVolume),
