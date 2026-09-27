@@ -41,34 +41,45 @@ export function createApp({
   server.get(
     '/api/v1/health',
     async (_request, reply) => {
-      const dockerAvailable =
-        await docker.ping();
+        try {
+        const dockerAvailable =
+            await docker.ping();
 
-      if (!dockerAvailable) {
-        return reply.status(503).send({
-          error: {
-            code:
-              'COLLECTOR_DOCKER_UNAVAILABLE',
-            message:
-              'Docker Engine is unavailable',
-          },
-        });
-      }
+        if (!dockerAvailable) {
+            return reply.status(503).send({
+            error: {
+                code:
+                'COLLECTOR_DOCKER_UNAVAILABLE',
+                message:
+                'Docker Engine is unavailable',
+            },
+            });
+        }
 
-      const version =
-        await docker.version();
+        const version =
+            await docker.version();
 
-      return {
-        data: {
-          status: 'ok',
-          docker: {
+        return {
+            data: {
             status: 'ok',
-            version: version.Version,
-            apiVersion:
-              version.ApiVersion,
-          },
-        },
-      };
+            docker: {
+                status: 'ok',
+                version: version.Version,
+                apiVersion:
+                version.ApiVersion,
+            },
+            },
+        };
+        } catch {
+        return reply.status(503).send({
+            error: {
+            code:
+                'COLLECTOR_DOCKER_UNAVAILABLE',
+            message:
+                'Docker Engine is unavailable',
+            },
+        });
+        }
     },
   );
 
