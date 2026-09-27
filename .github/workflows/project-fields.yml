@@ -41,6 +41,13 @@ jobs:
                 Area: 'General',
                 Module: 'Non-module',
               },
+              test: {
+                'Task type': 'Testing',
+                Priority: 'Medium',
+                Size: 'M',
+                Area: 'General',
+                Module: 'Non-module',
+              },
               research: {
                 'Task type': 'Research',
                 Priority: 'Low',
