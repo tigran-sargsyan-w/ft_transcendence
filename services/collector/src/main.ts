@@ -3,6 +3,13 @@ import Fastify from 'fastify';
 import { DockerClient } from './docker-client.js';
 import { SnapshotService } from './snapshot.js';
 
+import {
+  EventStore,
+  SequenceExpiredError,
+} from './event-store.js';
+
+import { EventWatcher } from './event-watcher.js';
+
 const PORT = Number(process.env.PORT ?? 3001);
 const HOST = process.env.HOST ?? '0.0.0.0';
 
@@ -18,9 +25,20 @@ const server = Fastify({
 
 const docker = new DockerClient(DOCKER_API_URL);
 
+const events = new EventStore(
+  ENVIRONMENT_ID,
+  1000,
+);
+
 const snapshots = new SnapshotService(
   docker,
+  events,
   ENVIRONMENT_ID,
+);
+
+const watcher = new EventWatcher(
+  docker,
+  events,
 );
 
 server.get('/api/v1/health', async (_request, reply) => {
@@ -68,8 +86,69 @@ server.get('/api/v1/snapshot', async (_request, reply) => {
   }
 });
 
+server.get<{
+  Querystring: {
+    after?: string;
+  };
+}>('/api/v1/events', async (request, reply) => {
+  const rawAfter = request.query.after;
+
+  if (
+    rawAfter === undefined ||
+    !/^\d+$/.test(rawAfter)
+  ) {
+    return reply.status(400).send({
+      error: {
+        code: 'COLLECTOR_INVALID_REQUEST',
+        message: 'after must be a non-negative integer',
+      },
+    });
+  }
+
+  const after = Number(rawAfter);
+
+  if (!Number.isSafeInteger(after)) {
+    return reply.status(400).send({
+      error: {
+        code: 'COLLECTOR_INVALID_REQUEST',
+        message: 'after must be a non-negative integer',
+      },
+    });
+  }
+
+  try {
+    const collected = await events.waitForEvents(
+      after,
+      25_000,
+    );
+
+    return {
+      data: {
+        streamId: events.streamId,
+        events: collected,
+      },
+    };
+  } catch (error) {
+    if (error instanceof SequenceExpiredError) {
+      return reply.status(409).send({
+        error: {
+          code: 'COLLECTOR_SEQUENCE_EXPIRED',
+          message:
+            'Requested event sequence is no longer available',
+        },
+      });
+    }
+
+    throw error;
+  }
+});
+
 async function start(): Promise<void> {
   try {
+    await docker.version();
+
+    void watcher.run();
+
     await server.listen({
       port: PORT,
       host: HOST,
