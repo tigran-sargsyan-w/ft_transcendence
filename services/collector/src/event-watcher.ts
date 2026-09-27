@@ -20,17 +20,26 @@ export class EventWatcher {
 
   async run(): Promise<void> {
     while (true) {
-      try {
-        await this.consumeStream();
-      } catch (error) {
-        console.error('Docker event stream failed:', error);
+            try {
+            await this.consumeStream();
 
-        await new Promise((resolve) =>
-          setTimeout(resolve, 1000),
-        );
-      }
+            console.warn(
+                'Docker event stream closed; resetting stream session',
+            );
+            } catch (error) {
+            console.error(
+                'Docker event stream failed:',
+                error,
+            );
+            }
+
+            this.store.resetStream();
+
+            await new Promise((resolve) =>
+            setTimeout(resolve, 1000),
+            );
+        }
     }
-  }
 
   private async consumeStream(): Promise<void> {
     const stream = await this.docker.eventStream();
@@ -100,70 +109,75 @@ export class EventWatcher {
 
   private async handleContainer(
     event: DockerEvent,
-  ): Promise<void> {
+    ): Promise<void> {
     if (event.Action === 'destroy') {
-      this.store.append({
+        this.store.append({
         occurredAt: this.occurredAt(event),
         type: 'container.destroyed',
         resource: {
-          kind: 'container',
-          id: event.Actor.ID,
+            kind: 'container',
+            id: event.Actor.ID,
         },
         data: {},
-      });
+        });
 
-      return;
+        return;
     }
 
     const eventType = this.containerEventType(
-      event.Action,
+        event.Action,
     );
 
     if (eventType === null) {
-      return;
+        return;
     }
 
     const inspected = await this.inspectContainer(
-      event.Actor.ID,
+        event.Actor.ID,
     );
 
-    if (inspected === null) {
-      return;
-    }
-
-    const container = normalizeContainer(inspected);
-
     if (eventType === 'container.died') {
-      const exitCode = Number(
-        event.Actor.Attributes.exitCode ?? 0,
-      );
+        const data: Record<string, unknown> = {};
 
-      this.store.append({
+        const exitCode = Number(
+        event.Actor.Attributes.exitCode,
+        );
+
+        if (Number.isInteger(exitCode)) {
+        data.exitCode = exitCode;
+        }
+
+        if (inspected !== null) {
+        data.container = normalizeContainer(inspected);
+        }
+
+        this.store.append({
         occurredAt: this.occurredAt(event),
         type: eventType,
         resource: {
-          kind: 'container',
-          id: event.Actor.ID,
+            kind: 'container',
+            id: event.Actor.ID,
         },
-        data: {
-          exitCode,
-          container,
-        },
-      });
+        data,
+        });
 
-      return;
+        return;
+    }
+
+    if (inspected === null) {
+        return;
     }
 
     this.store.append({
-      occurredAt: this.occurredAt(event),
-      type: eventType,
-      resource: {
+        occurredAt: this.occurredAt(event),
+        type: eventType,
+        resource: {
         kind: 'container',
         id: event.Actor.ID,
-      },
-      data: {
-        container,
-      },
+        },
+        data: {
+        container: normalizeContainer(inspected),
+        },
     });
   }
 
