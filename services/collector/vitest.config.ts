@@ -15,6 +15,13 @@ export default defineConfig({
         'src/main.ts',
         'src/types.ts',
       ],
+
+      thresholds: {
+          statements: 90,
+          branches: 85,
+          functions: 85,
+          lines: 90,
+      },
     },
   },
 });
