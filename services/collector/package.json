@@ -8,14 +8,19 @@
     "start": "tsx src/main.ts",
     "build": "tsc",
     "start:prod": "node dist/main.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:cov": "vitest run --coverage"
   },
   "dependencies": {
     "fastify": "^5.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.11",
     "tsx": "^4.0.0",
-    "typescript": "^6.0.0"
+    "typescript": "^6.0.0",
+    "vitest": "^4.1.11"
   }
 }

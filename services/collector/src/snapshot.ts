@@ -37,7 +37,7 @@ export class SnapshotService {
 
     return {
       schemaVersion: 1,
-      streamId: this.events.streamId,
+      streamId: checkpoint.streamId,
       environmentId: this.environmentId,
       capturedAt: new Date().toISOString(),
       sequence: checkpoint.sequence,
