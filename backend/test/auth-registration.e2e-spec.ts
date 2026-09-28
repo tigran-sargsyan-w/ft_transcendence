@@ -1,4 +1,4 @@
-import { type INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import * as argon2 from 'argon2';
 import request from 'supertest';
@@ -7,7 +7,7 @@ import { configureApp } from '../src/app.setup.js';
 import { PrismaService } from '../src/shared/prisma/prisma.service.js';
 
 describe('User registration (e2e)', () => {
-  let app: INestApplication;
+  let app: NestExpressApplication;
   let prisma: PrismaService;
 
   const email = 'registration-e2e@example.com';
@@ -17,7 +17,9 @@ describe('User registration (e2e)', () => {
       imports: [AppModule],
     }).compile();
 
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication<NestExpressApplication>({
+      bodyParser: false,
+    });
     configureApp(app);
 
     await app.init();
