@@ -6,7 +6,9 @@ import {
   Post,
   Req,
   Res,
+  UseGuards,
 } from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import type { Response } from 'express';
 import {
   type AuthenticatedRequest,
@@ -35,6 +37,7 @@ export class AuthController {
   // passthrough: we set the cookie ourselves but still return the user,
   // so the response keeps its { data } envelope.
   @Public()
+  @UseGuards(ThrottlerGuard)
   @Post('login')
   @HttpCode(200)
   async login(
