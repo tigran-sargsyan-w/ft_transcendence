@@ -1,6 +1,7 @@
-import { Body, Controller, HttpCode, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import { AuthService } from './auth.service.js';
+import { CurrentUser, Public } from './auth.decorators.js';
+import { AuthService, type PublicUser } from './auth.service.js';
 import { LoginDto } from './dto/login.dto.js';
 import { RegisterDto } from './dto/register.dto.js';
 import {
@@ -13,6 +14,7 @@ import {
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @Public()
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
@@ -20,6 +22,7 @@ export class AuthController {
 
   // passthrough: we set the cookie ourselves but still return the user,
   // so the response keeps its { data } envelope.
+  @Public()
   @Post('login')
   @HttpCode(200)
   async login(
@@ -33,6 +36,11 @@ export class AuthController {
       maxAge: SESSION_TTL_MS,
     });
 
+    return user;
+  }
+
+  @Get('me')
+  me(@CurrentUser() user: PublicUser) {
     return user;
   }
 }

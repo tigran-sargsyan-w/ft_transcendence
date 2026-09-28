@@ -142,4 +142,51 @@ describe('Sessions (e2e)', () => {
     expect(response.body.error.code).toBe('VALIDATION_ERROR');
     expect(response.get('Set-Cookie')).toBeUndefined();
   });
+
+  it('returns the current user with a valid session', async () => {
+    const token = await login();
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/auth/me')
+      .set('Cookie', `sid=${token}`)
+      .expect(200);
+
+    expect(response.body.data.email).toBe(email);
+    expect(response.body.data).not.toHaveProperty('passwordHash');
+  });
+
+  it('refuses the current user without a session', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/auth/me')
+      .expect(401);
+
+    expect(response.body).toEqual({
+      error: { code: 'UNAUTHORIZED', message: 'Unauthorized' },
+    });
+  });
+
+  it('refuses a made-up session cookie', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/auth/me')
+      .set('Cookie', 'sid=made-up-token')
+      .expect(401);
+  });
+
+  it('refuses an expired session and deletes it', async () => {
+    const token = await login();
+
+    await prisma.session.update({
+      where: { tokenHash: hashToken(token) },
+      data: { expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    });
+
+    await request(app.getHttpServer())
+      .get('/api/v1/auth/me')
+      .set('Cookie', `sid=${token}`)
+      .expect(401);
+
+    expect(
+      await prisma.session.count({ where: { tokenHash: hashToken(token) } }),
+    ).toBe(0);
+  });
 });

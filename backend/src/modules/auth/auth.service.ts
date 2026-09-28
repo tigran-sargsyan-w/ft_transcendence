@@ -19,6 +19,8 @@ const PUBLIC_USER = {
   updatedAt: true,
 } as const;
 
+export type PublicUser = Prisma.UserGetPayload<{ select: typeof PUBLIC_USER }>;
+
 // Hashed once at startup. Checked when the email is unknown, so that an
 // unknown email and a wrong password take the same time to answer.
 const dummyHash = argon2.hash('dummy-password', { type: argon2.argon2id });
@@ -95,5 +97,29 @@ export class AuthService {
         updatedAt: user.updatedAt,
       },
     };
+  }
+
+  // The user behind a session cookie, or null if the session is unknown or
+  // expired. An expired session is deleted on the way.
+  async findSessionUser(token: string | undefined) {
+    if (!token) {
+      return null;
+    }
+
+    const session = await this.prisma.session.findUnique({
+      where: { tokenHash: hashToken(token) },
+      include: { user: { select: PUBLIC_USER } },
+    });
+
+    if (!session) {
+      return null;
+    }
+
+    if (session.expiresAt <= new Date()) {
+      await this.prisma.session.deleteMany({ where: { id: session.id } });
+      return null;
+    }
+
+    return session.user;
   }
 }
