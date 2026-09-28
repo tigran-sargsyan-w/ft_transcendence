@@ -31,7 +31,11 @@ Authenticated clients must have a defined way to retrieve the current user's pub
 
 ## Password handling
 
-The final implementation must use an appropriate salted password-hashing algorithm. The concrete library and algorithm parameters will be selected with the backend stack and recorded in an ADR if the decision is significant.
+The final implementation must use an appropriate salted password-hashing algorithm: argon2id, see [ADR 0002](../adr/0002-server-side-sessions.md).
+
+## Session mechanism
+
+Server-side sessions with an opaque `HttpOnly` cookie, see [ADR 0002](../adr/0002-server-side-sessions.md). Endpoints: `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`. Every other route needs a session unless it is explicitly public (health, register, login).
 
 ## Conceptual user data
 
@@ -51,6 +55,5 @@ These are optional/future decisions and are not part of this foundation contract
 - OAuth
 - 2FA
 - refresh-token design
-- session-cookie vs token authentication
 - roles/permissions beyond what the product requires
 - avatars/friends/profile expansion
