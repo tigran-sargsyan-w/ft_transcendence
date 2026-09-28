@@ -26,7 +26,7 @@ Readable by any script on the page, so one XSS leaks the credential. Rejected.
 Option A.
 
 - **Token:** 32 random bytes (`crypto.randomBytes`). Only its SHA-256 is stored (`sessions.tokenHash`), so a database leak gives no usable session.
-- **Cookie:** `sid`, `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, `Max-Age` equal to the session lifetime.
+- **Cookie:** `sid`, `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, `Max-Age` equal to the session lifetime. `Secure` can only be turned off for local development over plain HTTP (`COOKIE_SECURE=false`).
 - **Lifecycle:** a new session at each login; logout deletes it; an expired session is refused and deleted when read. Lifetime 7 days (`SESSION_TTL_HOURS`), no sliding renewal for now.
 - **Passwords:** argon2id (`argon2` package), already used by registration.
 - **Brute force:** login attempts are rate-limited per IP.
