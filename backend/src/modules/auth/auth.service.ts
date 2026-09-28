@@ -99,6 +99,12 @@ export class AuthService {
     };
   }
 
+  async logout(token: string) {
+    await this.prisma.session.deleteMany({
+      where: { tokenHash: hashToken(token) },
+    });
+  }
+
   // The user behind a session cookie, or null if the session is unknown or
   // expired. An expired session is deleted on the way.
   async findSessionUser(token: string | undefined) {

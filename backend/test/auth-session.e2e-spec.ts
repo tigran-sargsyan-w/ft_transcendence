@@ -172,6 +172,29 @@ describe('Sessions (e2e)', () => {
       .expect(401);
   });
 
+  it('logs out: deletes the session and clears the cookie', async () => {
+    const token = await login();
+
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/auth/logout')
+      .set('Cookie', `sid=${token}`)
+      .expect(204);
+
+    expect(response.text).toBe('');
+    expect(response.get('Set-Cookie')?.[0]).toMatch(
+      /^sid=;.*Expires=Thu, 01 Jan 1970/,
+    );
+
+    await request(app.getHttpServer())
+      .get('/api/v1/auth/me')
+      .set('Cookie', `sid=${token}`)
+      .expect(401);
+  });
+
+  it('refuses a logout without a session', async () => {
+    await request(app.getHttpServer()).post('/api/v1/auth/logout').expect(401);
+  });
+
   it('refuses an expired session and deletes it', async () => {
     const token = await login();
 

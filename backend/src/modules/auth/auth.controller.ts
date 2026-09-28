@@ -1,6 +1,18 @@
-import { Body, Controller, Get, HttpCode, Post, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Post,
+  Req,
+  Res,
+} from '@nestjs/common';
 import type { Response } from 'express';
-import { CurrentUser, Public } from './auth.decorators.js';
+import {
+  type AuthenticatedRequest,
+  CurrentUser,
+  Public,
+} from './auth.decorators.js';
 import { AuthService, type PublicUser } from './auth.service.js';
 import { LoginDto } from './dto/login.dto.js';
 import { RegisterDto } from './dto/register.dto.js';
@@ -37,6 +49,18 @@ export class AuthController {
     });
 
     return user;
+  }
+
+  // Protected: the guard has already checked the session cookie.
+  @Post('logout')
+  @HttpCode(204)
+  async logout(
+    @Req() request: AuthenticatedRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    await this.authService.logout(request.cookies[SESSION_COOKIE]);
+
+    response.clearCookie(SESSION_COOKIE, sessionCookieOptions);
   }
 
   @Get('me')
