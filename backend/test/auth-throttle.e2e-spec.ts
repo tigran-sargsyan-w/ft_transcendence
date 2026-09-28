@@ -29,12 +29,10 @@ describe('Login rate limit (e2e)', () => {
 
   it('refuses the 11th login attempt within a minute', async () => {
     const attempt = () =>
-      request(app.getHttpServer())
-        .post('/api/v1/auth/login')
-        .send({
-          email: 'throttle-e2e@example.com',
-          password: 'wrong-password',
-        });
+      request(app.getHttpServer()).post('/api/v1/auth/login').send({
+        email: 'throttle-e2e@example.com',
+        password: 'wrong-password',
+      });
 
     for (let i = 0; i < 10; i++) {
       await attempt().expect(401);
