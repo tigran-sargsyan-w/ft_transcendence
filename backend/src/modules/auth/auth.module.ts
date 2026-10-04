@@ -10,7 +10,7 @@ import { SessionGuard } from './session.guard.js';
   imports: [
     PrismaModule,
     // 10 login attempts per minute, applied to the login route only.
-    // ponytail: counted per IP in memory; behind Nginx, enable `trust proxy`
+    // Counted per IP in memory; behind Nginx, enable `trust proxy`
     // or every client shares the proxy's IP.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 10 }]),
   ],
