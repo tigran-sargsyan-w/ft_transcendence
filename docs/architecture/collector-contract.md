@@ -1,6 +1,6 @@
 # Collector Contract
 
-**Status: draft v0**, written from the Nest side (the consumer). To be validated by Tigran (collector); the mapping to the graph is to be reviewed by Camille.
+**Status: implemented v0.** The Collector side has been validated against the running implementation and automated tests. Final consumer confirmation from the Nest topology side is still required before closing the contract task.
 
 The Docker collector serves the current state of a Docker/Compose environment (a **snapshot**) and a numbered stream of **events** over internal HTTP/JSON. Nest reads both to build the topology (`nodes` / `edges`, see [Graph contract](./graph-contract.md)). Nothing else calls the collector.
 
@@ -8,7 +8,7 @@ The Docker collector serves the current state of a Docker/Compose environment (a
 |-------|--------|
 | HTTP/JSON transport | Decided (Tigran) |
 | Docker reached through a read-only socket proxy, no direct `docker.sock` mount | Decided (Tigran) |
-| Nest reads from the collector (snapshot + long polling) | **Proposal**, to validate with Tigran |
+| Nest reads from the collector (snapshot + long polling) | Decided and implemented |
 
 ## Roles
 
@@ -22,9 +22,11 @@ Same as the [Graph contract](./graph-contract.md): `schemaVersion` (integer, sta
 
 ## Snapshot
 
-The full state at one moment: `{ schemaVersion, environmentId, capturedAt, sequence, containers, networks, volumes }`.
+The full Docker state collected for one snapshot: `{ schemaVersion, streamId, environmentId, capturedAt, sequence, containers, networks, volumes }`.
 
-`sequence` is the last event the snapshot includes: it reflects every event up to that number and none after. Events carry whole objects (see [Events](#events)), so applying an event the snapshot already reflects is harmless.
+`streamId` identifies the current Collector event-stream session. It changes whenever the Collector resets the Docker event stream. `streamId` and `sequence` are captured together from the same checkpoint immediately before Docker state is collected.
+
+Because Docker state is collected after the checkpoint is captured, the resulting snapshot may already reflect a change represented by an event with a higher sequence. Nest must therefore apply every event after `snapshot.sequence`; applying an update that the snapshot already reflects must be safe and idempotent.
 
 **Container**
 
@@ -37,9 +39,9 @@ The full state at one moment: `{ schemaVersion, environmentId, capturedAt, seque
 | `health` | `healthy` `unhealthy` `starting` `none` (no healthcheck, or not started). Only meaningful while `running`: a stopped container was seen `unhealthy` |
 | `labels` | All labels except `com.docker.compose.*` (same rule for networks and volumes) |
 | `compose` | `{ project, service, dependsOn }` from the Compose labels, `null` if not managed by Compose |
-| `ports` | Published ports `{ containerPort, protocol, hostIp, hostPort }`, read from the port bindings (no IPv4/IPv6 duplicate). `hostIp` is `0.0.0.0` when Docker leaves it empty |
+| `ports` | Published ports `{ containerPort, protocol, hostIp, hostPort }`, read from the port bindings. Exact duplicate bindings are removed, but bindings with different `hostIp` values remain distinct. `hostIp` is `0.0.0.0` when Docker leaves it empty |
 | `networks` | `{ networkId, name, ipv4Address }`. `networkId` and `ipv4Address` are empty while the container is not attached (just created, or exited) |
-| `mounts` | `{ type, source, destination, readOnly }`. `source` is the volume **name** for a volume, the host path for a bind mount |
+| `mounts` | `{ type, source, destination, readOnly }`. For Docker volumes, `source` is the volume **name**. For bind mounts, the host path is never exposed and `source` is `[redacted]` |
 
 **Network:** `id`, `name`, `driver`, `internal`, `labels`. **Volume:** `name` (Docker volumes have no id), `driver`, `labels`.
 
@@ -50,8 +52,9 @@ Environment variables and command lines are never forwarded: they routinely cont
 | Field | Notes |
 |-------|-------|
 | `schemaVersion`, `environmentId` | As in the snapshot |
-| `eventId` | Opaque, unique while the collector runs. For logs: Nest deduplicates on `sequence` |
-| `sequence` | Starts at `1` when the collector starts, `+1` per event, **no gaps** (ignored Docker events use no number) |
+| `streamId` | Identifies the current Collector stream session. All events in the same stream share it; it changes when the Docker event stream is reset |
+| `eventId` | Opaque and unique within one `streamId`. It is derived from the sequence, so use `streamId` + `sequence` as the stable event identity across resets |
+| `sequence` | Starts at `1` for each `streamId`, `+1` per emitted event, **no gaps** (ignored Docker events use no number) |
 | `occurredAt` | ISO 8601 UTC, from Docker |
 | `type` | See below |
 | `resource` | `{ kind, id }`: `container`, `network` or `volume` (its id is its name). For `network.connected` / `network.disconnected` it is the network |
@@ -64,7 +67,7 @@ Nest ignores an unknown `type` (and still records its `sequence`), so types can 
 | `container.created` | container / `create` | `{ container }` |
 | `container.started` | container / `start` | `{ container }` |
 | `container.stopped` | container / `stop` | `{ container }` |
-| `container.died` | container / `die` | `{ exitCode, container }` |
+| `container.died` | container / `die` | `{ exitCode?, container? }` |
 | `container.destroyed` | container / `destroy` | `{}` |
 | `container.health_changed` | container / `health_status: healthy` and `health_status: unhealthy` | `{ container }` |
 | `network.created` | network / `create` | `{ network }` |
@@ -74,14 +77,13 @@ Nest ignores an unknown `type` (and still records its `sequence`), so types can 
 | `volume.created` | volume / `create` | `{ volume }` |
 | `volume.removed` | volume / `destroy` | `{}` |
 
-`exitCode` is an integer (Docker sends a string).
+`exitCode` is an integer when Docker supplies a valid integer value (Docker sends it as a string).
 
-**Every container event carries the whole container object** (snapshot format), inspected by the collector right after the Docker event, except `destroyed`. So:
+For `container.created`, `container.started`, `container.stopped`, and `container.health_changed`, the Collector inspects the container immediately after the Docker event and emits the event only when that normalized container object is available. Nest can upsert the whole object with no merge and derives state from `data.container`, not from the event type alone.
 
-- Nest simply replaces its copy (upsert), with no merge.
-- Nest derives the status from `data.container` (`state`, `health`), never from `type` alone: at `stop` the container is already `exited` or `removing`.
-- An ignored Docker event leaves no wrong state for long: the next container event brings the current object.
-- If the container is already gone when the collector inspects it (`docker rm -f`, fast `compose down`: `die` and `destroy` come about 20 ms apart), the collector emits nothing for that event. `container.died` is therefore not guaranteed; `container.destroyed` is enough.
+`container.died` is different: it is emitted even if the container disappears before `docker inspect` succeeds (for example a fast `docker run --rm`). `exitCode` is included when valid, and `container` is included only when inspection still succeeds. `container.destroyed` never carries a container object.
+
+An ignored Docker event leaves no wrong state for long: the next emitted container event carries the current normalized object.
 
 Everything else Docker emits is ignored (`kill`, `rename`, `pause`, `exec_*`, volume `mount` / `unmount`…). Match `Action` exactly, as it can carry a suffix (`health_status: healthy`, `exec_create: true `). A healthcheck emits `exec_*` at every run, so the collector must filter them.
 
@@ -118,14 +120,26 @@ The final mapping and edge direction belong to the topology module, with Camille
 
 ## Order, gaps and resynchronization
 
-Nest ignores an event whose `sequence` is lower than or equal to the last applied one. A gap (an event that is not `lastApplied + 1`, or a response that does not start at `after + 1`) or a `COLLECTOR_SEQUENCE_EXPIRED` triggers a resynchronization. So does a Nest start (no state) or a collector restart (its sequence starts again at `1`, see [Open questions](#open-questions)).
+Nest tracks both `streamId` and `sequence`. Within one stream, it ignores an event whose `sequence` is lower than or equal to the last applied one.
+
+A resynchronization is required when:
+
+- Nest starts without existing topology state;
+- `COLLECTOR_SEQUENCE_EXPIRED` is returned;
+- an event sequence contains a gap (an event is not `lastApplied + 1`, or a response does not start at `after + 1`);
+- the event-batch `streamId` differs from the current snapshot/stream `streamId`.
 
 ```text
 1. GET /api/v1/snapshot
 2. replace the whole in-memory state with it
-3. lastApplied = snapshot.sequence
-4. loop: GET /api/v1/events?after=lastApplied, apply each event in order
+3. currentStreamId = snapshot.streamId
+4. lastApplied = snapshot.sequence
+5. loop: GET /api/v1/events?after=lastApplied
+6. if response.streamId != currentStreamId: discard the batch and restart from step 1
+7. otherwise apply events in order and advance lastApplied
 ```
+
+Nest does not send `streamId` back to the Collector in v0; it validates the `streamId` returned with each event batch.
 
 ## HTTP surface (v0)
 
@@ -133,11 +147,11 @@ Internal only, base path `/api/v1`.
 
 | Method | Path | Answer |
 |--------|------|--------|
-| `GET` | `/health` | Liveness |
+| `GET` | `/health` | Collector/Docker availability and Docker version information |
 | `GET` | `/snapshot` | `{ "data": <snapshot> }` |
-| `GET` | `/events?after=<sequence>` | `{ "data": { "events": [] } }`: the events with a `sequence` greater than `after` (integer, `0` or more) |
+| `GET` | `/events?after=<sequence>` | `{ "data": { "streamId": "…", "events": [] } }`: the events with a `sequence` greater than `after` (integer, `0` or more) |
 
-`/events` is a **long poll**: with nothing new, the collector waits about 25 s and answers with an empty list. Nest's HTTP timeout must be longer (for example 35 s) and Nest calls again right after each answer. The collector keeps a bounded in-memory buffer of its latest events (size: its choice, documented in its README).
+`/events` is a **long poll**: with nothing new, the collector waits about 25 s and answers with an empty list while still returning the current `streamId`. Nest's HTTP timeout must be longer (for example 35 s) and Nest calls again right after each answer. The Collector keeps the latest **1000 events** in memory by default.
 
 ### Errors
 
@@ -147,13 +161,14 @@ Internal only, base path `/api/v1`.
 | `COLLECTOR_INVALID_REQUEST` | `400` | Missing or malformed `after` |
 | `COLLECTOR_DOCKER_UNAVAILABLE` | `503` | The collector cannot reach Docker |
 
-**Why Nest reads (proposal):** Nest sets its own pace, restarting is trivial, the collector does not need to know Nest, and Nest exposes no extra internal endpoint. Alternative: the collector **pushes** each event to an internal endpoint of Nest. It is more reactive, but the collector must handle retries and ordering, and that endpoint must never be routed by Nginx.
+**Why Nest reads:** this direction is now the implemented v0 design. Nest sets its own pace, restart/resynchronization is straightforward, the Collector does not need to know Nest, and Nest exposes no additional ingestion endpoint to the Collector.
 
 ## Security
 
-- **Docker access (decided):** read-only socket proxy, no direct `docker.sock` mount. Docker Engine calls needed (`GET` only, so the proxy can be tight): `/_ping`, `/version`, `/containers/json?all=1`, `/containers/{id}/json`, `/networks`, `/networks/{id}`, `/volumes`, `/events`.
-- The collector sits on the internal Compose network only: no published port, never routed by Nginx. Nest is its only client. No authentication between them in v0 (see [Open questions](#open-questions)).
-- Environment variables and command lines are never forwarded.
+- **Docker access (decided):** read-only socket proxy, no direct `docker.sock` mount in the Collector. The current proxy enables only the Docker API sections needed for containers, networks, volumes, events, ping and version, with `POST=0`. Collector calls are read-only and currently use `/_ping`, `/version`, `/containers/json?all=1`, `/containers/{id}/json`, `/networks`, `/networks/{id}`, `/volumes`, `/volumes/{name}`, and `/events`.
+- In the final application topology, the Collector and Docker proxy are internal-only and must not be routed through Nginx or exposed publicly. The current development Compose configuration temporarily publishes both services on `127.0.0.1` for local debugging; those loopback-only development bindings are not part of the final deployment exposure model.
+- Nest is the only application consumer of the Collector. No authentication between Collector and Nest exists in v0 (see [Open questions](#open-questions)).
+- Environment variables and command lines are never forwarded. Bind-mount host paths are redacted.
 
 ## Examples
 
@@ -166,7 +181,7 @@ One run of a small Compose project, `demo`: `db` (healthcheck, volume), `api` (d
 ```json
 {
   "data": {
-    "schemaVersion": 1, "environmentId": "env_local_compose", "capturedAt": "2026-09-23T15:38:47.960Z", "sequence": 12,
+    "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "capturedAt": "2026-09-23T15:38:47.960Z", "sequence": 12,
     "containers": [
       { "id": "6c28d5dff0b8", "name": "demo-db-1", "image": "busybox:1.37", "state": "running", "health": "healthy", "labels": {},
         "compose": { "project": "demo", "service": "db", "dependsOn": [] }, "ports": [],
@@ -194,21 +209,22 @@ One run of a small Compose project, `demo`: `db` (healthcheck, volume), `api` (d
 ```json
 {
   "data": {
+    "streamId": "stream_demo_01",
     "events": [
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0001", "sequence": 1,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000001", "sequence": 1,
         "occurredAt": "2026-09-23T15:38:44.353Z", "type": "network.created",
         "resource": { "kind": "network", "id": "e5b899c59c6a" },
         "data": { "network": { "id": "e5b899c59c6a", "name": "demo_default", "driver": "bridge", "internal": false, "labels": {} } }
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0002", "sequence": 2,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000002", "sequence": 2,
         "occurredAt": "2026-09-23T15:38:44.357Z", "type": "volume.created",
         "resource": { "kind": "volume", "id": "demo_db_data" },
         "data": { "volume": { "name": "demo_db_data", "driver": "local", "labels": {} } }
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0003", "sequence": 3,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000003", "sequence": 3,
         "occurredAt": "2026-09-23T15:38:44.442Z", "type": "container.created",
         "resource": { "kind": "container", "id": "6c28d5dff0b8" },
         "data": { "container": { "id": "6c28d5dff0b8", "name": "demo-db-1", "image": "busybox:1.37", "state": "created", "health": "none", "labels": {},
@@ -217,7 +233,7 @@ One run of a small Compose project, `demo`: `db` (healthcheck, volume), `api` (d
           "mounts": [{ "type": "volume", "source": "demo_db_data", "destination": "/data", "readOnly": false }] } }
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0004", "sequence": 4,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000004", "sequence": 4,
         "occurredAt": "2026-09-23T15:38:44.542Z", "type": "container.created",
         "resource": { "kind": "container", "id": "4589c1f3ac3c" },
         "data": { "container": { "id": "4589c1f3ac3c", "name": "demo-api-1", "image": "busybox:1.37", "state": "created", "health": "none", "labels": {},
@@ -226,7 +242,7 @@ One run of a small Compose project, `demo`: `db` (healthcheck, volume), `api` (d
           "mounts": [] } }
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0005", "sequence": 5,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000005", "sequence": 5,
         "occurredAt": "2026-09-23T15:38:44.620Z", "type": "container.created",
         "resource": { "kind": "container", "id": "b183ed94a57c" },
         "data": { "container": { "id": "b183ed94a57c", "name": "demo-web-1", "image": "busybox:1.37", "state": "created", "health": "none", "labels": {},
@@ -235,13 +251,13 @@ One run of a small Compose project, `demo`: `db` (healthcheck, volume), `api` (d
           "mounts": [] } }
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0006", "sequence": 6,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000006", "sequence": 6,
         "occurredAt": "2026-09-23T15:38:44.902Z", "type": "network.connected",
         "resource": { "kind": "network", "id": "e5b899c59c6a" },
         "data": { "containerId": "6c28d5dff0b8" }
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0007", "sequence": 7,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000007", "sequence": 7,
         "occurredAt": "2026-09-23T15:38:44.928Z", "type": "container.started",
         "resource": { "kind": "container", "id": "6c28d5dff0b8" },
         "data": { "container": { "id": "6c28d5dff0b8", "name": "demo-db-1", "image": "busybox:1.37", "state": "running", "health": "starting", "labels": {},
@@ -250,7 +266,7 @@ One run of a small Compose project, `demo`: `db` (healthcheck, volume), `api` (d
           "mounts": [{ "type": "volume", "source": "demo_db_data", "destination": "/data", "readOnly": false }] } }
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0008", "sequence": 8,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000008", "sequence": 8,
         "occurredAt": "2026-09-23T15:38:46.976Z", "type": "container.health_changed",
         "resource": { "kind": "container", "id": "6c28d5dff0b8" },
         "data": { "container": { "id": "6c28d5dff0b8", "name": "demo-db-1", "image": "busybox:1.37", "state": "running", "health": "healthy", "labels": {},
@@ -259,13 +275,13 @@ One run of a small Compose project, `demo`: `db` (healthcheck, volume), `api` (d
           "mounts": [{ "type": "volume", "source": "demo_db_data", "destination": "/data", "readOnly": false }] } }
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0009", "sequence": 9,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000009", "sequence": 9,
         "occurredAt": "2026-09-23T15:38:47.610Z", "type": "network.connected",
         "resource": { "kind": "network", "id": "e5b899c59c6a" },
         "data": { "containerId": "4589c1f3ac3c" }
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0010", "sequence": 10,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000010", "sequence": 10,
         "occurredAt": "2026-09-23T15:38:47.628Z", "type": "container.started",
         "resource": { "kind": "container", "id": "4589c1f3ac3c" },
         "data": { "container": { "id": "4589c1f3ac3c", "name": "demo-api-1", "image": "busybox:1.37", "state": "running", "health": "none", "labels": {},
@@ -274,13 +290,13 @@ One run of a small Compose project, `demo`: `db` (healthcheck, volume), `api` (d
           "mounts": [] } }
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0011", "sequence": 11,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000011", "sequence": 11,
         "occurredAt": "2026-09-23T15:38:47.902Z", "type": "network.connected",
         "resource": { "kind": "network", "id": "e5b899c59c6a" },
         "data": { "containerId": "b183ed94a57c" }
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0012", "sequence": 12,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000012", "sequence": 12,
         "occurredAt": "2026-09-23T15:38:47.923Z", "type": "container.started",
         "resource": { "kind": "container", "id": "b183ed94a57c" },
         "data": { "container": { "id": "b183ed94a57c", "name": "demo-web-1", "image": "busybox:1.37", "state": "running", "health": "none", "labels": {},
@@ -303,15 +319,16 @@ One run of a small Compose project, `demo`: `db` (healthcheck, volume), `api` (d
 ```json
 {
   "data": {
+    "streamId": "stream_demo_01",
     "events": [
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0013", "sequence": 13,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000013", "sequence": 13,
         "occurredAt": "2026-09-23T15:38:57.830Z", "type": "network.disconnected",
         "resource": { "kind": "network", "id": "e5b899c59c6a" },
         "data": { "containerId": "4589c1f3ac3c" }
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0014", "sequence": 14,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000014", "sequence": 14,
         "occurredAt": "2026-09-23T15:38:57.839Z", "type": "container.died",
         "resource": { "kind": "container", "id": "4589c1f3ac3c" },
         "data": { "exitCode": 1, "container": { "id": "4589c1f3ac3c", "name": "demo-api-1", "image": "busybox:1.37", "state": "exited", "health": "none", "labels": {},
@@ -320,7 +337,7 @@ One run of a small Compose project, `demo`: `db` (healthcheck, volume), `api` (d
           "mounts": [] } }
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0015", "sequence": 15,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000015", "sequence": 15,
         "occurredAt": "2026-09-23T15:39:07.184Z", "type": "container.created",
         "resource": { "kind": "container", "id": "ea2201557210" },
         "data": { "container": { "id": "ea2201557210", "name": "4589c1f3ac3c_demo-api-1", "image": "busybox:1.37", "state": "created", "health": "none", "labels": {},
@@ -329,19 +346,19 @@ One run of a small Compose project, `demo`: `db` (healthcheck, volume), `api` (d
           "mounts": [] } }
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0016", "sequence": 16,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000016", "sequence": 16,
         "occurredAt": "2026-09-23T15:39:07.209Z", "type": "container.destroyed",
         "resource": { "kind": "container", "id": "4589c1f3ac3c" },
         "data": {}
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0017", "sequence": 17,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000017", "sequence": 17,
         "occurredAt": "2026-09-23T15:39:07.954Z", "type": "network.connected",
         "resource": { "kind": "network", "id": "e5b899c59c6a" },
         "data": { "containerId": "ea2201557210" }
       },
       {
-        "schemaVersion": 1, "environmentId": "env_local_compose", "eventId": "evt_0018", "sequence": 18,
+        "schemaVersion": 1, "streamId": "stream_demo_01", "environmentId": "env_local_compose", "eventId": "evt_00000018", "sequence": 18,
         "occurredAt": "2026-09-23T15:39:07.976Z", "type": "container.started",
         "resource": { "kind": "container", "id": "ea2201557210" },
         "data": { "container": { "id": "ea2201557210", "name": "demo-api-1", "image": "busybox:1.37", "state": "running", "health": "none", "labels": {},
@@ -356,10 +373,7 @@ One run of a small Compose project, `demo`: `db` (healthcheck, volume), `api` (d
 
 ## Open questions
 
-1. **Flow direction.** Nest pulls (proposed here) or the collector pushes. To validate with Tigran, then record in an ADR.
-2. **Collector restart.** Its sequence starts again at `1`. If it has already emitted more events than Nest's `after`, Nest cannot notice and mixes two streams. A `streamId` (random at each collector start, returned in the snapshot and the events, sent back by Nest) would fix it. Worth it only if restarts are expected to be common.
-3. **Authentication between services.** None in v0: internal network only. Does that hold?
-4. **Scaled services and one-off containers.** The `container-number` and `oneoff` labels are not exposed. Do they need to be?
-5. **Stale data after ignored events.** `docker rename` and a standalone `docker network connect` / `disconnect` leave Nest with old data until the next container event, because network events only carry `containerId`.
-6. **`network.disconnected`** fires on every stop or crash while the inspect still lists the network. Proposal: graph edges follow `container.networks`, not these events (topology mapping).
-7. **Forwarded as is:** bind mount sources (host paths) and non-Compose labels. Redact them?
+1. **Authentication between services.** None in v0: internal network only. Revisit if the deployment model changes.
+2. **Scaled services and one-off containers.** The `container-number` and `oneoff` labels are not exposed yet. Do they need to be?
+3. **Stale data after ignored events.** `docker rename` and a standalone `docker network connect` / `disconnect` can leave some container metadata stale until the next container event or a full resynchronization, because network events only carry `containerId`.
+4. **Topology semantics for network connect/disconnect.** `network.disconnected` fires on every stop or crash while container inspection may still list the network. Final graph-edge behavior belongs to the Nest topology module.
