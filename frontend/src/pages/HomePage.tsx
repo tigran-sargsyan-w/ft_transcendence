@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router'
 import { getBackendHealth } from '../services/health'
 
 type BackendStatus = 'loading' | 'healthy' | 'unavailable'
@@ -26,6 +27,10 @@ export function HomePage() {
       <p>Frontend is running.</p>
 
       <p>Backend status: {backendStatus}</p>
+
+      <p>
+        <Link to="/register">Create account</Link>
+      </p>
     </main>
   )
 }
