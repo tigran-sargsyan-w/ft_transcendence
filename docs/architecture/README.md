@@ -25,10 +25,10 @@ Documents here should stay short and stable. Concrete stack and product decision
 - backend framework — NestJS (TypeScript) as the main app API, with a **small set of services** (e.g. Docker collector, Python Graph Engine) rather than one single process for everything
 - database/ORM — PostgreSQL + Prisma
 - Graph Engine (product-specific) — Python FastAPI + NetworkX, plain HTTP/JSON — [ADR 0001](../adr/0001-python-graph-engine.md), [graph contract](./graph-contract.md)
+- authentication — server-side sessions with an opaque cookie — [ADR 0002](../adr/0002-server-side-sessions.md)
 
 **Still open:**
 
-- concrete authentication/session mechanism
 - concrete WebSocket library
 - product-specific modules and events (beyond the graph contract v0)
 

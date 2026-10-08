@@ -1,4 +1,5 @@
-import { type INestApplication, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
@@ -7,14 +8,16 @@ import { AuthService } from '../src/modules/auth/auth.service.js';
 import { PrismaService } from '../src/shared/prisma/prisma.service.js';
 
 describe('API response format (e2e)', () => {
-  let app: INestApplication;
+  let app: NestExpressApplication;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication<NestExpressApplication>({
+      bodyParser: false,
+    });
     configureApp(app);
 
     await app.init();
