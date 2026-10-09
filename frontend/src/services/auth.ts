@@ -13,6 +13,7 @@ export interface RegisteredUser {
 export type RegisterErrorCode =
   | 'EMAIL_ALREADY_EXISTS'
   | 'VALIDATION_ERROR'
+  | 'NETWORK_ERROR'
   | 'UNKNOWN'
 
 export class RegisterError extends Error {
@@ -30,13 +31,23 @@ export class RegisterError extends Error {
 export async function registerUser(
   input: RegisterInput,
 ): Promise<RegisteredUser> {
-  const response = await fetch('/api/v1/auth/register', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(input),
-  })
+  let response: Response
+
+  try {
+    response = await fetch('/api/v1/auth/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+    })
+  } catch {
+    throw new RegisterError(
+      'NETWORK_ERROR',
+      'Cannot reach the backend. Is it running on port 3000?',
+      0,
+    )
+  }
 
   if (response.ok) {
     return response.json() as Promise<RegisteredUser>
