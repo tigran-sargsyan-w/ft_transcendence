@@ -1,6 +1,6 @@
 
 param(
-    [ValidateSet("check", "plan", "setup", "cleanup", "_apply")]
+    [ValidateSet("check", "plan", "setup", "cleanup", "_apply", "_remove")]
     [string]$Action = "check",
 
     [string]$Domain = "transcendence.test",
@@ -9,6 +9,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+. "$PSScriptRoot/windows_hosts_core.ps1"
 
 $Domain = $Domain.Trim().ToLowerInvariant()
 $ExpectedIP = "127.0.0.1"
@@ -189,10 +191,33 @@ function Get-ManagedMappings {
     }
 }
 
+function Remove-WindowsManagedMapping {
+    if (-not (Test-Administrator)) {
+        throw "Administrator privileges are required"
+    }
+
+    $Result = Remove-ManagedMappingFile `
+        -Path $HostsFile `
+        -Domain $Domain
+
+    if (-not $Result.Changed) {
+        Write-Host "[OK] No managed Windows mapping to remove"
+        return 0
+    }
+
+    Write-Host "[OK] Removed $($Result.Removed) managed mapping(s)"
+    Write-Host "[BACKUP] $($Result.Backup)"
+
+    return 0
+}
 
 try {
     if ($Action -eq "_apply") {
         exit (Add-ManagedMapping)
+    }
+    
+    if ($Action -eq "_remove") {
+        exit (Remove-WindowsManagedMapping)
     }
     
     if ($Action -eq "cleanup") {
@@ -207,15 +232,38 @@ try {
             exit 0
         }
 
-        Write-Host "[PLAN] The following entries would be removed:"
+        Write-Host "[PLAN] The following entries will be removed:"
 
         foreach ($Entry in $Managed) {
             Write-Host "  $Entry"
         }
 
-        Write-Host "[INFO] Preview only. No changes made."
-        exit 1
+        if (-not $Apply) {
+            Write-Host "[INFO] Preview only. Use -Apply to confirm."
+            exit 1
+        }
+
+        if (Test-Administrator) {
+            exit (Remove-WindowsManagedMapping)
+        }
+
+        Write-Host "[UAC] Requesting administrator permission..."
+
+        $Arguments = (
+            '-NoProfile -NonInteractive -ExecutionPolicy Bypass ' +
+            '-File "{0}" -Action _remove -Domain {1}'
+        ) -f $PSCommandPath, $Domain
+
+        $Process = Start-Process `
+            -FilePath (Join-Path $PSHOME "powershell.exe") `
+            -ArgumentList $Arguments `
+            -Verb RunAs `
+            -Wait `
+            -PassThru
+
+        exit $Process.ExitCode
     }
+
 
     $Addresses = @(Get-CurrentAddresses)
 
