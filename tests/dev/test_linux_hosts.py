@@ -84,6 +84,18 @@ class LinuxHostsTests(unittest.TestCase):
                     "transcendence.test"
                 )
 
+                backups = list(
+                    Path(directory).glob(
+                        ".hosts.ft-transcendence-*.bak"
+                    )
+                )
+
+                self.assertEqual(len(backups), 1)
+                self.assertEqual(
+                    backups[0].read_text(),
+                    original,
+                )
+
             self.assertEqual(result, 0)
             self.assertEqual(
                 hosts.read_text(),

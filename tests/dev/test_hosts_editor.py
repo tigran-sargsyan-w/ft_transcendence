@@ -69,6 +69,40 @@ class HostsEditorTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(restored, original)
 
+
+    def test_cleanup_preserves_windows_crlf(self):
+        original = (
+            "127.0.0.1 localhost\r\n"
+            "127.0.0.1 transcendence.test "
+            "# ft_transcendence:managed\r\n"
+            "192.168.1.10 other-project.test\r\n"
+        )
+
+        result, changed = remove_managed_mapping(
+            original, "transcendence.test"
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(
+            result,
+            "127.0.0.1 localhost\r\n"
+            "192.168.1.10 other-project.test\r\n",
+        )
+
+    def test_cleanup_preserves_shared_aliases(self):
+        original = (
+            "127.0.0.1 transcendence.test other.test "
+            "# ft_transcendence:managed\n"
+        )
+
+        result, changed = remove_managed_mapping(
+            original, "transcendence.test"
+        )
+
+        self.assertFalse(changed)
+        self.assertEqual(result, original)
+
+
     def test_ignores_commented_entries(self):
         content = "# 192.168.1.10 transcendence.test\n"
 

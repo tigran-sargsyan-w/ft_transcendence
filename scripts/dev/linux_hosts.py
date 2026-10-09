@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from scripts.dev.hosts_editor import (
@@ -135,6 +136,31 @@ def setup(domain: str) -> int:
     ).returncode
 
 
+def create_hosts_backup(content: str) -> Path:
+    fd, filename = tempfile.mkstemp(
+        prefix=f".{HOSTS_FILE.name}.ft-transcendence-",
+        suffix=".bak",
+        dir=HOSTS_FILE.parent,
+    )
+
+    backup_path = Path(filename)
+
+    try:
+        with os.fdopen(
+            fd, "w", encoding="utf-8", newline=""
+        ) as backup:
+            backup.write(content)
+            backup.flush()
+            os.fsync(backup.fileno())
+
+    except BaseException:
+        backup_path.unlink(missing_ok=True)
+        raise
+
+    return backup_path
+
+
+
 
 def remove_mapping(domain: str) -> int:
     if os.geteuid() != 0:
@@ -158,11 +184,24 @@ def remove_mapping(domain: str) -> int:
                 print("[OK] No managed entry to remove")
                 return 0
 
-            file.seek(0)
-            file.write(updated)
-            file.truncate()
-            file.flush()
-            os.fsync(file.fileno())
+            # Back up the original contents before writing.
+            backup = create_hosts_backup(current)
+            print(f"[BACKUP] Saved: {backup}")
+
+            try:
+                file.seek(0)
+                file.write(updated)
+                file.truncate()
+                file.flush()
+                os.fsync(file.fileno())
+
+            except OSError:
+                print(
+                    f"[ERROR] Hosts update failed. "
+                    f"Original contents saved at: {backup}",
+                    file=sys.stderr,
+                )
+                raise
 
         finally:
             fcntl.flock(file.fileno(), fcntl.LOCK_UN)
