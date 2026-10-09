@@ -1,0 +1,34 @@
+import type { TopologySnapshot } from './types'
+
+/** Local fixture aligned with services/graph-engine/fixtures/sample_topology.json */
+export const sampleTopology = {
+  schemaVersion: 1,
+  environmentId: 'env_local_compose',
+  capturedAt: '2026-09-14T10:00:00Z',
+  nodes: [
+    { id: 'svc_api', kind: 'service', label: 'api', status: 'down' },
+    { id: 'svc_worker', kind: 'service', label: 'worker', status: 'healthy' },
+    { id: 'svc_db', kind: 'service', label: 'db', status: 'healthy' },
+    { id: 'svc_cache', kind: 'service', label: 'cache', status: 'healthy' },
+  ],
+  edges: [
+    {
+      id: 'edge_api_db',
+      source: 'svc_api',
+      target: 'svc_db',
+      kind: 'depends_on',
+    },
+    {
+      id: 'edge_api_cache',
+      source: 'svc_api',
+      target: 'svc_cache',
+      kind: 'depends_on',
+    },
+    {
+      id: 'edge_worker_api',
+      source: 'svc_worker',
+      target: 'svc_api',
+      kind: 'depends_on',
+    },
+  ],
+} satisfies TopologySnapshot
