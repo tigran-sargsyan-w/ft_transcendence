@@ -1,6 +1,6 @@
 
 param(
-    [ValidateSet("check", "plan", "setup", "_apply")]
+    [ValidateSet("check", "plan", "setup", "cleanup", "_apply")]
     [string]$Action = "check",
 
     [string]$Domain = "transcendence.test",
@@ -156,10 +156,65 @@ function Add-ManagedMapping {
     return 0
 }
 
+function Get-ManagedMappings {
+    param(
+        [string]$Path,
+        [string]$Name
+    )
+
+    foreach ($Line in [IO.File]::ReadAllLines($Path)) {
+        $Parts = $Line -split '#', 2
+
+        if ($Parts.Count -ne 2) {
+            continue
+        }
+
+        if ($Parts[1].Trim() -ne "ft_transcendence:managed") {
+            continue
+        }
+
+        $Fields = $Parts[0].Trim() -split '\s+'
+
+        # Never remove a line containing other aliases.
+        if ($Fields.Count -ne 2) {
+            continue
+        }
+
+        if (
+            $Fields[0] -eq $ExpectedIP -and
+            $Fields[1].ToLowerInvariant() -eq $Name
+        ) {
+            $Line
+        }
+    }
+}
+
 
 try {
     if ($Action -eq "_apply") {
         exit (Add-ManagedMapping)
+    }
+    
+    if ($Action -eq "cleanup") {
+        $Managed = @(
+            Get-ManagedMappings `
+                -Path $HostsFile `
+                -Name $Domain
+        )
+
+        if ($Managed.Count -eq 0) {
+            Write-Host "[OK] No managed Windows mapping to remove"
+            exit 0
+        }
+
+        Write-Host "[PLAN] The following entries would be removed:"
+
+        foreach ($Entry in $Managed) {
+            Write-Host "  $Entry"
+        }
+
+        Write-Host "[INFO] Preview only. No changes made."
+        exit 1
     }
 
     $Addresses = @(Get-CurrentAddresses)
