@@ -1,13 +1,17 @@
 
+import argparse
 import os
 import platform
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 
-DOMAIN = os.environ.get("DEV_DOMAIN", "transcendence.test").strip().lower()
-EXPECTED_IP = "127.0.0.1"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+DEFAULT_DOMAIN = "transcendence.test"
 
 
 def is_wsl() -> bool:
@@ -17,97 +21,161 @@ def is_wsl() -> bool:
     )
 
 
-def read_hosts() -> dict[str, str]:
-    system = platform.system()
+def validate_domain(value: str) -> str:
+    domain = value.strip().lower()
 
-    if system == "Windows":
-        root = Path(os.environ["SystemRoot"])
-        path = root / "System32" / "drivers" / "etc" / "hosts"
-        return {
-            "Windows": path.read_text(encoding="utf-8", errors="replace")
-        }
+    if domain == "localhost":
+        return domain
 
-    if system not in ("Linux", "Darwin"):
-        raise RuntimeError(f"Unsupported operating system: {system}")
+    labels = domain.split(".")
 
-    hosts = {
-        "WSL" if is_wsl() else system:
-            Path("/etc/hosts").read_text(encoding="utf-8")
-    }
+    if (
+        len(domain) > 253
+        or len(labels) < 2
+        or labels[-1] != "test"
+        or not all(
+            re.fullmatch(
+                r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?",
+                label,
+            )
+            for label in labels
+        )
+    ):
+        raise ValueError("Invalid local .test domain")
+
+    return domain
+
+
+def run_linux(action: str, domain: str) -> int:
+    print("[DOMAIN] Linux hosts", flush=True)
+
+    command = [
+        sys.executable,
+        "-m",
+        "scripts.dev.linux_hosts",
+        action,
+        "--domain",
+        domain,
+    ]
+
+    return subprocess.run(
+        command,
+        cwd=PROJECT_ROOT,
+        check=False,
+    ).returncode
+
+
+def run_windows(action: str, domain: str) -> int:
+    print("[DOMAIN] Windows hosts", flush=True)
+
+    script = SCRIPT_DIR / "windows_hosts.ps1"
 
     if is_wsl():
-        command = (
-            "$p = Join-Path $env:SystemRoot "
-            "'System32\\drivers\\etc\\hosts'; "
-            "Get-Content -LiteralPath $p -Raw"
-        )
-
         result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive",
-             "-Command", command],
+            ["wslpath", "-w", str(script)],
             capture_output=True,
             text=True,
             check=True,
         )
-        hosts["Windows"] = result.stdout
+        script_path = result.stdout.strip()
+    else:
+        script_path = str(script)
 
-    return hosts
+    command = [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        script_path,
+        "-Action",
+        action,
+        "-Domain",
+        domain,
+    ]
+
+    if action == "setup":
+        command.append("-Apply")
+
+    return subprocess.run(
+        command,
+        check=False,
+    ).returncode
 
 
-def find_mappings(content: str, domain: str) -> list[str]:
-    addresses = []
+def manage(action: str, domain: str) -> int:
+    domain = validate_domain(domain)
 
-    for line in content.splitlines():
-        fields = line.split("#", 1)[0].split()
-
-        if len(fields) < 2:
-            continue
-
-        if domain in (name.lower() for name in fields[1:]):
-            addresses.append(fields[0])
-
-    return addresses
-
-
-def check() -> int:
-    if DOMAIN == "localhost":
-        print("[OK] localhost requires no custom hosts mapping")
+    if domain == "localhost":
+        print("[OK] localhost requires no hosts modification")
         return 0
 
-    if not DOMAIN.endswith(".test") or any(
-        char not in "abcdefghijklmnopqrstuvwxyz0123456789.-"
-        for char in DOMAIN
-    ):
-        print("[ERROR] DEV_DOMAIN must be localhost or a .test domain")
-        return 2
+    system = platform.system()
 
-    print(f"[DOMAIN] Checking {DOMAIN}")
-    print(f"[SYSTEM] {platform.system()}")
+    print(f"[SYSTEM] {system}")
     print(f"[WSL] {'yes' if is_wsl() else 'no'}")
+    print(f"[DOMAIN] {domain}", flush=True)
 
-    missing = False
-    conflict = False
+    if system == "Linux":
+        adapters = [run_linux]
 
-    for system, content in read_hosts().items():
-        addresses = find_mappings(content, DOMAIN)
+        if is_wsl():
+            adapters.append(run_windows)
 
-        if not addresses:
-            print(f"[MISSING] {system}: no mapping")
-            missing = True
-        elif addresses == [EXPECTED_IP]:
-            print(f"[OK] {system}: {DOMAIN} -> {EXPECTED_IP}")
-        else:
-            print(f"[CONFLICT] {system}: {addresses}")
-            conflict = True
+    elif system == "Windows":
+        adapters = [run_windows]
 
-    if conflict:
+    else:
+        print(f"[ERROR] Unsupported OS adapter: {system}")
         return 2
-    return 1 if missing else 0
+
+    results = []
+
+    for adapter in adapters:
+        result = adapter(action, domain)
+        results.append(result)
+
+        # During setup, do not continue changing other
+        # hosts files if an earlier operation failed.
+        if action == "setup" and result != 0:
+            return result
+
+    if 2 in results:
+        return 2
+
+    if 1 in results:
+        return 1
+
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Manage local development domain"
+    )
+
+    parser.add_argument(
+        "action",
+        choices=["check", "setup"],
+    )
+
+    parser.add_argument(
+        "--domain",
+        default=os.environ.get(
+            "DEV_DOMAIN",
+            DEFAULT_DOMAIN,
+        ),
+    )
+
+    args = parser.parse_args()
+
+    try:
+        return manage(args.action, args.domain)
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        print(f"[ERROR] {error}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(check())
-    except (OSError, subprocess.CalledProcessError) as error:
-        print(f"[ERROR] {error}", file=sys.stderr)
-        sys.exit(2)
+    sys.exit(main())
