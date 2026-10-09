@@ -35,11 +35,6 @@ services:
       - "3000:3000"
     volumes:
       - ./backend/prisma:/app/prisma
-    develop:
-      watch:
-        - action: sync+restart
-          path: ./backend/src
-          target: /app/src
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,11 +46,6 @@ services:
       BACKEND_URL: http://backend:3000
     ports:
       - "5173:5173"
-    develop:
-      watch:
-        - action: sync
-          path: ./frontend/src
-          target: /app/src
     depends_on:
       - backend
 
@@ -66,6 +56,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
 
