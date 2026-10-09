@@ -79,6 +79,74 @@ try {
         "Cleanup idempotency"
 
     
+    # 6. Test actual file modification on a temporary file.
+    $TempDirectory = Join-Path (
+        [IO.Path]::GetTempPath()
+    ) (
+        "ft-transcendence-" +
+        [guid]::NewGuid().ToString("N")
+    )
+
+    [void][IO.Directory]::CreateDirectory($TempDirectory)
+
+    try {
+        $TempHosts = Join-Path $TempDirectory "hosts"
+
+        $Original = (
+            "127.0.0.1 localhost`r`n" +
+            "127.0.0.1 transcendence.test " +
+            "# ft_transcendence:managed`r`n" +
+            "192.168.1.10 other-project.test`r`n"
+        )
+
+        [IO.File]::WriteAllText(
+            $TempHosts,
+            $Original,
+            [Text.Encoding]::UTF8
+        )
+
+        $Result = Remove-ManagedMappingFile `
+            -Path $TempHosts `
+            -Domain $Domain
+
+        $Expected = (
+            "127.0.0.1 localhost`r`n" +
+            "192.168.1.10 other-project.test`r`n"
+        )
+
+        Assert-Equal $Result.Changed $true `
+            "File modification detected"
+
+        Assert-Equal (
+            [IO.File]::ReadAllText($TempHosts)
+        ) $Expected "File contents updated"
+
+        Assert-Equal (
+            [IO.File]::Exists($Result.Backup)
+        ) $true "Backup created"
+
+        Assert-Equal (
+            [IO.File]::ReadAllText($Result.Backup)
+        ) $Original "Backup preserves original"
+
+        # 7. Repeating cleanup must not create a new backup.
+        $Second = Remove-ManagedMappingFile `
+            -Path $TempHosts `
+            -Domain $Domain
+
+        Assert-Equal $Second.Changed $false `
+            "File cleanup idempotency"
+
+        Assert-Equal $Second.Backup $null `
+            "No backup for unchanged file"
+    }
+    finally {
+        [IO.Directory]::Delete(
+            $TempDirectory,
+            $true
+        )
+    }
+
 
     Write-Host ""
     Write-Host "All $Passed Windows cleanup tests passed."
