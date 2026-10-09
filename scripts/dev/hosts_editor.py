@@ -52,20 +52,45 @@ def ensure_mapping(
     return content + separator + entry, True
 
 
+
 def remove_managed_mapping(
     content: str,
     domain: str,
     ip: str = DEFAULT_IP,
 ) -> tuple[str, bool]:
-    expected = f"{ip}\t{domain}\t{MARKER}"
+
+    def is_managed_entry(line: str) -> bool:
+        text = line.rstrip("\r\n")
+
+        entry, separator, comment = text.partition("#")
+
+        # Only remove entries carrying our exact marker.
+        if not separator:
+            return False
+
+        if comment.strip() != MARKER[1:].strip():
+            return False
+
+        # Accept tabs or spaces between fields.
+        fields = entry.split()
+
+        # Do not remove lines containing other aliases.
+        if len(fields) != 2:
+            return False
+
+        return (
+            fields[0] == ip
+            and fields[1].lower() == domain.lower()
+        )
 
     lines = content.splitlines(keepends=True)
 
     remaining = [
         line for line in lines
-        if line.rstrip("\r\n") != expected
+        if not is_managed_entry(line)
     ]
 
     changed = len(remaining) != len(lines)
 
     return "".join(remaining), changed
+

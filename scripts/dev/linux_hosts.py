@@ -13,6 +13,7 @@ from pathlib import Path
 from scripts.dev.hosts_editor import (
     HostsConflictError,
     ensure_mapping,
+    remove_managed_mapping,
 )
 
 HOSTS_FILE = Path("/etc/hosts")
@@ -134,6 +135,86 @@ def setup(domain: str) -> int:
     ).returncode
 
 
+
+def remove_mapping(domain: str) -> int:
+    if os.geteuid() != 0:
+        print("[ERROR] Root privileges required")
+        return 2
+
+    with HOSTS_FILE.open(
+        "r+", encoding="utf-8", newline=""
+    ) as file:
+        fcntl.flock(file.fileno(), fcntl.LOCK_EX)
+
+        try:
+            file.seek(0)
+            current = file.read()
+
+            updated, changed = remove_managed_mapping(
+                current, domain
+            )
+
+            if not changed:
+                print("[OK] No managed entry to remove")
+                return 0
+
+            file.seek(0)
+            file.write(updated)
+            file.truncate()
+            file.flush()
+            os.fsync(file.fileno())
+
+        finally:
+            fcntl.flock(file.fileno(), fcntl.LOCK_UN)
+
+    print(f"[OK] Removed managed mapping for {domain}")
+    return 0
+
+
+def cleanup(domain: str) -> int:
+    current = read_hosts()
+
+    _, changed = remove_managed_mapping(
+        current, domain
+    )
+
+    if not changed:
+        print("[OK] No managed entry to remove")
+        return 0
+
+    print("[DOMAIN] The following managed entry will be removed:")
+    print(
+        f"127.0.0.1\t{domain}\t"
+        "# ft_transcendence:managed"
+    )
+
+    answer = input("Remove this entry? [y/N]: ")
+
+    if answer.strip().lower() not in ("y", "yes"):
+        print("[SKIP] No changes made")
+        return 1
+
+    if os.geteuid() == 0:
+        return remove_mapping(domain)
+
+    if shutil.which("sudo") is None:
+        print("[ERROR] sudo is unavailable")
+        return 2
+
+    return subprocess.run(
+        [
+            "sudo",
+            sys.executable,
+            "-m",
+            "scripts.dev.linux_hosts",
+            "_remove",
+            "--domain",
+            domain,
+        ],
+        check=False,
+    ).returncode
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Manage the Linux development domain"
@@ -141,7 +222,13 @@ def main() -> int:
 
     parser.add_argument(
         "command",
-        choices=["check", "setup", "_apply"],
+        choices=[
+            "check",
+            "setup",
+            "cleanup",
+            "_apply",
+            "_remove",
+        ],
     )
     parser.add_argument(
         "--domain",
@@ -163,7 +250,13 @@ def main() -> int:
         if args.command == "setup":
             return setup(domain)
 
-        return apply_mapping(domain)
+        if args.command == "cleanup":
+            return cleanup(domain)
+
+        if args.command == "_apply":
+            return apply_mapping(domain)
+
+        return remove_mapping(domain)
 
     except (
         OSError,
