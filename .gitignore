@@ -6,3 +6,12 @@ coverage/
 *.log
 *.tsbuildinfo
 backend/src/generated/prisma/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Local development TLS certificates
+infra/nginx/certs/
