@@ -446,6 +446,87 @@ def uninstall_plan() -> int:
     return 0
 
 
+def uninstall_linux() -> int:
+    """Remove mkcert CA trust from Linux without deleting CA files."""
+
+    if platform.system() != "Linux":
+        print("[ERROR] Linux trust uninstall requires Linux")
+        return 2
+
+    ca_root = certificates.get_ca_root()
+
+    if ca_root is None:
+        return 2
+
+    ca_file = ca_root / "rootCA.pem"
+    ca_key = ca_root / "rootCA-key.pem"
+
+    if not ca_file.is_file():
+        print("[ERROR] Root CA certificate not found")
+        return 2
+
+    thumbprint = get_thumbprint(ca_file)
+
+    if thumbprint is None:
+        print("[ERROR] Cannot identify Root CA")
+        return 2
+
+    if not check_linux(ca_file):
+        print("[OK] Linux OpenSSL CA trust already absent")
+        return 0
+
+    print("[PLAN] Remove local mkcert CA trust from Linux")
+    print(f"[CA] {ca_file}")
+    print(f"[THUMBPRINT] {thumbprint}")
+
+    print("[PRESERVED] Root CA certificate and private key")
+    print("[PRESERVED] Project TLS certificates")
+    print("[PRESERVED] Windows CA trust")
+
+    print(
+        "[WARNING] mkcert -uninstall may also remove "
+        "CA trust from Linux browser/NSS stores"
+    )
+
+    try:
+        answer = input(
+            "Remove this CA trust from Linux? [y/N]: "
+        ).strip().lower()
+    except EOFError:
+        print("[CANCELLED] Interactive confirmation required")
+        return 1
+
+    if answer != "y":
+        print("[CANCELLED] Linux CA trust uninstall declined")
+        return 1
+
+    try:
+        result = subprocess.run(
+            ["mkcert", "-uninstall"],
+            check=False,
+        )
+    except OSError as error:
+        print(f"[ERROR] Cannot execute mkcert: {error}")
+        return 2
+
+    if result.returncode != 0:
+        print("[ERROR] mkcert -uninstall failed")
+        return 2
+
+    if check_linux(ca_file):
+        print("[ERROR] CA remains trusted in Linux OpenSSL")
+        return 2
+
+    if not ca_file.is_file() or not ca_key.is_file():
+        print("[ERROR] CA files unexpectedly missing")
+        return 2
+
+    print("[OK] Linux OpenSSL CA trust removed")
+    print("[OK] Root CA files preserved")
+
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Manage local CA trust"
@@ -459,6 +540,7 @@ def main() -> int:
             "setup",
             "setup-linux",
             "uninstall-plan",
+            "uninstall-linux",
         ],
     )
 
@@ -472,6 +554,9 @@ def main() -> int:
 
     if args.action == "uninstall-plan":
         return uninstall_plan()
+
+    if args.action == "uninstall-linux":
+        return uninstall_linux()
 
     return inspect(args.action)
 
