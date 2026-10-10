@@ -4,6 +4,8 @@
 import io
 import tempfile
 import unittest
+import shutil
+import subprocess
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
@@ -110,6 +112,100 @@ class CertificateDiagnosticsTests(unittest.TestCase):
 
         # Real OpenSSL validation must reject these files.
         self.assertEqual(self.run_check(), 1)
+
+
+@unittest.skipUnless(
+    shutil.which("openssl"),
+    "OpenSSL is required",
+)
+class CertificateCryptographyTests(unittest.TestCase):
+
+    def test_valid_certificate_is_accepted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ca_root = root / "ca"
+            ca_root.mkdir()
+
+            cert_file = root / "cert.pem"
+            key_file = root / "key.pem"
+            csr_file = root / "request.csr"
+            extensions_file = root / "extensions.cnf"
+
+            def openssl(*args):
+                subprocess.run(
+                    ["openssl", *map(str, args)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+
+            # 1. Create an isolated, temporary CA.
+            openssl(
+                "req", "-x509",
+                "-newkey", "rsa:2048",
+                "-nodes",
+                "-days", "365",
+                "-keyout", ca_root / "rootCA-key.pem",
+                "-out", ca_root / "rootCA.pem",
+                "-subj", "/CN=ft-transcendence-test-CA",
+                "-addext",
+                "basicConstraints=critical,CA:TRUE",
+                "-addext",
+                "keyUsage=critical,keyCertSign,cRLSign",
+            )
+
+            # 2. Generate TLS private key and CSR.
+            openssl(
+                "req", "-new",
+                "-newkey", "rsa:2048",
+                "-nodes",
+                "-keyout", key_file,
+                "-out", csr_file,
+                "-subj", "/CN=transcendence.test",
+            )
+
+            # 3. Configure TLS extensions.
+            extensions_file.write_text(
+                "basicConstraints=CA:FALSE\n"
+                "keyUsage=digitalSignature,keyEncipherment\n"
+                "extendedKeyUsage=serverAuth\n"
+                "subjectAltName="
+                "DNS:transcendence.test,"
+                "DNS:localhost,"
+                "IP:127.0.0.1\n",
+                encoding="utf-8",
+            )
+
+            # 4. Sign the TLS certificate.
+            openssl(
+                "x509", "-req",
+                "-in", csr_file,
+                "-CA", ca_root / "rootCA.pem",
+                "-CAkey", ca_root / "rootCA-key.pem",
+                "-CAcreateserial",
+                "-out", cert_file,
+                "-days", "90",
+                "-sha256",
+                "-extfile", extensions_file,
+            )
+
+            # 5. Validate using our real application code.
+            with (
+                patch.object(
+                    certificates, "CERT_FILE", cert_file
+                ),
+                patch.object(
+                    certificates, "KEY_FILE", key_file
+                ),
+            ):
+                valid, message = (
+                    certificates.validate_certificate(
+                        ca_root,
+                        "transcendence.test",
+                    )
+                )
+
+            self.assertTrue(valid, message)
 
 
 if __name__ == "__main__":
