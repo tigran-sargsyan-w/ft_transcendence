@@ -50,11 +50,12 @@ def run_linux(action: str, domain: str) -> int:
     print("[DOMAIN] Linux hosts", flush=True)
 
     # Unified cleanup is preview-only for now.
-    linux_action = (
-        "cleanup-plan"
-        if action == "cleanup"
-        else action
-    )
+    if action == "cleanup":
+        linux_action = "cleanup-plan"
+    elif action == "cleanup-apply":
+        linux_action = "cleanup"
+    else:
+        linux_action = action
 
     command = [
         sys.executable,
@@ -74,6 +75,12 @@ def run_linux(action: str, domain: str) -> int:
 
 def run_windows(action: str, domain: str) -> int:
     print("[DOMAIN] Windows hosts", flush=True)
+
+    windows_action = (
+        "cleanup"
+        if action == "cleanup-apply"
+        else action
+    )
 
     script = SCRIPT_DIR / "windows_hosts.ps1"
 
@@ -97,12 +104,12 @@ def run_windows(action: str, domain: str) -> int:
         "-File",
         script_path,
         "-Action",
-        action,
+        windows_action,
         "-Domain",
         domain,
     ]
 
-    if action == "setup":
+    if action in ("setup", "cleanup-apply"):
         command.append("-Apply")
 
     return subprocess.run(
@@ -139,13 +146,15 @@ def manage(action: str, domain: str) -> int:
 
     results = []
 
+
+    results = []
+
     for adapter in adapters:
         result = adapter(action, domain)
         results.append(result)
 
-        # During setup, do not continue changing other
-        # hosts files if an earlier operation failed.
-        if action == "setup" and result != 0:
+        # Stop immediately if a modifying operation fails.
+        if action in ("setup", "cleanup-apply") and result != 0:
             return result
 
     if 2 in results:
@@ -175,10 +184,25 @@ def main() -> int:
         ),
     )
 
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Actually remove managed hosts entries during cleanup",
+    )
+
     args = parser.parse_args()
 
+    if args.apply and args.action != "cleanup":
+        parser.error("--apply is supported only with cleanup")
+
+    effective_action = (
+        "cleanup-apply"
+        if args.action == "cleanup" and args.apply
+        else args.action
+    )
+
     try:
-        return manage(args.action, args.domain)
+        return manage(effective_action, args.domain)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"[ERROR] {error}", file=sys.stderr)
         return 2
