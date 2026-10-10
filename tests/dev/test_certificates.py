@@ -69,7 +69,16 @@ class CertificateDiagnosticsTests(unittest.TestCase):
         ]:
             self.create_file(path)
 
-        self.assertEqual(self.run_check(), 0)
+        # This test checks file presence, not cryptography.
+        with patch.object(
+            certificates,
+            "validate_certificate",
+            return_value=(
+                True,
+                "Certificate cryptographically valid",
+            ),
+        ):
+            self.assertEqual(self.run_check(), 0)
 
     def test_missing_private_key(self):
         for path in [
@@ -88,6 +97,19 @@ class CertificateDiagnosticsTests(unittest.TestCase):
             return_value=None,
         ):
             self.assertEqual(self.run_check(), 2)
+
+    def test_invalid_certificate_is_rejected(self):
+        # All files exist, but contain invalid PEM data.
+        for path in [
+            self.ca_root / "rootCA.pem",
+            self.ca_root / "rootCA-key.pem",
+            self.cert_file,
+            self.key_file,
+        ]:
+            self.create_file(path)
+
+        # Real OpenSSL validation must reject these files.
+        self.assertEqual(self.run_check(), 1)
 
 
 if __name__ == "__main__":
