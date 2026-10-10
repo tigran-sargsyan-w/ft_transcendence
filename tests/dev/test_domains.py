@@ -100,6 +100,62 @@ class DomainManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             domains.manage("setup", "invalid..test")
 
+    def test_wsl_cleanup_previews_both_adapters(self):
+        with (
+            patch.object(
+                domains.platform, "system",
+                return_value="Linux",
+            ),
+            patch.object(domains, "is_wsl", return_value=True),
+            patch.object(
+                domains, "run_linux", return_value=1
+            ) as linux,
+            patch.object(
+                domains, "run_windows", return_value=1
+            ) as windows,
+        ):
+            result = domains.manage("cleanup", DOMAIN)
+
+            self.assertEqual(result, 1)
+            linux.assert_called_once_with("cleanup", DOMAIN)
+            windows.assert_called_once_with("cleanup", DOMAIN)
+
+    def test_native_linux_cleanup(self):
+        with (
+            patch.object(
+                domains.platform, "system",
+                return_value="Linux",
+            ),
+            patch.object(domains, "is_wsl", return_value=False),
+            patch.object(
+                domains, "run_linux", return_value=1
+            ) as linux,
+            patch.object(domains, "run_windows") as windows,
+        ):
+            result = domains.manage("cleanup", DOMAIN)
+
+            self.assertEqual(result, 1)
+            linux.assert_called_once_with("cleanup", DOMAIN)
+            windows.assert_not_called()
+
+    def test_cleanup_error_takes_priority(self):
+        with (
+            patch.object(
+                domains.platform, "system",
+                return_value="Linux",
+            ),
+            patch.object(domains, "is_wsl", return_value=True),
+            patch.object(domains, "run_linux", return_value=2),
+            patch.object(
+                domains, "run_windows", return_value=1
+            ) as windows,
+        ):
+            result = domains.manage("cleanup", DOMAIN)
+
+            self.assertEqual(result, 2)
+            windows.assert_called_once()
+
+
 
 if __name__ == "__main__":
     unittest.main()
