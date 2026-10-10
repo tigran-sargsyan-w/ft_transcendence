@@ -527,6 +527,204 @@ def uninstall_linux() -> int:
     return 0
 
 
+def uninstall_windows(ca_file: Path, thumbprint: str) -> int:
+    """Remove matching CA from Windows CurrentUser Root."""
+
+    script_path = Path(__file__).with_name(
+        "windows_ca_trust.ps1"
+    )
+
+    if not script_path.is_file():
+        print("[ERROR] Windows trust adapter not found")
+        return 2
+
+    system = platform.system()
+
+    if system == "Linux":
+        if not domains.is_wsl():
+            print("[ERROR] Windows adapter requires WSL")
+            return 2
+
+        try:
+            ca_result = run("wslpath", "-w", str(ca_file))
+            script_result = run("wslpath", "-w", str(script_path))
+        except OSError as error:
+            print(f"[ERROR] WSL path conversion: {error}")
+            return 2
+
+        if (
+            ca_result.returncode != 0
+            or script_result.returncode != 0
+        ):
+            print("[ERROR] Cannot convert WSL paths")
+            return 2
+
+        windows_ca = ca_result.stdout.strip()
+        windows_script = script_result.stdout.strip()
+
+    elif system == "Windows":
+        windows_ca = str(ca_file)
+        windows_script = str(script_path)
+
+    else:
+        print("[ERROR] Unsupported Windows adapter platform")
+        return 2
+
+    command = [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy", "Bypass",
+        "-File", windows_script,
+        "-Action", "uninstall",
+        "-CaPath", windows_ca,
+        "-ExpectedThumbprint", thumbprint,
+    ]
+
+    # Preview and inspect CurrentUser Root specifically.
+    try:
+        preview = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as error:
+        print(f"[ERROR] Windows trust check: {error}")
+        return 2
+
+    print(preview.stdout, end="")
+
+    if (
+        preview.returncode == 0
+        and "[OK] CA is not in CurrentUser Root"
+        in preview.stdout
+    ):
+        return 0
+
+    if (
+        preview.returncode != 1
+        or "[PLAN] Remove matching CA from CurrentUser Root"
+        not in preview.stdout
+    ):
+        print("[ERROR] Windows uninstall preview failed")
+        print(preview.stderr.strip())
+        return 2
+
+    try:
+        answer = input(
+            "Remove this CA trust from Windows? [y/N]: "
+        ).strip().lower()
+    except EOFError:
+        print("[CANCELLED] Interactive confirmation required")
+        return 1
+
+    if answer != "y":
+        print("[CANCELLED] Windows CA trust uninstall declined")
+        return 1
+
+    # Apply the change only after explicit confirmation.
+    try:
+        result = subprocess.run(
+            [*command, "-Apply"],
+            check=False,
+        )
+    except OSError as error:
+        print(f"[ERROR] Windows uninstall: {error}")
+        return 2
+
+    if result.returncode != 0:
+        print("[ERROR] Windows CA trust uninstall failed")
+        return 2
+
+    # Verify the certificate is absent from CurrentUser Root.
+    try:
+        verification = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as error:
+        print(f"[ERROR] Windows verification: {error}")
+        return 2
+
+    if (
+        verification.returncode != 0
+        or "[OK] CA is not in CurrentUser Root"
+        not in verification.stdout
+    ):
+        print("[ERROR] Windows CA trust removal not verified")
+        return 2
+
+    print("[OK] Windows CurrentUser CA trust removed")
+    return 0
+
+
+def uninstall() -> int:
+    """Remove CA trust for the current environment."""
+
+    system = platform.system()
+
+    if system not in ("Linux", "Windows"):
+        print("[ERROR] Unsupported platform")
+        return 2
+
+    ca_root = certificates.get_ca_root()
+
+    if ca_root is None:
+        return 2
+
+    ca_file = ca_root / "rootCA.pem"
+
+    if not ca_file.is_file():
+        print("[ERROR] Root CA certificate not found")
+        return 2
+
+    thumbprint = get_thumbprint(ca_file)
+
+    if thumbprint is None:
+        print("[ERROR] Cannot identify Root CA")
+        return 2
+
+    print("[TRUST] Unified CA trust uninstall")
+    print(f"[SYSTEM] {system}")
+    print(f"[THUMBPRINT] {thumbprint}")
+
+    print("[PRESERVED] CA certificate and private key")
+    print("[PRESERVED] Project TLS certificates")
+
+    if system == "Linux":
+        result = uninstall_linux()
+
+        if result != 0:
+            return result
+
+    needs_windows = (
+        system == "Windows"
+        or (system == "Linux" and domains.is_wsl())
+    )
+
+    if needs_windows:
+        result = uninstall_windows(ca_file, thumbprint)
+
+        if result != 0:
+            print(
+                "[INFO] Some trust stores may already "
+                "have been modified"
+            )
+            print(
+                "[INFO] Run 'python3 -m "
+                "scripts.dev.ca_trust setup' to restore trust"
+            )
+            return result
+
+    print("[OK] Required CA trust removal completed")
+    print("[OK] CA files and project TLS certificates preserved")
+
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Manage local CA trust"
@@ -541,6 +739,7 @@ def main() -> int:
             "setup-linux",
             "uninstall-plan",
             "uninstall-linux",
+            "uninstall",
         ],
     )
 
@@ -557,6 +756,9 @@ def main() -> int:
 
     if args.action == "uninstall-linux":
         return uninstall_linux()
+
+    if args.action == "uninstall":
+        return uninstall()
 
     return inspect(args.action)
 
