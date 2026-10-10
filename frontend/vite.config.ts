@@ -6,6 +6,7 @@ const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:3000'
 export default defineConfig({
   plugins: [react()],
   server: {
+    allowedHosts: ['transcendence.test'],
     proxy: {
       '/api': {
         target: backendUrl,
