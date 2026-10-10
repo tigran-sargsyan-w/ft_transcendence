@@ -49,11 +49,18 @@ def validate_domain(value: str) -> str:
 def run_linux(action: str, domain: str) -> int:
     print("[DOMAIN] Linux hosts", flush=True)
 
+    # Unified cleanup is preview-only for now.
+    linux_action = (
+        "cleanup-plan"
+        if action == "cleanup"
+        else action
+    )
+
     command = [
         sys.executable,
         "-m",
         "scripts.dev.linux_hosts",
-        action,
+        linux_action,
         "--domain",
         domain,
     ]
@@ -157,7 +164,7 @@ def main() -> int:
 
     parser.add_argument(
         "action",
-        choices=["check", "setup"],
+        choices=["check", "setup", "cleanup"],
     )
 
     parser.add_argument(

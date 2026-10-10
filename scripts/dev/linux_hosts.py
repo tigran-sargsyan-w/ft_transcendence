@@ -210,6 +210,27 @@ def remove_mapping(domain: str) -> int:
     return 0
 
 
+def preview_cleanup(domain: str) -> int:
+    current = read_hosts()
+
+    _, changed = remove_managed_mapping(
+        current, domain
+    )
+
+    if not changed:
+        print("[OK] No managed Linux mapping to remove")
+        return 0
+
+    print("[PLAN] Linux hosts entry can be removed:")
+    print(
+        f"127.0.0.1\t{domain}\t"
+        "# ft_transcendence:managed"
+    )
+    print("[INFO] Preview only. No changes made.")
+
+    return 1
+
+
 def cleanup(domain: str) -> int:
     current = read_hosts()
 
@@ -265,6 +286,7 @@ def main() -> int:
             "check",
             "setup",
             "cleanup",
+            "cleanup-plan",
             "_apply",
             "_remove",
         ],
@@ -288,6 +310,9 @@ def main() -> int:
 
         if args.command == "setup":
             return setup(domain)
+
+        if args.command == "cleanup-plan":
+            return preview_cleanup(domain)
 
         if args.command == "cleanup":
             return cleanup(domain)
