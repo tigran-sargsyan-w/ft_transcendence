@@ -310,6 +310,86 @@ def setup() -> int:
     return 0
 
 
+def cleanup(*, apply: bool = False) -> int:
+    """Remove only project TLS certificates, preserving the CA."""
+
+    print("[TLS] Certificate cleanup")
+
+    # Refuse redirected certificate directories.
+    if CERT_DIR.is_symlink():
+        print("[ERROR] Certificate directory is a symbolic link")
+        return 2
+
+    targets = [
+        ("TLS certificate", CERT_FILE),
+        ("TLS private key", KEY_FILE),
+    ]
+
+    # Refuse symlinks and unexpected file types.
+    for label, path in targets:
+        if path.is_symlink():
+            print(f"[ERROR] {label} is a symbolic link: {path}")
+            return 2
+
+        if path.exists() and not path.is_file():
+            print(f"[ERROR] Unexpected file type: {path}")
+            return 2
+
+    existing = [
+        (label, path)
+        for label, path in targets
+        if path.is_file()
+    ]
+
+    if not existing:
+        print("[OK] No project TLS certificates to remove")
+        return 0
+
+    print("[PLAN] The following files will be removed:")
+
+    for label, path in existing:
+        print(f"  {label}: {path}")
+
+    print("[PRESERVED] mkcert Root CA and CA private key")
+    print("[PRESERVED] Linux and Windows CA trust stores")
+
+    if not apply:
+        print("[INFO] Preview only. Use cleanup --apply to confirm.")
+        return 1
+
+    try:
+        answer = input(
+            "Remove project TLS certificates? [y/N]: "
+        ).strip().lower()
+    except EOFError:
+        print("[CANCELLED] Interactive confirmation required")
+        return 1
+
+    if answer != "y":
+        print("[CANCELLED] Certificate cleanup declined")
+        return 1
+
+    try:
+        for label, path in existing:
+            # Recheck before removing each file.
+            if path.is_symlink() or not path.is_file():
+                print(f"[ERROR] File changed during cleanup: {path}")
+                return 2
+
+            path.unlink()
+            print(f"[REMOVED] {label}: {path}")
+
+    except OSError as error:
+        print(f"[ERROR] Certificate cleanup failed: {error}")
+        return 2
+
+    print("[OK] Project TLS certificates removed")
+    print("[OK] Root CA and system trust preserved")
+
+    return 0
+
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Manage local TLS certificates"
@@ -317,16 +397,28 @@ def main() -> int:
 
     parser.add_argument(
         "action",
-        choices=["check", "setup"],
+        choices=["check", "setup", "cleanup"],
+    )
+
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Confirm certificate cleanup",
     )
 
     args = parser.parse_args()
+
+    if args.apply and args.action != "cleanup":
+        parser.error("--apply is only valid with cleanup")
 
     if args.action == "check":
         return check()
 
     if args.action == "setup":
         return setup()
+
+    if args.action == "cleanup":
+        return cleanup(apply=args.apply)
 
     return 2
 
