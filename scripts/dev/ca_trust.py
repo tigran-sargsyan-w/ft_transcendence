@@ -190,6 +190,73 @@ def inspect(action: str) -> int:
     return 0
 
 
+def setup_linux() -> int:
+    """Install local mkcert CA into Linux trust stores."""
+
+    if platform.system() != "Linux":
+        print("[ERROR] Linux trust setup requires Linux")
+        return 2
+
+    ca_root = certificates.get_ca_root()
+
+    if ca_root is None:
+        return 2
+
+    ca_file = ca_root / "rootCA.pem"
+
+    if not ca_file.is_file():
+        print("[MISSING] Root CA certificate")
+        print("[INFO] Generate the CA first")
+        return 1
+
+    if check_linux(ca_file):
+        print("[OK] Linux CA trust already configured")
+        return 0
+
+    thumbprint = get_thumbprint(ca_file)
+
+    if thumbprint is None:
+        print("[ERROR] Cannot identify Root CA")
+        return 2
+
+    print("[PLAN] Install local mkcert CA into Linux trust stores")
+    print(f"[CA] {ca_file}")
+    print(f"[THUMBPRINT] {thumbprint}")
+
+    try:
+        answer = input(
+            "Trust this CA on Linux? [y/N]: "
+        ).strip().lower()
+    except EOFError:
+        print("[CANCELLED] Interactive confirmation required")
+        return 1
+
+    if answer != "y":
+        print("[CANCELLED] CA trust installation declined")
+        return 1
+
+    try:
+        result = subprocess.run(
+            ["mkcert", "-install"],
+            check=False,
+        )
+    except OSError as error:
+        print(f"[ERROR] Cannot execute mkcert: {error}")
+        return 2
+
+    if result.returncode != 0:
+        print("[ERROR] mkcert -install failed")
+        return 2
+
+    if not check_linux(ca_file):
+        print("[ERROR] CA trust verification failed")
+        return 2
+
+    print("[OK] Linux CA trust configured successfully")
+    return 0
+
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Manage local CA trust"
@@ -197,10 +264,13 @@ def main() -> int:
 
     parser.add_argument(
         "action",
-        choices=["check", "plan"],
+        choices=["check", "plan", "setup-linux"],
     )
 
     args = parser.parse_args()
+
+    if args.action == "setup-linux":
+        return setup_linux()
 
     return inspect(args.action)
 
