@@ -2,10 +2,10 @@
 """Tests for local TLS certificate diagnostics."""
 
 import io
-import tempfile
-import unittest
 import shutil
 import subprocess
+import tempfile
+import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
@@ -123,6 +123,7 @@ class CertificateCryptographyTests(unittest.TestCase):
     def test_valid_certificate_is_accepted(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+
             ca_root = root / "ca"
             ca_root.mkdir()
 
@@ -189,7 +190,17 @@ class CertificateCryptographyTests(unittest.TestCase):
                 "-extfile", extensions_file,
             )
 
-            # 5. Validate using our real application code.
+            # 5. Generate an unrelated private key.
+            wrong_key = root / "wrong-key.pem"
+
+            openssl(
+                "genpkey",
+                "-algorithm", "RSA",
+                "-out", wrong_key,
+                "-pkeyopt", "rsa_keygen_bits:2048",
+            )
+
+            # 6. Test real certificate validation.
             with (
                 patch.object(
                     certificates, "CERT_FILE", cert_file
@@ -198,6 +209,7 @@ class CertificateCryptographyTests(unittest.TestCase):
                     certificates, "KEY_FILE", key_file
                 ),
             ):
+                # Case A: Valid certificate.
                 valid, message = (
                     certificates.validate_certificate(
                         ca_root,
@@ -205,7 +217,38 @@ class CertificateCryptographyTests(unittest.TestCase):
                     )
                 )
 
-            self.assertTrue(valid, message)
+                self.assertTrue(valid, message)
+
+                # Case B: Wrong hostname.
+                valid, message = (
+                    certificates.validate_certificate(
+                        ca_root,
+                        "wrong.test",
+                    )
+                )
+
+                self.assertFalse(valid)
+                self.assertEqual(
+                    message,
+                    "Certificate chain or hostname verification failed",
+                )
+
+                # Case C: Wrong private key.
+                with patch.object(
+                    certificates, "KEY_FILE", wrong_key
+                ):
+                    valid, message = (
+                        certificates.validate_certificate(
+                            ca_root,
+                            "transcendence.test",
+                        )
+                    )
+
+                    self.assertFalse(valid)
+                    self.assertEqual(
+                        message,
+                        "TLS certificate and private key do not match",
+                    )
 
 
 if __name__ == "__main__":
