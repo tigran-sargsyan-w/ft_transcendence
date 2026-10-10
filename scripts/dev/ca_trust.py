@@ -387,6 +387,64 @@ def setup() -> int:
     return inspect("check")
 
 
+def uninstall_plan() -> int:
+    """Preview removal of local CA trust without modifying stores."""
+
+    system = platform.system()
+
+    if system != "Linux":
+        print("[ERROR] Uninstall preview currently supports Linux/WSL")
+        return 2
+
+    ca_root = certificates.get_ca_root()
+
+    if ca_root is None:
+        return 2
+
+    ca_file = ca_root / "rootCA.pem"
+
+    if not ca_file.is_file():
+        print("[ERROR] Root CA certificate not found")
+        return 2
+
+    thumbprint = get_thumbprint(ca_file)
+
+    if thumbprint is None:
+        print("[ERROR] Cannot identify Root CA")
+        return 2
+
+    print("[TRUST] CA trust removal preview")
+    print(f"[CA] {ca_file}")
+    print(f"[THUMBPRINT] {thumbprint}")
+
+    # Linux trust.
+    if check_linux(ca_file):
+        print("[PLAN] Linux: remove mkcert CA trust")
+    else:
+        print("[OK] Linux: CA already untrusted")
+
+    # Windows trust when running under WSL.
+    if domains.is_wsl():
+        print("[WSL] Windows trust check")
+
+        trusted = check_windows(thumbprint)
+
+        if trusted is None:
+            return 2
+
+        print(
+            "[PLAN] Windows: remove matching CA from "
+            "CurrentUser Root if present"
+        )
+        print("[PRESERVED] Windows LocalMachine Root")
+
+    print("[PRESERVED] rootCA.pem")
+    print("[PRESERVED] rootCA-key.pem")
+    print("[PRESERVED] Project TLS certificates")
+    print("[INFO] Preview only. No changes made")
+
+    return 0
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -400,6 +458,7 @@ def main() -> int:
             "plan",
             "setup",
             "setup-linux",
+            "uninstall-plan",
         ],
     )
 
@@ -410,6 +469,9 @@ def main() -> int:
 
     if args.action == "setup-linux":
         return setup_linux()
+
+    if args.action == "uninstall-plan":
+        return uninstall_plan()
 
     return inspect(args.action)
 

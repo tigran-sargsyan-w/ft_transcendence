@@ -171,5 +171,38 @@ class WindowsCATrustTests(unittest.TestCase):
         )
 
 
+    def test_uninstall_untrusted_ca_is_idempotent(self):
+        # The temporary CA was never installed.
+        result = self.run_adapter("uninstall")
+
+        self.assertEqual(
+            result.returncode,
+            0,
+            result.stdout + result.stderr,
+        )
+
+        self.assertIn(
+            "[OK] CA is not in CurrentUser Root",
+            result.stdout,
+        )
+
+        # It must remain untrusted.
+        check = self.run_adapter("check")
+        self.assertEqual(check.returncode, 1)
+
+    def test_uninstall_wrong_thumbprint_is_rejected(self):
+        result = self.run_adapter(
+            "uninstall",
+            thumbprint="B" * 40,
+        )
+
+        self.assertEqual(result.returncode, 2)
+
+        self.assertIn(
+            "CA thumbprint mismatch",
+            result.stderr,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

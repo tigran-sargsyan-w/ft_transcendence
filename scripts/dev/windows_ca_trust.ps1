@@ -1,6 +1,6 @@
 
 param(
-    [ValidateSet("check", "plan", "setup")]
+    [ValidateSet("check", "plan", "setup", "uninstall")]
     [string]$Action = "check",
 
     [Parameter(Mandatory = $true)]
@@ -123,6 +123,92 @@ try {
 
     Write-Output "[CA] $($Certificate.Subject)"
     Write-Output "[THUMBPRINT] $Actual"
+
+
+    if ($Action -eq "uninstall") {
+        $Store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+            [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+            [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+        )
+
+        # Check only CurrentUser Root.
+        try {
+            $Store.Open(
+                [System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly
+            )
+
+            $Matches = $Store.Certificates.Find(
+                [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                $Expected,
+                $false
+            )
+
+            $Present = $Matches.Count -gt 0
+        }
+        finally {
+            $Store.Close()
+        }
+
+        if (-not $Present) {
+            Write-Output "[OK] CA is not in CurrentUser Root"
+            Write-Output "[PRESERVED] LocalMachine Root"
+            exit 0
+        }
+
+        Write-Output "[PLAN] Remove matching CA from CurrentUser Root"
+        Write-Output "[PRESERVED] LocalMachine Root"
+        Write-Output "[PRESERVED] CA files and project TLS certificates"
+
+        if (-not $Apply) {
+            Write-Output "[INFO] Preview only. Use -Action uninstall -Apply"
+            exit 1
+        }
+
+        # Remove only certificates matching the expected thumbprint.
+        try {
+            $Store.Open(
+                [System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite
+            )
+
+            $Matches = $Store.Certificates.Find(
+                [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                $Expected,
+                $false
+            )
+
+            foreach ($Match in $Matches) {
+                $Store.Remove($Match)
+            }
+        }
+        finally {
+            $Store.Close()
+        }
+
+        # Verify that CurrentUser Root no longer contains this CA.
+        try {
+            $Store.Open(
+                [System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly
+            )
+
+            $Remaining = $Store.Certificates.Find(
+                [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                $Expected,
+                $false
+            )
+
+            if ($Remaining.Count -gt 0) {
+                throw "CA still exists in CurrentUser Root"
+            }
+        }
+        finally {
+            $Store.Close()
+        }
+
+        Write-Output "[OK] CA removed from CurrentUser Root"
+        Write-Output "[OK] CA files and LocalMachine Root preserved"
+        exit 0
+    }
+
 
     # Check both user and machine trust stores.
     $Trusted = Test-CaTrust -Thumbprint $Expected
