@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
@@ -71,7 +72,6 @@ class CertificateDiagnosticsTests(unittest.TestCase):
         ]:
             self.create_file(path)
 
-        # This test checks file presence, not cryptography.
         with patch.object(
             certificates,
             "validate_certificate",
@@ -101,7 +101,6 @@ class CertificateDiagnosticsTests(unittest.TestCase):
             self.assertEqual(self.run_check(), 2)
 
     def test_invalid_certificate_is_rejected(self):
-        # All files exist, but contain invalid PEM data.
         for path in [
             self.ca_root / "rootCA.pem",
             self.ca_root / "rootCA-key.pem",
@@ -110,7 +109,6 @@ class CertificateDiagnosticsTests(unittest.TestCase):
         ]:
             self.create_file(path)
 
-        # Real OpenSSL validation must reject these files.
         self.assertEqual(self.run_check(), 1)
 
 
@@ -120,135 +118,217 @@ class CertificateDiagnosticsTests(unittest.TestCase):
 )
 class CertificateCryptographyTests(unittest.TestCase):
 
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+
+        cls.temp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.temp.cleanup)
+
+        cls.root = Path(cls.temp.name)
+        cls.ca_root = cls.root / "ca"
+        cls.ca_root.mkdir()
+
+        cls.key_file = cls.root / "key.pem"
+        cls.wrong_key = cls.root / "wrong-key.pem"
+        cls.csr_file = cls.root / "request.csr"
+
+        # Generate a temporary CA.
+        cls.openssl(
+            "req", "-x509",
+            "-newkey", "rsa:2048",
+            "-nodes",
+            "-days", "365",
+            "-keyout", cls.ca_root / "rootCA-key.pem",
+            "-out", cls.ca_root / "rootCA.pem",
+            "-subj", "/CN=ft-transcendence-test-CA",
+            "-addext",
+            "basicConstraints=critical,CA:TRUE",
+            "-addext",
+            "keyUsage=critical,keyCertSign,cRLSign",
+        )
+
+        # Generate the server's private key and CSR.
+        cls.openssl(
+            "req", "-new",
+            "-newkey", "rsa:2048",
+            "-nodes",
+            "-keyout", cls.key_file,
+            "-out", cls.csr_file,
+            "-subj", "/CN=transcendence.test",
+        )
+
+        # Generate an unrelated private key.
+        cls.openssl(
+            "genpkey",
+            "-algorithm", "RSA",
+            "-out", cls.wrong_key,
+            "-pkeyopt", "rsa_keygen_bits:2048",
+        )
+
+    @staticmethod
+    def openssl(*args):
+        subprocess.run(
+            ["openssl", *map(str, args)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def issue_certificate(
+        self,
+        name,
+        san,
+        days=90,
+    ):
+        """Issue a temporary certificate with chosen extensions."""
+
+        cert_file = self.root / f"{name}.pem"
+        extensions_file = self.root / f"{name}.cnf"
+
+        extensions_file.write_text(
+            "basicConstraints=CA:FALSE\n"
+            "keyUsage=digitalSignature,keyEncipherment\n"
+            "extendedKeyUsage=serverAuth\n"
+            f"subjectAltName={san}\n",
+            encoding="utf-8",
+        )
+
+        self.openssl(
+            "x509", "-req",
+            "-in", self.csr_file,
+            "-CA", self.ca_root / "rootCA.pem",
+            "-CAkey", self.ca_root / "rootCA-key.pem",
+            "-CAcreateserial",
+            "-out", cert_file,
+            "-days", str(days),
+            "-sha256",
+            "-extfile", extensions_file,
+        )
+
+        return cert_file
+
+    def validate(
+        self,
+        cert_file,
+        key_file=None,
+        domain="transcendence.test",
+    ):
+        if key_file is None:
+            key_file = self.key_file
+
+        with (
+            patch.object(
+                certificates, "CERT_FILE", cert_file
+            ),
+            patch.object(
+                certificates, "KEY_FILE", key_file
+            ),
+        ):
+            return certificates.validate_certificate(
+                self.ca_root,
+                domain,
+            )
+
     def test_valid_certificate_is_accepted(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+        cert = self.issue_certificate(
+            "valid",
+            "DNS:transcendence.test,"
+            "DNS:localhost,"
+            "IP:127.0.0.1",
+        )
 
-            ca_root = root / "ca"
-            ca_root.mkdir()
+        valid, message = self.validate(cert)
 
-            cert_file = root / "cert.pem"
-            key_file = root / "key.pem"
-            csr_file = root / "request.csr"
-            extensions_file = root / "extensions.cnf"
+        self.assertTrue(valid, message)
 
-            def openssl(*args):
-                subprocess.run(
-                    ["openssl", *map(str, args)],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
+    def test_wrong_hostname_is_rejected(self):
+        cert = self.issue_certificate(
+            "wrong-hostname",
+            "DNS:transcendence.test,"
+            "DNS:localhost,"
+            "IP:127.0.0.1",
+        )
 
-            # 1. Create an isolated, temporary CA.
-            openssl(
-                "req", "-x509",
-                "-newkey", "rsa:2048",
-                "-nodes",
-                "-days", "365",
-                "-keyout", ca_root / "rootCA-key.pem",
-                "-out", ca_root / "rootCA.pem",
-                "-subj", "/CN=ft-transcendence-test-CA",
-                "-addext",
-                "basicConstraints=critical,CA:TRUE",
-                "-addext",
-                "keyUsage=critical,keyCertSign,cRLSign",
-            )
+        valid, message = self.validate(
+            cert,
+            domain="wrong.test",
+        )
 
-            # 2. Generate TLS private key and CSR.
-            openssl(
-                "req", "-new",
-                "-newkey", "rsa:2048",
-                "-nodes",
-                "-keyout", key_file,
-                "-out", csr_file,
-                "-subj", "/CN=transcendence.test",
-            )
+        self.assertFalse(valid)
+        self.assertEqual(
+            message,
+            "Certificate chain or hostname verification failed",
+        )
 
-            # 3. Configure TLS extensions.
-            extensions_file.write_text(
-                "basicConstraints=CA:FALSE\n"
-                "keyUsage=digitalSignature,keyEncipherment\n"
-                "extendedKeyUsage=serverAuth\n"
-                "subjectAltName="
-                "DNS:transcendence.test,"
-                "DNS:localhost,"
-                "IP:127.0.0.1\n",
-                encoding="utf-8",
-            )
+    def test_wrong_private_key_is_rejected(self):
+        cert = self.issue_certificate(
+            "mismatched-key-cert",
+            "DNS:transcendence.test,"
+            "DNS:localhost,"
+            "IP:127.0.0.1",
+        )
 
-            # 4. Sign the TLS certificate.
-            openssl(
-                "x509", "-req",
-                "-in", csr_file,
-                "-CA", ca_root / "rootCA.pem",
-                "-CAkey", ca_root / "rootCA-key.pem",
-                "-CAcreateserial",
-                "-out", cert_file,
-                "-days", "90",
-                "-sha256",
-                "-extfile", extensions_file,
-            )
+        valid, message = self.validate(
+            cert,
+            key_file=self.wrong_key,
+        )
 
-            # 5. Generate an unrelated private key.
-            wrong_key = root / "wrong-key.pem"
+        self.assertFalse(valid)
+        self.assertEqual(
+            message,
+            "TLS certificate and private key do not match",
+        )
 
-            openssl(
-                "genpkey",
-                "-algorithm", "RSA",
-                "-out", wrong_key,
-                "-pkeyopt", "rsa_keygen_bits:2048",
-            )
+    def test_missing_dns_san_is_rejected(self):
+        # localhost is deliberately missing.
+        cert = self.issue_certificate(
+            "missing-dns",
+            "DNS:transcendence.test,"
+            "IP:127.0.0.1",
+        )
 
-            # 6. Test real certificate validation.
-            with (
-                patch.object(
-                    certificates, "CERT_FILE", cert_file
-                ),
-                patch.object(
-                    certificates, "KEY_FILE", key_file
-                ),
-            ):
-                # Case A: Valid certificate.
-                valid, message = (
-                    certificates.validate_certificate(
-                        ca_root,
-                        "transcendence.test",
-                    )
-                )
+        valid, message = self.validate(cert)
 
-                self.assertTrue(valid, message)
+        self.assertFalse(valid)
+        self.assertEqual(
+            message,
+            "Missing required DNS SAN entries",
+        )
 
-                # Case B: Wrong hostname.
-                valid, message = (
-                    certificates.validate_certificate(
-                        ca_root,
-                        "wrong.test",
-                    )
-                )
+    def test_missing_ip_san_is_rejected(self):
+        # 127.0.0.1 is deliberately missing.
+        cert = self.issue_certificate(
+            "missing-ip",
+            "DNS:transcendence.test,"
+            "DNS:localhost",
+        )
 
-                self.assertFalse(valid)
-                self.assertEqual(
-                    message,
-                    "Certificate chain or hostname verification failed",
-                )
+        valid, message = self.validate(cert)
 
-                # Case C: Wrong private key.
-                with patch.object(
-                    certificates, "KEY_FILE", wrong_key
-                ):
-                    valid, message = (
-                        certificates.validate_certificate(
-                            ca_root,
-                            "transcendence.test",
-                        )
-                    )
+        self.assertFalse(valid)
+        self.assertEqual(
+            message,
+            "Missing required IP SAN entries",
+        )
 
-                    self.assertFalse(valid)
-                    self.assertEqual(
-                        message,
-                        "TLS certificate and private key do not match",
-                    )
+    def test_expiring_certificate_is_rejected(self):
+        # A certificate valid for only 1 day.
+        cert = self.issue_certificate(
+            "expiring",
+            "DNS:transcendence.test,"
+            "DNS:localhost,"
+            "IP:127.0.0.1",
+            days=1,
+        )
+
+        valid, message = self.validate(cert)
+
+        self.assertFalse(valid)
+        self.assertEqual(
+            message,
+            "Certificate invalid or expiring within 30 days",
+        )
 
 
 if __name__ == "__main__":
