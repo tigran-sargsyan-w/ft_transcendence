@@ -256,6 +256,137 @@ def setup_linux() -> int:
     return 0
 
 
+def setup_windows(ca_file: Path, thumbprint: str) -> int:
+    """Install the public CA into Windows CurrentUser Root."""
+
+    script_path = Path(__file__).with_name("windows_ca_trust.ps1")
+
+    if not script_path.is_file():
+        print("[ERROR] Windows CA trust adapter not found")
+        return 2
+
+    system = platform.system()
+
+    if system == "Linux":
+        # Convert WSL paths to Windows paths.
+        ca_result = run("wslpath", "-w", str(ca_file))
+        script_result = run("wslpath", "-w", str(script_path))
+
+        if (
+            ca_result.returncode != 0
+            or script_result.returncode != 0
+        ):
+            print("[ERROR] Cannot convert WSL paths")
+            return 2
+
+        windows_ca = ca_result.stdout.strip()
+        windows_script = script_result.stdout.strip()
+    else:
+        windows_ca = str(ca_file)
+        windows_script = str(script_path)
+
+    print("[PLAN] Install public CA into Windows CurrentUser Root")
+    print(f"[THUMBPRINT] {thumbprint}")
+    print("[INFO] Windows will trust certificates issued by this CA")
+
+    try:
+        answer = input(
+            "Trust this CA on Windows? [y/N]: "
+        ).strip().lower()
+    except EOFError:
+        print("[CANCELLED] Interactive confirmation required")
+        return 1
+
+    if answer != "y":
+        print("[CANCELLED] Windows CA trust installation declined")
+        return 1
+
+    try:
+        result = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy", "Bypass",
+                "-File", windows_script,
+                "-Action", "setup",
+                "-CaPath", windows_ca,
+                "-ExpectedThumbprint", thumbprint,
+                "-Apply",
+            ],
+            check=False,
+        )
+    except OSError as error:
+        print(f"[ERROR] Windows CA setup failed: {error}")
+        return 2
+
+    if result.returncode != 0:
+        print("[ERROR] Windows CA trust installation failed")
+        return 2
+
+    return 0
+
+
+def setup() -> int:
+    """Configure CA trust for the current environment."""
+
+    system = platform.system()
+
+    if system not in ("Linux", "Windows"):
+        print("[ERROR] Unsupported platform")
+        return 2
+
+    ca_root = certificates.get_ca_root()
+
+    if ca_root is None:
+        return 2
+
+    ca_file = ca_root / "rootCA.pem"
+
+    if not ca_file.is_file():
+        print("[MISSING] Root CA certificate")
+        return 1
+
+    thumbprint = get_thumbprint(ca_file)
+
+    if thumbprint is None:
+        print("[ERROR] Cannot identify Root CA")
+        return 2
+
+    print("[TRUST] Unified CA trust setup")
+    print(f"[SYSTEM] {system}")
+    print(f"[THUMBPRINT] {thumbprint}")
+
+    # Linux trust.
+    if system == "Linux":
+        if not check_linux(ca_file):
+            result = setup_linux()
+
+            if result != 0:
+                return result
+
+    # Windows trust (native Windows or WSL).
+    needs_windows = (
+        system == "Windows"
+        or (system == "Linux" and domains.is_wsl())
+    )
+
+    if needs_windows:
+        trusted = check_windows(thumbprint)
+
+        if trusted is None:
+            return 2
+
+        if not trusted:
+            result = setup_windows(ca_file, thumbprint)
+
+            if result != 0:
+                return result
+
+    # Final verification of all required trust stores.
+    return inspect("check")
+
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -264,10 +395,18 @@ def main() -> int:
 
     parser.add_argument(
         "action",
-        choices=["check", "plan", "setup-linux"],
+        choices=[
+            "check",
+            "plan",
+            "setup",
+            "setup-linux",
+        ],
     )
 
     args = parser.parse_args()
+
+    if args.action == "setup":
+        return setup()
 
     if args.action == "setup-linux":
         return setup_linux()
