@@ -78,3 +78,48 @@ def test_critical_nodes_sample_topology_ranks_api_high():
     node_ids = [item["nodeId"] for item in result["nodes"]]
     assert node_ids[0] == "svc_api"
     assert set(node_ids) == {"svc_api", "svc_worker", "svc_db", "svc_cache"}
+
+
+def test_critical_nodes_ignores_non_dependency_edges_for_dependents():
+    topology = _topology(
+        nodes=[
+            GraphNode(id="svc_api", kind="service", label="api", status="healthy"),
+            GraphNode(id="svc_db", kind="service", label="db", status="healthy"),
+            GraphNode(
+                id="svc_metrics", kind="service", label="metrics", status="healthy"
+            ),
+            GraphNode(id="svc_a", kind="service", label="a", status="healthy"),
+            GraphNode(id="svc_b", kind="service", label="b", status="healthy"),
+        ],
+        edges=[
+            GraphEdge(
+                id="edge_api_db",
+                source="svc_api",
+                target="svc_db",
+                kind="depends_on",
+            ),
+            GraphEdge(
+                id="edge_a_metrics",
+                source="svc_a",
+                target="svc_metrics",
+                kind="connects_to",
+            ),
+            GraphEdge(
+                id="edge_b_metrics",
+                source="svc_b",
+                target="svc_metrics",
+                kind="connects_to",
+            ),
+            GraphEdge(
+                id="edge_api_metrics",
+                source="svc_api",
+                target="svc_metrics",
+                kind="exposes",
+            ),
+        ],
+    )
+    result = compute_critical_nodes(build_digraph(topology))
+    by_id = {item["nodeId"]: item for item in result["nodes"]}
+
+    assert "many_dependents" in by_id["svc_db"]["reasons"]
+    assert "many_dependents" not in by_id["svc_metrics"]["reasons"]
