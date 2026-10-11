@@ -178,7 +178,12 @@ The browser should not call these endpoints in production; Nest is the gateway.
 | `attack_paths` | yes | `attackPaths` | Implemented |
 | `critical_nodes` | no | `criticalNodes` | Implemented |
 
-`critical_nodes` v0 scoring mixes normalized betweenness centrality and in-degree (dependents). Reasons may include `high_betweenness`, `many_dependents`, `structural_role`, or `single_node`.
+`critical_nodes` v0 scoring mixes:
+
+- normalized betweenness centrality on the **full** graph (all edge kinds)
+- dependency in-degree for dependents: only edges with kind `depends_on` count (`DEPENDENCY_EDGE_KINDS` in the Graph Engine)
+
+Reasons may include `high_betweenness`, `many_dependents`, `structural_role`, or `single_node`.
 
 ### Analyze success response
 

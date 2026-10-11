@@ -40,7 +40,7 @@ Expected shape:
 
 - `blast_radius` — implemented (who depends on the seed service, via reversed dependency edges)
 - `attack_paths` — implemented (forward paths from a compromised seed)
-- `critical_nodes` — implemented (betweenness + dependents ranking; no seeds required)
+- `critical_nodes` — implemented (betweenness on full graph + dependents from `depends_on` only; no seeds required)
 
 ### Blast radius example
 
