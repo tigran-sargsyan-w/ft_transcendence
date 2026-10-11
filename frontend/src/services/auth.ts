@@ -28,6 +28,17 @@ export class RegisterError extends Error {
   }
 }
 
+type ApiErrorBody = {
+  error?: {
+    code?: string
+    message?: string
+  }
+}
+
+type ApiSuccessBody = {
+  data?: RegisteredUser
+}
+
 export async function registerUser(
   input: RegisterInput,
 ): Promise<RegisteredUser> {
@@ -49,38 +60,46 @@ export async function registerUser(
     )
   }
 
+  const body = (await response.json().catch(() => null)) as
+    | (ApiErrorBody & ApiSuccessBody)
+    | null
+
   if (response.ok) {
-    return response.json() as Promise<RegisteredUser>
+    if (!body?.data) {
+      throw new RegisterError(
+        'UNKNOWN',
+        'Registration succeeded but returned an unexpected response.',
+        response.status,
+      )
+    }
+
+    return body.data
   }
 
-  const body = (await response.json().catch(() => null)) as {
-    code?: string
-    message?: string | string[]
-  } | null
+  const code = body?.error?.code
+  const message = body?.error?.message
 
-  if (response.status === 409 && body?.code === 'EMAIL_ALREADY_EXISTS') {
+  if (response.status === 409 && code === 'EMAIL_ALREADY_EXISTS') {
     throw new RegisterError(
       'EMAIL_ALREADY_EXISTS',
-      typeof body.message === 'string'
-        ? body.message
-        : 'Email is already registered',
+      typeof message === 'string' ? message : 'Email is already registered',
       response.status,
     )
   }
 
   if (response.status === 400) {
-    const message = Array.isArray(body?.message)
-      ? body.message.join(', ')
-      : typeof body?.message === 'string'
-        ? body.message
-        : 'Invalid registration input'
-
-    throw new RegisterError('VALIDATION_ERROR', message, response.status)
+    throw new RegisterError(
+      'VALIDATION_ERROR',
+      typeof message === 'string' ? message : 'Invalid registration input',
+      response.status,
+    )
   }
 
   throw new RegisterError(
     'UNKNOWN',
-    `Registration failed with status ${response.status}`,
+    typeof message === 'string'
+      ? message
+      : `Registration failed with status ${response.status}`,
     response.status,
   )
 }
