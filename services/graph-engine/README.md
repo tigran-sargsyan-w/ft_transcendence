@@ -8,7 +8,7 @@ See `docs/architecture/graph-contract.md` and `docs/adr/0001-python-graph-engine
 
 - Python 3.9+
 
-## Local setup
+## Local setup (venv)
 
 ```bash
 cd services/graph-engine
@@ -17,6 +17,19 @@ source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+## Docker Compose
+
+From the repo root:
+
+```bash
+docker compose up -d --build graph-engine
+curl http://localhost:8000/api/v1/health
+```
+
+In Compose, other services reach the engine at `http://graph-engine:8000`.  
+Nest should use env var `GRAPH_ENGINE_URL` (set on the `backend` service in `compose.yml`).  
+From the host (Nest or curl outside Compose), use `http://localhost:8000`.
 
 ## Health check
 
