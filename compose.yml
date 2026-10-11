@@ -26,11 +26,29 @@ services:
     ports: # TODO: Remove on production
       - "127.0.0.1:3001:3001"
 
+  graph-engine:
+    build:
+      context: ./services/graph-engine
+    ports: # TODO: Remove on production
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./backend
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public"
+      GRAPH_ENGINE_URL: http://graph-engine:8000
     ports:
       - "3000:3000"
     volumes:
