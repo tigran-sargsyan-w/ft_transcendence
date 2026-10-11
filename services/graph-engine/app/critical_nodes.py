@@ -2,14 +2,26 @@ from typing import Dict, List
 
 import networkx as nx
 
+from app.schemas import DEPENDENCY_EDGE_KINDS
+
+
+def _dependency_in_degree(graph: nx.DiGraph, node_id: str) -> int:
+    """Count predecessors linked by a dependency edge kind (e.g. depends_on)."""
+    count = 0
+    for predecessor in graph.predecessors(node_id):
+        kind = graph.edges[predecessor, node_id].get("kind")
+        if kind in DEPENDENCY_EDGE_KINDS:
+            count += 1
+    return count
+
 
 def compute_critical_nodes(graph: nx.DiGraph) -> Dict:
     """
     Rank nodes by how critical they are in the topology.
 
     v0 metric mix:
-    - betweenness centrality (bridge / bottleneck role)
-    - in-degree (how many others depend on this node for depends_on-style edges)
+    - betweenness centrality on the full graph (bridge / bottleneck role)
+    - dependency in-degree (how many others depend_on this node)
     """
     node_ids = list(graph.nodes())
     if not node_ids:
@@ -28,12 +40,15 @@ def compute_critical_nodes(graph: nx.DiGraph) -> Dict:
         }
 
     betweenness = nx.betweenness_centrality(graph, normalized=True)
-    max_in_degree = max((graph.in_degree(n) for n in node_ids), default=0)
+    dependency_in_degrees = {
+        node_id: _dependency_in_degree(graph, node_id) for node_id in node_ids
+    }
+    max_in_degree = max(dependency_in_degrees.values(), default=0)
 
     ranked: List[Dict] = []
     for node_id in node_ids:
         betweenness_score = float(betweenness.get(node_id, 0.0))
-        in_degree = graph.in_degree(node_id)
+        in_degree = dependency_in_degrees[node_id]
         dependents_score = (
             float(in_degree) / float(max_in_degree) if max_in_degree > 0 else 0.0
         )
