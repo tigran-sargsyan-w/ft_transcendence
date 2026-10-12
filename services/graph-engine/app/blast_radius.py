@@ -38,9 +38,10 @@ def compute_blast_radius(
     If a seed fails, find nodes that depend on it (directly or transitively).
 
     Contract edges are source -> target (e.g. api --depends_on--> db).
-    Impact spreads to dependents, so we BFS on the reversed graph.
+    Impact spreads to dependents, so we BFS on the reversed dependency
+    subgraph (depends_on only).
     """
-    reversed_graph = graph.reverse(copy=False)
+    reversed_graph = dependency_subgraph(graph).reverse(copy=False)
     depth_by_node_id: Dict[str, int] = {}
     affected_edge_ids: List[str] = []
     queue: List[str] = []
