@@ -2,7 +2,7 @@ from typing import Dict, List, Optional
 
 import networkx as nx
 
-from app.schemas import TopologySnapshot
+from app.schemas import DEPENDENCY_EDGE_KINDS, TopologySnapshot
 
 
 def build_digraph(topology: TopologySnapshot) -> nx.DiGraph:
@@ -17,6 +17,16 @@ def build_digraph(topology: TopologySnapshot) -> nx.DiGraph:
             kind=edge.kind,
         )
     return graph
+
+
+def dependency_subgraph(graph: nx.DiGraph) -> nx.DiGraph:
+    """Keep all nodes; keep only edges whose kind is in DEPENDENCY_EDGE_KINDS."""
+    filtered = nx.DiGraph()
+    filtered.add_nodes_from(graph.nodes())
+    for source, target, data in graph.edges(data=True):
+        if data.get("kind") in DEPENDENCY_EDGE_KINDS:
+            filtered.add_edge(source, target, **data)
+    return filtered
 
 
 def compute_blast_radius(
