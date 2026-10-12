@@ -58,3 +58,36 @@ def test_blast_radius_respects_max_depth():
     )
     assert result["affectedNodeIds"] == ["svc_db", "svc_api"]
     assert "svc_worker" not in result["affectedNodeIds"]
+
+
+def test_blast_radius_ignores_non_dependency_edges():
+    topology = TopologySnapshot(
+        schemaVersion=1,
+        environmentId="env_test",
+        capturedAt="2026-09-14T10:00:00Z",
+        nodes=[
+            GraphNode(id="svc_api", kind="service", label="api", status="healthy"),
+            GraphNode(id="svc_db", kind="service", label="db", status="healthy"),
+            GraphNode(
+                id="svc_metrics", kind="service", label="metrics", status="healthy"
+            ),
+        ],
+        edges=[
+            GraphEdge(
+                id="edge_api_db",
+                source="svc_api",
+                target="svc_db",
+                kind="depends_on",
+            ),
+            GraphEdge(
+                id="edge_metrics_db",
+                source="svc_metrics",
+                target="svc_db",
+                kind="connects_to",
+            ),
+        ],
+    )
+    result = compute_blast_radius(build_digraph(topology), ["svc_db"])
+    assert result["affectedNodeIds"] == ["svc_db", "svc_api"]
+    assert "svc_metrics" not in result["affectedNodeIds"]
+    assert result["affectedEdgeIds"] == ["edge_api_db"]
