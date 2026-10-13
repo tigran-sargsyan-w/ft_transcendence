@@ -1,0 +1,17 @@
+# Optional watch overlay for newer Docker Compose (v2.22+):
+#   docker compose -f compose.yml -f compose.dev.yml watch
+
+services:
+  backend:
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend/src
+          target: /app/src
+
+  frontend:
+    develop:
+      watch:
+        - action: sync
+          path: ./frontend/src
+          target: /app/src
