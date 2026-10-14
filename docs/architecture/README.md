@@ -11,6 +11,7 @@ Documents here should stay short and stable. Concrete stack and product decision
 - [API conventions](./api-conventions.md)
 - [Graph contract](./graph-contract.md) (topology snapshot and analyze API v0)
 - [Collector contract](./collector-contract.md) (Docker collector snapshot and events, draft v0)
+- [Topology mapping](./topology-mapping.md) (collector containers to graph nodes and edges)
 - [Security baseline](./security-baseline.md)
 - [Testing strategy](./testing-strategy.md)
 - [Real-time conventions](./realtime-conventions.md)
