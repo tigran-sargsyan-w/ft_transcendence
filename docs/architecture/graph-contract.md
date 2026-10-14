@@ -12,6 +12,8 @@ Nest sends a JSON snapshot of the infrastructure graph to the Graph Engine; the 
 
 Transport between Nest and the Graph Engine is plain HTTP/JSON (see ADR 0001). Response envelopes follow [API conventions](./api-conventions.md) (`data` / `error`).
 
+Base URL for Nest: env `GRAPH_ENGINE_URL` (Compose default `http://graph-engine:8000`; see `services/graph-engine/README.md`).
+
 This document describes the **v0** contract. Fields can grow; renames of existing required fields should be avoided without a version bump.
 
 ## Boundaries (team agreement)
