@@ -38,9 +38,9 @@ Expected shape:
 
 `POST /api/v1/analyze` validates the graph-contract request.
 
-- `blast_radius` — implemented (who depends on the seed service, via reversed dependency edges)
-- `attack_paths` — implemented (forward paths from a compromised seed)
-- `critical_nodes` — implemented (betweenness + dependents ranking; no seeds required)
+- `blast_radius` — implemented (who depends on the seed, via reversed `depends_on` edges only)
+- `attack_paths` — implemented (forward paths from a compromised seed along `depends_on` only)
+- `critical_nodes` — implemented (betweenness on full graph + dependents from `depends_on` only; no seeds required)
 
 ### Blast radius example
 

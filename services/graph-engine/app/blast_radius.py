@@ -2,7 +2,7 @@ from typing import Dict, List, Optional
 
 import networkx as nx
 
-from app.schemas import TopologySnapshot
+from app.schemas import DEPENDENCY_EDGE_KINDS, TopologySnapshot
 
 
 def build_digraph(topology: TopologySnapshot) -> nx.DiGraph:
@@ -19,6 +19,16 @@ def build_digraph(topology: TopologySnapshot) -> nx.DiGraph:
     return graph
 
 
+def dependency_subgraph(graph: nx.DiGraph) -> nx.DiGraph:
+    """Keep all nodes; keep only edges whose kind is in DEPENDENCY_EDGE_KINDS."""
+    filtered = nx.DiGraph()
+    filtered.add_nodes_from(graph.nodes())
+    for source, target, data in graph.edges(data=True):
+        if data.get("kind") in DEPENDENCY_EDGE_KINDS:
+            filtered.add_edge(source, target, **data)
+    return filtered
+
+
 def compute_blast_radius(
     graph: nx.DiGraph,
     seed_node_ids: List[str],
@@ -28,9 +38,10 @@ def compute_blast_radius(
     If a seed fails, find nodes that depend on it (directly or transitively).
 
     Contract edges are source -> target (e.g. api --depends_on--> db).
-    Impact spreads to dependents, so we BFS on the reversed graph.
+    Impact spreads to dependents, so we BFS on the reversed dependency
+    subgraph (depends_on only).
     """
-    reversed_graph = graph.reverse(copy=False)
+    reversed_graph = dependency_subgraph(graph).reverse(copy=False)
     depth_by_node_id: Dict[str, int] = {}
     affected_edge_ids: List[str] = []
     queue: List[str] = []

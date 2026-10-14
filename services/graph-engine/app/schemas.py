@@ -12,6 +12,8 @@ ALLOWED_NODE_STATUSES = frozenset(
 ALLOWED_EDGE_KINDS = frozenset(
     {"depends_on", "connects_to", "exposes", "runs_on", "mounts"}
 )
+# edge kinds that count as dependency for critical_nodes dependents scoring
+DEPENDENCY_EDGE_KINDS = frozenset({"depends_on"})
 ALLOWED_ANALYSES = frozenset(
     {"blast_radius", "attack_paths", "critical_nodes"}
 )

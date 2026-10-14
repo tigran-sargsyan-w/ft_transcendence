@@ -2,6 +2,8 @@ from typing import Dict, List, Optional
 
 import networkx as nx
 
+from app.blast_radius import dependency_subgraph
+
 
 def compute_attack_paths(
     graph: nx.DiGraph,
@@ -14,7 +16,9 @@ def compute_attack_paths(
     could follow along dependency edges (source -> target).
 
     Example: api --depends_on--> db means a path api -> db.
+    Only `depends_on` edges are traversed.
     """
+    dependency_graph = dependency_subgraph(graph)
     depth_limit = 5 if max_depth is None else max_depth
     path_limit = 20 if max_paths is None else max_paths
     paths: List[Dict] = []
@@ -36,10 +40,10 @@ def compute_attack_paths(
         if (len(node_path) - 1) >= depth_limit:
             return
 
-        for successor in graph.successors(current):
+        for successor in dependency_graph.successors(current):
             if successor in node_path:
                 continue
-            edge_id = graph.edges[current, successor]["id"]
+            edge_id = dependency_graph.edges[current, successor]["id"]
             node_path.append(successor)
             edge_path.append(edge_id)
             dfs(successor, node_path, edge_path)
@@ -49,7 +53,7 @@ def compute_attack_paths(
                 return
 
     for seed_id in seed_node_ids:
-        if seed_id not in graph:
+        if seed_id not in dependency_graph:
             continue
         dfs(seed_id, [seed_id], [])
         if len(paths) >= path_limit:

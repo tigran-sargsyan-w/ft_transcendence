@@ -121,10 +121,11 @@ Unknown kinds/statuses should be rejected or normalized by the receiver; do not 
 
 Direction matters for blast radius and attack-path analysis (`source` → `target`).
 
-For v0 analysis direction:
+For v0 analysis direction and edge kinds:
 
-- `blast_radius` walks the **reversed** dependency graph (if `db` fails, who depends on it?)
-- `attack_paths` walks edges **forward** from a compromised seed (what can it reach?)
+- `blast_radius` walks the **reversed** dependency subgraph (if `db` fails, who depends on it?). Only `depends_on` edges are traversed.
+- `attack_paths` walks **forward** from a compromised seed along the same dependency subgraph (what can it reach via `depends_on`?).
+- Other edge kinds (`connects_to`, `exposes`, `runs_on`, `mounts`) are ignored by these two analyses.
 
 ## Graph Engine HTTP surface (v0)
 
@@ -178,7 +179,12 @@ The browser should not call these endpoints in production; Nest is the gateway.
 | `attack_paths` | yes | `attackPaths` | Implemented |
 | `critical_nodes` | no | `criticalNodes` | Implemented |
 
-`critical_nodes` v0 scoring mixes normalized betweenness centrality and in-degree (dependents). Reasons may include `high_betweenness`, `many_dependents`, `structural_role`, or `single_node`.
+`critical_nodes` v0 scoring mixes:
+
+- normalized betweenness centrality on the **full** graph (all edge kinds)
+- dependency in-degree for dependents: only edges with kind `depends_on` count (`DEPENDENCY_EDGE_KINDS` in the Graph Engine)
+
+Reasons may include `high_betweenness`, `many_dependents`, `structural_role`, or `single_node`.
 
 ### Analyze success response
 

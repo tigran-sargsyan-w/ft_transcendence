@@ -56,3 +56,36 @@ def test_attack_paths_respects_max_paths():
         max_paths=1,
     )
     assert len(result["paths"]) == 1
+
+
+def test_attack_paths_ignores_non_dependency_edges():
+    topology = TopologySnapshot(
+        schemaVersion=1,
+        environmentId="env_test",
+        capturedAt="2026-09-14T10:00:00Z",
+        nodes=[
+            GraphNode(id="svc_api", kind="service", label="api", status="healthy"),
+            GraphNode(id="svc_db", kind="service", label="db", status="healthy"),
+            GraphNode(
+                id="svc_sidecar", kind="service", label="sidecar", status="healthy"
+            ),
+        ],
+        edges=[
+            GraphEdge(
+                id="edge_api_db",
+                source="svc_api",
+                target="svc_db",
+                kind="depends_on",
+            ),
+            GraphEdge(
+                id="edge_api_sidecar",
+                source="svc_api",
+                target="svc_sidecar",
+                kind="connects_to",
+            ),
+        ],
+    )
+    result = compute_attack_paths(build_digraph(topology), ["svc_api"])
+    path_node_ids = [tuple(path["nodeIds"]) for path in result["paths"]]
+    assert path_node_ids == [("svc_api", "svc_db")]
+    assert all(path["edgeIds"] == ["edge_api_db"] for path in result["paths"])
