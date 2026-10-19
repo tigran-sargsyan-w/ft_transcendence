@@ -1,0 +1,33 @@
+{
+  "data": {
+    "schemaVersion": 1,
+    "environmentId": "env_local_compose",
+    "analyzedAt": "2026-09-14T10:00:01Z",
+    "results": {
+      "criticalNodes": {
+        "nodes": [
+          {
+            "nodeId": "svc_api",
+            "score": 0.6,
+            "reasons": ["high_betweenness", "many_dependents"]
+          },
+          {
+            "nodeId": "svc_cache",
+            "score": 0.4,
+            "reasons": ["many_dependents"]
+          },
+          {
+            "nodeId": "svc_db",
+            "score": 0.4,
+            "reasons": ["many_dependents"]
+          },
+          {
+            "nodeId": "svc_worker",
+            "score": 0.0,
+            "reasons": []
+          }
+        ]
+      }
+    }
+  }
+}
