@@ -55,96 +55,78 @@ Expected shape:
 - `attack_paths` — implemented (forward paths from a compromised seed along `depends_on` only)
 - `critical_nodes` — implemented (betweenness on full graph + dependents from `depends_on` only; no seeds required)
 
-### Blast radius example
+## Fixtures (Nest integration)
 
-Seed = `svc_db` → expects `svc_api` and `svc_worker` in the blast radius:
+Topology snapshots live under `fixtures/`. Golden `/analyze` envelopes (stable examples for Nest) live under `fixtures/golden/`.
 
-```bash
-curl -s http://localhost:8000/api/v1/analyze \
-  -H 'Content-Type: application/json' \
-  -d @- <<'EOF'
-{
-  "topology": {
-    "schemaVersion": 1,
-    "environmentId": "env_local_compose",
-    "capturedAt": "2026-09-14T10:00:00Z",
-    "nodes": [
-      {"id": "svc_api", "kind": "service", "label": "api", "status": "down"},
-      {"id": "svc_worker", "kind": "service", "label": "worker", "status": "healthy"},
-      {"id": "svc_db", "kind": "service", "label": "db", "status": "healthy"},
-      {"id": "svc_cache", "kind": "service", "label": "cache", "status": "healthy"}
-    ],
-    "edges": [
-      {"id": "edge_api_db", "source": "svc_api", "target": "svc_db", "kind": "depends_on"},
-      {"id": "edge_api_cache", "source": "svc_api", "target": "svc_cache", "kind": "depends_on"},
-      {"id": "edge_worker_api", "source": "svc_worker", "target": "svc_api", "kind": "depends_on"}
-    ]
-  },
-  "analyses": ["blast_radius"],
-  "options": {"seedNodeIds": ["svc_db"]}
-}
-EOF
-```
+| File | Purpose |
+|------|---------|
+| `fixtures/sample_topology.json` | Small `depends_on`-only demo (README / golden happy paths) |
+| `fixtures/mixed_kind_topology.json` | Nest-style ids + all edge kinds (`depends_on`, `connects_to`, `mounts`, `runs_on`, `exposes`) |
+| `fixtures/cycle_topology.json` | `depends_on` cycle (a → b → c → a) |
+| `fixtures/multi_seed_topology.json` | Two independent chains (useful multi-seed blast/attack) |
+| `fixtures/golden/sample_blast_radius.json` | Expected blast response for `sample_topology` + seed `svc_db` |
+| `fixtures/golden/sample_attack_paths.json` | Expected attack response for `sample_topology` + seed `svc_api` |
+| `fixtures/golden/sample_critical_nodes.json` | Expected critical-nodes response for `sample_topology` |
 
-### Attack paths example
+`analyzedAt` in goldens is fixed (`2026-09-14T10:00:01Z`). Live responses use the current UTC time; compare `results` (and ignore or normalize `analyzedAt`).
 
-Same topology, seed = `svc_api` → expects paths such as `svc_api → svc_db` and `svc_api → svc_cache`:
+Edge directions in `mixed_kind_topology.json` follow `docs/architecture/topology-mapping.md`.
+
+### Curl against a fixture
+
+From `services/graph-engine` (engine already running on port 8000). Requires `jq`.
+
+Blast radius (`sample_topology`, seed `svc_db`):
 
 ```bash
-curl -s http://localhost:8000/api/v1/analyze \
-  -H 'Content-Type: application/json' \
-  -d @- <<'EOF'
-{
-  "topology": {
-    "schemaVersion": 1,
-    "environmentId": "env_local_compose",
-    "capturedAt": "2026-09-14T10:00:00Z",
-    "nodes": [
-      {"id": "svc_api", "kind": "service", "label": "api", "status": "down"},
-      {"id": "svc_worker", "kind": "service", "label": "worker", "status": "healthy"},
-      {"id": "svc_db", "kind": "service", "label": "db", "status": "healthy"},
-      {"id": "svc_cache", "kind": "service", "label": "cache", "status": "healthy"}
-    ],
-    "edges": [
-      {"id": "edge_api_db", "source": "svc_api", "target": "svc_db", "kind": "depends_on"},
-      {"id": "edge_api_cache", "source": "svc_api", "target": "svc_cache", "kind": "depends_on"},
-      {"id": "edge_worker_api", "source": "svc_worker", "target": "svc_api", "kind": "depends_on"}
-    ]
-  },
-  "analyses": ["attack_paths"],
-  "options": {"seedNodeIds": ["svc_api"]}
-}
-EOF
+jq -n --slurpfile t fixtures/sample_topology.json \
+  '{topology: $t[0], analyses: ["blast_radius"], options: {seedNodeIds: ["svc_db"]}}' \
+  | curl -s http://localhost:8000/api/v1/analyze \
+    -H 'Content-Type: application/json' \
+    -d @-
 ```
 
-### Critical nodes example
-
-Same topology, no seeds → ranked nodes with `score` and `reasons` (often `svc_api` near the top):
+Attack paths (same topology, seed `svc_api`):
 
 ```bash
-curl -s http://localhost:8000/api/v1/analyze \
-  -H 'Content-Type: application/json' \
-  -d @- <<'EOF'
-{
-  "topology": {
-    "schemaVersion": 1,
-    "environmentId": "env_local_compose",
-    "capturedAt": "2026-09-14T10:00:00Z",
-    "nodes": [
-      {"id": "svc_api", "kind": "service", "label": "api", "status": "down"},
-      {"id": "svc_worker", "kind": "service", "label": "worker", "status": "healthy"},
-      {"id": "svc_db", "kind": "service", "label": "db", "status": "healthy"},
-      {"id": "svc_cache", "kind": "service", "label": "cache", "status": "healthy"}
-    ],
-    "edges": [
-      {"id": "edge_api_db", "source": "svc_api", "target": "svc_db", "kind": "depends_on"},
-      {"id": "edge_api_cache", "source": "svc_api", "target": "svc_cache", "kind": "depends_on"},
-      {"id": "edge_worker_api", "source": "svc_worker", "target": "svc_api", "kind": "depends_on"}
-    ]
-  },
-  "analyses": ["critical_nodes"]
-}
-EOF
+jq -n --slurpfile t fixtures/sample_topology.json \
+  '{topology: $t[0], analyses: ["attack_paths"], options: {seedNodeIds: ["svc_api"]}}' \
+  | curl -s http://localhost:8000/api/v1/analyze \
+    -H 'Content-Type: application/json' \
+    -d @-
 ```
 
-A copy of this topology lives in `fixtures/sample_topology.json`.
+Critical nodes (no seeds):
+
+```bash
+jq -n --slurpfile t fixtures/sample_topology.json \
+  '{topology: $t[0], analyses: ["critical_nodes"]}' \
+  | curl -s http://localhost:8000/api/v1/analyze \
+    -H 'Content-Type: application/json' \
+    -d @-
+```
+
+Mixed-kind / multi-seed examples (same pattern, change fixture and seeds):
+
+```bash
+# multi-seed blast: db + redis
+jq -n --slurpfile t fixtures/multi_seed_topology.json \
+  '{topology: $t[0], analyses: ["blast_radius"], options: {seedNodeIds: ["svc:demo:db", "svc:demo:redis"]}}' \
+  | curl -s http://localhost:8000/api/v1/analyze \
+    -H 'Content-Type: application/json' \
+    -d @-
+```
+
+### Pytest
+
+From `services/graph-engine`:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+PYTHONPATH=. python -m pytest -q
+```
+
+`tests/test_golden.py` locks the three sample goldens. CI runs the same suite (`Graph Engine / pytest`).
