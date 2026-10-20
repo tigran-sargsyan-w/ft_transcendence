@@ -69,6 +69,16 @@ With several instances (recreation, scaling) the service shows its best status: 
 - Both are Nest's own: neither follows the collector's `streamId` nor its `sequence`.
 - The collector's position is the pair (`streamId`, `sequence`). A batch is applied only if it is on the same stream and continues the sequence; events already applied are dropped. Otherwise Nest loads a new snapshot: a different `streamId` (even with a lower or higher sequence), a gap, or no snapshot yet. The state stays as it was until then, so nothing wrong is published.
 
+## Sending the topology to the Graph Engine
+
+`toEngineTopology(snapshot)` (`backend/src/modules/topology/engine-topology.ts`) turns the live snapshot into the `topology` of a `POST /analyze` request: `schemaVersion`, `environmentId`, `capturedAt`, `topologyRevision`, `nodes` and `edges`, nothing else.
+
+`topologyRevision` is `<epoch>:<revision>` (`topologyRevisionOf`). The engine echoes it unchanged, so Nest compares it with the current value and takes a different one for a stale result. The epoch comes first because a restart of Nest starts the revision over at 1.
+
+Do not send the live snapshot as it is. The engine ignores the fields it does not know (`epoch`, `revision`) without an error, then echoes no `topologyRevision`, and the stale check is off without anyone noticing. A missing echo means "cannot be checked", never "up to date". A revision sent as an integer is refused (HTTP 400).
+
+For an analysis that starts from the outside (`ext:internet`), note that this node only exists when a service publishes a port beyond loopback.
+
 ## Known limits (v0)
 
 - Bind mounts have no node: the collector redacts their source, so they have no identity.
