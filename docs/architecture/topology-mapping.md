@@ -105,3 +105,4 @@ For an analysis that starts from the outside (`ext:internet`), note that this no
 - Ids use `:` and `>` as separators. Compose project and service names cannot contain `:` (Compose specification); the names of standalone containers, networks and volumes are used as Docker gives them.
 - The environment is the whole Docker host: containers that are not part of the project appear too, as `ctr:<name>` nodes or as services of their own Compose project.
 - A stopped container publishes no port, so `exposes` disappears while a service is stopped (observed with a real collector).
+- While the collector cannot be reached the last topology is kept, and nothing tells the clients it may be out of date. The realtime protocol still has to carry that signal.
