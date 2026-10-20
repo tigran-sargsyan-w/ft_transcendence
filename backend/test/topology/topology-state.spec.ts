@@ -88,6 +88,35 @@ describe('TopologyState', () => {
       expect(graphOf(second)).toEqual(expectedAfterRecreate);
     });
 
+    it('is all or nothing: a snapshot that cannot be built changes nothing', () => {
+      // A container with no networks list: the graph cannot be built from it.
+      const broken = {
+        ...snapshotAfterRecreate,
+        environmentId: 'env_other',
+        capturedAt: '2030-01-01T00:00:00.000Z',
+        streamId: 'stream_other',
+        sequence: 99,
+        containers: [
+          { ...snapshotAfterUp.containers[0], networks: undefined as never },
+        ],
+      };
+
+      const fresh = new TopologyState('epoch-1');
+
+      expect(() => fresh.loadSnapshot(broken)).toThrow();
+      expect(fresh.snapshot()).toBeNull();
+      expect(fresh.cursor).toBeNull();
+      expect(fresh.revision).toBe(0);
+
+      const state = stateAfterUp();
+      const before = state.snapshot();
+
+      expect(() => state.loadSnapshot(broken)).toThrow();
+      expect(state.snapshot()).toEqual(before);
+      expect(state.cursor).toEqual({ streamId: STREAM_ID, sequence: 12 });
+      expect(state.revision).toBe(1);
+    });
+
     it('gives each state its own epoch by default', () => {
       expect(new TopologyState().epoch).not.toBe(new TopologyState().epoch);
     });
