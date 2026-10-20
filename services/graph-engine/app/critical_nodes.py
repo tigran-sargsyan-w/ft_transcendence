@@ -2,7 +2,14 @@ from typing import Dict, List
 
 import networkx as nx
 
+from app.blast_radius import dependency_subgraph
 from app.schemas import DEPENDENCY_EDGE_KINDS
+
+# critical_nodes v1 scoring (security risk map)
+WEIGHT_BETWEENNESS = 0.6
+WEIGHT_DEPENDENTS = 0.4
+THRESHOLD_HIGH_BETWEENNESS = 0.3
+THRESHOLD_MANY_DEPENDENTS_RATIO = 0.5
 
 
 def _dependency_in_degree(graph: nx.DiGraph, node_id: str) -> int:
@@ -19,9 +26,9 @@ def compute_critical_nodes(graph: nx.DiGraph) -> Dict:
     """
     Rank nodes by how critical they are in the topology.
 
-    v0 metric mix:
-    - betweenness centrality on the full graph (bridge / bottleneck role)
-    - dependency in-degree (how many others depend_on this node)
+    v1 metric mix (risk map):
+    - betweenness on the depends_on subgraph only (bridge / pivot role)
+    - dependency in-degree (how many others directly depend_on this node)
     """
     node_ids = list(graph.nodes())
     if not node_ids:
@@ -39,7 +46,8 @@ def compute_critical_nodes(graph: nx.DiGraph) -> Dict:
             ]
         }
 
-    betweenness = nx.betweenness_centrality(graph, normalized=True)
+    dependency_graph = dependency_subgraph(graph)
+    betweenness = nx.betweenness_centrality(dependency_graph, normalized=True)
     dependency_in_degrees = {
         node_id: _dependency_in_degree(graph, node_id) for node_id in node_ids
     }
@@ -52,12 +60,18 @@ def compute_critical_nodes(graph: nx.DiGraph) -> Dict:
         dependents_score = (
             float(in_degree) / float(max_in_degree) if max_in_degree > 0 else 0.0
         )
-        score = round(0.6 * betweenness_score + 0.4 * dependents_score, 4)
+        score = round(
+            WEIGHT_BETWEENNESS * betweenness_score
+            + WEIGHT_DEPENDENTS * dependents_score,
+            4,
+        )
 
         reasons: List[str] = []
-        if betweenness_score >= 0.3:
+        if betweenness_score >= THRESHOLD_HIGH_BETWEENNESS:
             reasons.append("high_betweenness")
-        if max_in_degree > 0 and in_degree >= max(1, int(0.5 * max_in_degree)):
+        if max_in_degree > 0 and in_degree >= max(
+            1, int(THRESHOLD_MANY_DEPENDENTS_RATIO * max_in_degree)
+        ):
             reasons.append("many_dependents")
         if not reasons and score > 0:
             reasons.append("structural_role")
