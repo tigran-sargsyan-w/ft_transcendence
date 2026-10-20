@@ -18,6 +18,7 @@ import {
   STREAM_ID,
   emptySnapshot,
   event,
+  eventsCrashAndRecreate,
   eventsUp,
   snapshotAfterRecreate,
   snapshotAfterUp,
@@ -295,16 +296,60 @@ describe('TopologyService', () => {
     expect(slept).toEqual([timings.retryMinMs]);
   });
 
-  it('starts its pauses short again once the collector has answered', async () => {
+  it('keeps backing off while the events keep failing, although the snapshots work', async () => {
     const { service, slept } = setup(
-      [new Error('connect ECONNREFUSED'), snapshotAfterUp, snapshotAfterUp],
-      [new Error('socket hang up')],
+      [
+        snapshotAfterUp,
+        snapshotAfterUp,
+        snapshotAfterUp,
+        snapshotAfterUp,
+        snapshotAfterUp,
+      ],
+      [
+        new Error('HTTP 500'),
+        new Error('HTTP 500'),
+        new Error('HTTP 500'),
+        new Error('HTTP 500'),
+      ],
     );
 
-    await run(service, 2);
+    await run(service, 5);
 
-    // Down (10), answered, down again: short again (10), not doubled (20).
-    expect(slept).toEqual([10, 10]);
+    // 10, 20, 40, then the maximum. Never the minimum again: a collector that
+    // serves snapshots but not events is not asked again every 10 ms, nor
+    // are the clients sent a new snapshot each time.
+    expect(slept).toEqual([10, 20, 40, 40]);
+  });
+
+  it('backs off as well when the collector keeps resetting', async () => {
+    const { service, slept } = setup(
+      [snapshotAfterUp, snapshotAfterUp, snapshotAfterUp, snapshotAfterUp],
+      [
+        new SequenceExpiredError(),
+        new SequenceExpiredError(),
+        new SequenceExpiredError(),
+      ],
+    );
+
+    await run(service, 4);
+
+    expect(slept).toEqual([10, 20, 40]);
+  });
+
+  it('goes back to the shortest pause once events are read again', async () => {
+    const { service, slept } = setup(
+      [new Error('connect ECONNREFUSED'), snapshotAfterUp, snapshotAfterUp],
+      [
+        batchOf(...eventsCrashAndRecreate.slice(0, 2)),
+        new Error('socket hang up'),
+      ],
+    );
+
+    await run(service, 3);
+
+    // Down (10). Then a snapshot, events that apply (the batch window, 5),
+    // and a new failure: back to 10, not on to 20.
+    expect(slept).toEqual([10, 5, 10]);
   });
 
   it('builds nothing without a collector', async () => {

@@ -88,11 +88,11 @@ For an analysis that starts from the outside (`ext:internet`), note that this no
 | `COLLECTOR_URL` | Base URL of the collector (`http://collector:3001` on the Compose network). Unset: nothing is built and the collector is never called. The backend service must be given it in `compose.yml`. |
 | Snapshot timeout | 10 s |
 | Events timeout | 35 s (the collector holds a long poll for about 25 s) |
-| Pause after a failure | 1 s, doubled up to 30 s, short again once the collector answers |
+| Pause before the next try | 1 s, doubled up to 30 s each time a try ends without events having been read, back to 1 s once events are read again |
 | Pause after a change | 300 ms: a burst of events (a `docker compose up`) comes back as one batch, hence one delta |
 
 - While the collector cannot be reached nothing is published and the last topology stays as it was. Its next answer is a new snapshot.
-- A new snapshot is also loaded after a stream reset, a gap, or `COLLECTOR_SEQUENCE_EXPIRED` (HTTP 409), at most once a second.
+- A new snapshot is also loaded after a stream reset, a gap, or `COLLECTOR_SEQUENCE_EXPIRED` (HTTP 409), after the same pause: a collector that keeps resetting is not asked again every second.
 - Changes come out of `TopologyService.changes$` (a snapshot, or a delta). `snapshot()` gives the current topology to a client that connects between two changes.
 
 ## Known limits (v0)

@@ -62,6 +62,8 @@ export class TopologyService implements OnModuleInit, OnModuleDestroy {
   private readonly changes = new Subject<TopologyChange>();
   private readonly stop = new AbortController();
   private running: Promise<void> | null = null;
+  // The pause before the next try; grows while the collector keeps failing.
+  private retryMs: number;
 
   readonly changes$: Observable<TopologyChange> = this.changes.asObservable();
 
@@ -70,7 +72,9 @@ export class TopologyService implements OnModuleInit, OnModuleDestroy {
     private readonly client: CollectorClient | null,
     private readonly timings: TopologyTimings = DEFAULT_TIMINGS,
     private readonly sleep: Sleep = sleepUnlessAborted,
-  ) {}
+  ) {
+    this.retryMs = timings.retryMinMs;
+  }
 
   // The current topology, for a client that connects between two changes.
   snapshot() {
@@ -95,31 +99,30 @@ export class TopologyService implements OnModuleInit, OnModuleDestroy {
 
   private async run(client: CollectorClient) {
     const { signal } = this.stop;
-    let retryMs = this.timings.retryMinMs;
 
     while (!signal.aborted) {
       try {
         const snapshot = this.state.loadSnapshot(await client.snapshot(signal));
 
-        // The collector answered: the next failure starts from a short pause.
-        retryMs = this.timings.retryMinMs;
         this.changes.next({ type: 'snapshot', snapshot });
 
+        // Returns when a new snapshot is needed.
         await this.follow(client, signal);
-
-        // A new snapshot is needed. Not at full speed if it keeps happening.
-        await this.sleep(this.timings.retryMinMs, signal);
       } catch (error) {
         if (signal.aborted) {
           return;
         }
 
         this.logger.warn(
-          `Collector unavailable, retrying in ${retryMs} ms: ${errorMessage(error)}`,
+          `Collector unavailable, retrying in ${this.retryMs} ms: ${errorMessage(error)}`,
         );
-        await this.sleep(retryMs, signal);
-        retryMs = Math.min(retryMs * 2, this.timings.retryMaxMs);
       }
+
+      // Whichever way it ended, a new snapshot comes next. A snapshot alone
+      // proves nothing (the events may be what fails): the pause only goes
+      // back to its minimum once events have been read again.
+      await this.sleep(this.retryMs, signal);
+      this.retryMs = Math.min(this.retryMs * 2, this.timings.retryMaxMs);
     }
   }
 
@@ -150,6 +153,9 @@ export class TopologyService implements OnModuleInit, OnModuleDestroy {
       if (result.status === 'resync') {
         return;
       }
+
+      // Events are being read: the collector is serving.
+      this.retryMs = this.timings.retryMinMs;
 
       if (result.delta) {
         this.changes.next({ type: 'delta', delta: result.delta });
