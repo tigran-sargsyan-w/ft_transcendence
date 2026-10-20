@@ -46,8 +46,21 @@ const sleepUnlessAborted: Sleep = (ms, signal) =>
     signal.addEventListener('abort', done, { once: true });
   });
 
-const errorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error);
+// `fetch failed` says nothing: the reason (ECONNREFUSED, ENOTFOUND...) is in
+// its `cause`, as a code, or only as a message.
+function errorMessage(error: unknown) {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+
+  const { cause } = error;
+  const reason =
+    cause instanceof Error
+      ? ((cause as { code?: string }).code ?? cause.message)
+      : '';
+
+  return reason ? `${error.message} (${reason})` : error.message;
+}
 
 // Keeps the topology of the environment up to date from the collector:
 // a snapshot, then the events after it, read by long polling.

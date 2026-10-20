@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { firstValueFrom, take, toArray } from 'rxjs';
+import type { MockInstance } from 'vitest';
 import {
   type CollectorClient,
   SequenceExpiredError,
@@ -120,7 +121,7 @@ const batchOf = (...events: EventBatch['events']) => ({
 
 describe('TopologyService', () => {
   // A failure is logged as a warning; a normal resynchronization is not.
-  let warn: ReturnType<typeof vi.spyOn>;
+  let warn: MockInstance<Logger['warn']>;
 
   beforeEach(() => {
     warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
@@ -294,6 +295,28 @@ describe('TopologyService', () => {
     expect(collector.snapshotCalls).toBe(2);
     // The pause after a failure starts short again once it answered.
     expect(slept).toEqual([timings.retryMinMs]);
+  });
+
+  it('says why the collector could not be reached', async () => {
+    const failure = (message: string, cause?: Error) =>
+      new Error(message, { cause });
+    const refused = Object.assign(new AggregateError([]), {
+      code: 'ECONNREFUSED',
+    });
+    const { service } = setup([
+      failure('fetch failed', refused),
+      failure('fetch failed', new Error('getaddrinfo ENOTFOUND collector')),
+      failure('The collector answered HTTP 503'),
+      snapshotAfterUp,
+    ]);
+
+    await run(service, 1);
+
+    expect(warn.mock.calls.map((call) => String(call[0]))).toEqual([
+      expect.stringContaining('fetch failed (ECONNREFUSED)'),
+      expect.stringContaining('fetch failed (getaddrinfo ENOTFOUND collector)'),
+      expect.stringMatching(/: The collector answered HTTP 503$/),
+    ]);
   });
 
   it('keeps backing off while the events keep failing, although the snapshots work', async () => {
