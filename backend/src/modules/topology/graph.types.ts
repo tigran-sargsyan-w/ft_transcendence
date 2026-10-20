@@ -40,6 +40,15 @@ export type TopologySnapshot = Graph & {
   revision: number;
 };
 
+// A topology as the Graph Engine's analyze endpoint takes it: its revision is
+// one string, and `epoch` and `revision` are not fields of it.
+export type EngineTopology = Graph & {
+  schemaVersion: 1;
+  environmentId: string;
+  capturedAt: string;
+  topologyRevision: string;
+};
+
 export type TopologyOperation =
   | { op: 'node.upsert'; node: GraphNode }
   | { op: 'node.remove'; id: string }
