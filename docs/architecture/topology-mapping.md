@@ -79,6 +79,22 @@ Do not send the live snapshot as it is. The engine ignores the fields it does no
 
 For an analysis that starts from the outside (`ext:internet`), note that this node only exists when a service publishes a port beyond loopback.
 
+## Following the collector
+
+`TopologyService` keeps the topology up to date: one snapshot, then `GET /events?after=<sequence>` by long polling.
+
+| Setting | Value |
+|---------|-------|
+| `COLLECTOR_URL` | Base URL of the collector (`http://collector:3001` on the Compose network). Unset: nothing is built and the collector is never called. The backend service must be given it in `compose.yml`. |
+| Snapshot timeout | 10 s |
+| Events timeout | 35 s (the collector holds a long poll for about 25 s) |
+| Pause before the next try | 1 s, doubled up to 30 s each time a try ends without events having been read, back to 1 s once events are read again |
+| Pause after a change | 300 ms: a burst of events (a `docker compose up`) comes back as one batch, hence one delta |
+
+- While the collector cannot be reached nothing is published and the last topology stays as it was. Its next answer is a new snapshot.
+- A new snapshot is also loaded after a stream reset, a gap, or `COLLECTOR_SEQUENCE_EXPIRED` (HTTP 409), after the same pause: a collector that keeps resetting is not asked again every second.
+- Changes come out of `TopologyService.changes$` (a snapshot, or a delta). `snapshot()` gives the current topology to a client that connects between two changes.
+
 ## Known limits (v0)
 
 - Bind mounts have no node: the collector redacts their source, so they have no identity.
@@ -87,3 +103,6 @@ For an analysis that starts from the outside (`ext:internet`), note that this no
 - A `container.died` without container about a container Nest never saw is ignored: its project and service are unknown.
 - An external node only exists for published ports; nothing else is known about the outside.
 - Ids use `:` and `>` as separators. Compose project and service names cannot contain `:` (Compose specification); the names of standalone containers, networks and volumes are used as Docker gives them.
+- The environment is the whole Docker host: containers that are not part of the project appear too, as `ctr:<name>` nodes or as services of their own Compose project.
+- A stopped container publishes no port, so `exposes` disappears while a service is stopped (observed with a real collector).
+- While the collector cannot be reached the last topology is kept, and nothing tells the clients it may be out of date. The realtime protocol still has to carry that signal.
