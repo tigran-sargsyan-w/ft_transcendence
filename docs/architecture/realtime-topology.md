@@ -188,7 +188,7 @@ While the collector cannot be reached, Nest publishes nothing and keeps the last
 
 ## Errors
 
-Handshake errors are in [Connection](#connection). The acknowledgement of a command can carry:
+Handshake errors are in [Connection](#connection). The acknowledgement of a command can carry the codes below, all listed in the [API conventions](./api-conventions.md#error-codes):
 
 | Code | When |
 |------|------|
