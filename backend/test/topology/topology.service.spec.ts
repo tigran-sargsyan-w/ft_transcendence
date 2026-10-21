@@ -396,4 +396,23 @@ describe('TopologyService', () => {
     expect(await changes).toHaveLength(1);
     expect(collector.eventCalls).toEqual([12]);
   });
+
+  it('does not wait out a pause when it is stopped while publishing', async () => {
+    // The real pause and the real clock: waited out, the pause lasts 1 s.
+    const service = new TopologyService(new FakeCollector([snapshotAfterUp]));
+    let stopping: Promise<void> | undefined;
+
+    service.changes$.subscribe(() => {
+      stopping = service.onModuleDestroy();
+    });
+    service.onModuleInit();
+
+    await until(() => stopping !== undefined);
+
+    const started = Date.now();
+
+    await stopping;
+
+    expect(Date.now() - started).toBeLessThan(500);
+  });
 });

@@ -33,9 +33,15 @@ const DEFAULT_TIMINGS: TopologyTimings = {
 
 type Sleep = (ms: number, signal: AbortSignal) => Promise<void>;
 
-// Resolves early, without error, when `signal` aborts.
+// Resolves early, without error, when `signal` aborts, at once if it has.
 const sleepUnlessAborted: Sleep = (ms, signal) =>
   new Promise((resolve) => {
+    // An abort that already happened does not fire again.
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+
     const done = () => {
       clearTimeout(timer);
       signal.removeEventListener('abort', done);
