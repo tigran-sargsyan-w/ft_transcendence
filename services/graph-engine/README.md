@@ -53,7 +53,7 @@ Expected shape:
 
 - `blast_radius` — implemented (who depends on the seed, via reversed `depends_on` edges only)
 - `attack_paths` — implemented (forward paths from a compromised seed along `depends_on` only)
-- `critical_nodes` — implemented (betweenness on full graph + dependents from `depends_on` only; no seeds required)
+- `critical_nodes` — implemented (v1 risk-map score: `0.6` betweenness on `depends_on` only + `0.4` transitive dependents; reasons may include `exposed_to_internet`; no seeds required — see `docs/architecture/graph-contract.md`)
 
 ## Fixtures (Nest integration)
 

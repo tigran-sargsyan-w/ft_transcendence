@@ -123,3 +123,117 @@ def test_critical_nodes_ignores_non_dependency_edges_for_dependents():
 
     assert "many_dependents" in by_id["svc_db"]["reasons"]
     assert "many_dependents" not in by_id["svc_metrics"]["reasons"]
+
+
+def test_dependency_chain_bridge_and_transitive_reasons():
+    # web -> api -> db : api is the pivot; db has the largest blast impact.
+    topology = _topology(
+        nodes=[
+            GraphNode(id="web", kind="service", label="web", status="healthy"),
+            GraphNode(id="api", kind="service", label="api", status="healthy"),
+            GraphNode(id="db", kind="service", label="db", status="healthy"),
+        ],
+        edges=[
+            GraphEdge(
+                id="edge_web_api",
+                source="web",
+                target="api",
+                kind="depends_on",
+            ),
+            GraphEdge(
+                id="edge_api_db",
+                source="api",
+                target="db",
+                kind="depends_on",
+            ),
+        ],
+    )
+    by_id = {
+        item["nodeId"]: item
+        for item in compute_critical_nodes(build_digraph(topology))["nodes"]
+    }
+
+    assert "high_betweenness" in by_id["api"]["reasons"]
+    assert "many_dependents" in by_id["db"]["reasons"]
+    assert "exposed_to_internet" not in by_id["web"]["reasons"]
+
+
+def test_mixed_kind_ranking_prefers_db_impact_and_flags_exposure():
+    # Nest-style mixed edges: betweenness ignores exposes/mounts/runs_on/connects_to;
+    # transitive depends_on impact ranks db above api; web is internet-facing.
+    topology = _topology(
+        nodes=[
+            GraphNode(id="web", kind="service", label="web", status="healthy"),
+            GraphNode(id="api", kind="service", label="api", status="healthy"),
+            GraphNode(id="db", kind="service", label="db", status="healthy"),
+            GraphNode(id="net", kind="network", label="net", status="healthy"),
+            GraphNode(id="vol", kind="volume", label="vol", status="healthy"),
+            GraphNode(id="host", kind="host", label="host", status="healthy"),
+            GraphNode(
+                id="ext:internet",
+                kind="external",
+                label="Internet",
+                status="unknown",
+            ),
+        ],
+        edges=[
+            GraphEdge(
+                id="depends_on:web>api",
+                source="web",
+                target="api",
+                kind="depends_on",
+            ),
+            GraphEdge(
+                id="depends_on:api>db",
+                source="api",
+                target="db",
+                kind="depends_on",
+            ),
+            GraphEdge(
+                id="connects_to:web>net",
+                source="web",
+                target="net",
+                kind="connects_to",
+            ),
+            GraphEdge(
+                id="mounts:db>vol",
+                source="db",
+                target="vol",
+                kind="mounts",
+            ),
+            GraphEdge(
+                id="runs_on:web>host",
+                source="web",
+                target="host",
+                kind="runs_on",
+            ),
+            GraphEdge(
+                id="runs_on:api>host",
+                source="api",
+                target="host",
+                kind="runs_on",
+            ),
+            GraphEdge(
+                id="runs_on:db>host",
+                source="db",
+                target="host",
+                kind="runs_on",
+            ),
+            GraphEdge(
+                id="exposes:ext>web",
+                source="ext:internet",
+                target="web",
+                kind="exposes",
+            ),
+        ],
+    )
+    result = compute_critical_nodes(build_digraph(topology))
+    by_id = {item["nodeId"]: item for item in result["nodes"]}
+
+    assert by_id["db"]["score"] > by_id["api"]["score"]
+    assert by_id["db"]["score"] > by_id["web"]["score"]
+    assert "many_dependents" in by_id["db"]["reasons"]
+    assert "exposed_to_internet" in by_id["web"]["reasons"]
+    assert "high_betweenness" not in by_id["web"]["reasons"]
+    assert "many_dependents" not in by_id["host"]["reasons"]
+    assert "many_dependents" not in by_id["net"]["reasons"]

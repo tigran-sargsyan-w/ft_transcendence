@@ -8,18 +8,25 @@
         "nodes": [
           {
             "nodeId": "svc_api",
-            "score": 0.6,
-            "reasons": ["high_betweenness", "many_dependents"]
+            "score": 0.4,
+            "reasons": [
+              "high_betweenness",
+              "many_dependents"
+            ]
           },
           {
             "nodeId": "svc_cache",
             "score": 0.4,
-            "reasons": ["many_dependents"]
+            "reasons": [
+              "many_dependents"
+            ]
           },
           {
             "nodeId": "svc_db",
             "score": 0.4,
-            "reasons": ["many_dependents"]
+            "reasons": [
+              "many_dependents"
+            ]
           },
           {
             "nodeId": "svc_worker",

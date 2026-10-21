@@ -1,27 +1,45 @@
-from typing import Dict, List
+from typing import Dict, List, Set
 
 import networkx as nx
 
-from app.schemas import DEPENDENCY_EDGE_KINDS
+from app.blast_radius import dependency_subgraph
+
+# critical_nodes v1 scoring (security risk map)
+WEIGHT_BETWEENNESS = 0.6
+WEIGHT_DEPENDENTS = 0.4
+THRESHOLD_HIGH_BETWEENNESS = 0.3
+THRESHOLD_MANY_DEPENDENTS_RATIO = 0.5
 
 
-def _dependency_in_degree(graph: nx.DiGraph, node_id: str) -> int:
-    """Count predecessors linked by a dependency edge kind (e.g. depends_on)."""
-    count = 0
-    for predecessor in graph.predecessors(node_id):
-        kind = graph.edges[predecessor, node_id].get("kind")
-        if kind in DEPENDENCY_EDGE_KINDS:
-            count += 1
-    return count
+def _transitive_dependent_counts(dependency_graph: nx.DiGraph) -> Dict[str, int]:
+    """
+    How many other nodes fail if this node fails (blast-radius size on
+    reversed depends_on, excluding the node itself).
+    """
+    reversed_graph = dependency_graph.reverse(copy=False)
+    return {
+        node_id: len(nx.descendants(reversed_graph, node_id))
+        for node_id in dependency_graph.nodes()
+    }
+
+
+def _exposed_node_ids(graph: nx.DiGraph) -> Set[str]:
+    """Nodes targeted by an `exposes` edge (e.g. ext:internet -> service)."""
+    exposed: Set[str] = set()
+    for _source, target, data in graph.edges(data=True):
+        if data.get("kind") == "exposes":
+            exposed.add(target)
+    return exposed
 
 
 def compute_critical_nodes(graph: nx.DiGraph) -> Dict:
     """
     Rank nodes by how critical they are in the topology.
 
-    v0 metric mix:
-    - betweenness centrality on the full graph (bridge / bottleneck role)
-    - dependency in-degree (how many others depend_on this node)
+    v1 metric mix (risk map):
+    - betweenness on the depends_on subgraph only (bridge / pivot role)
+    - transitive dependents on depends_on (impact if the node fails)
+    - reason `exposed_to_internet` when an `exposes` edge points at the node
     """
     node_ids = list(graph.nodes())
     if not node_ids:
@@ -39,26 +57,36 @@ def compute_critical_nodes(graph: nx.DiGraph) -> Dict:
             ]
         }
 
-    betweenness = nx.betweenness_centrality(graph, normalized=True)
-    dependency_in_degrees = {
-        node_id: _dependency_in_degree(graph, node_id) for node_id in node_ids
-    }
-    max_in_degree = max(dependency_in_degrees.values(), default=0)
+    dependency_graph = dependency_subgraph(graph)
+    betweenness = nx.betweenness_centrality(dependency_graph, normalized=True)
+    dependent_counts = _transitive_dependent_counts(dependency_graph)
+    max_dependents = max(dependent_counts.values(), default=0)
+    exposed_ids = _exposed_node_ids(graph)
 
     ranked: List[Dict] = []
     for node_id in node_ids:
         betweenness_score = float(betweenness.get(node_id, 0.0))
-        in_degree = dependency_in_degrees[node_id]
+        dependent_count = dependent_counts[node_id]
         dependents_score = (
-            float(in_degree) / float(max_in_degree) if max_in_degree > 0 else 0.0
+            float(dependent_count) / float(max_dependents)
+            if max_dependents > 0
+            else 0.0
         )
-        score = round(0.6 * betweenness_score + 0.4 * dependents_score, 4)
+        score = round(
+            WEIGHT_BETWEENNESS * betweenness_score
+            + WEIGHT_DEPENDENTS * dependents_score,
+            4,
+        )
 
         reasons: List[str] = []
-        if betweenness_score >= 0.3:
+        if betweenness_score >= THRESHOLD_HIGH_BETWEENNESS:
             reasons.append("high_betweenness")
-        if max_in_degree > 0 and in_degree >= max(1, int(0.5 * max_in_degree)):
+        if max_dependents > 0 and dependent_count >= max(
+            1, int(THRESHOLD_MANY_DEPENDENTS_RATIO * max_dependents)
+        ):
             reasons.append("many_dependents")
+        if node_id in exposed_ids:
+            reasons.append("exposed_to_internet")
         if not reasons and score > 0:
             reasons.append("structural_role")
 
