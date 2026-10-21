@@ -1,0 +1,19 @@
+{
+  "data": {
+    "schemaVersion": 1,
+    "environmentId": "env_local_compose",
+    "analyzedAt": "2026-09-14T10:00:01Z",
+    "results": {
+      "blastRadius": {
+        "seedNodeIds": ["svc_db"],
+        "affectedNodeIds": ["svc_db", "svc_api", "svc_worker"],
+        "affectedEdgeIds": ["edge_api_db", "edge_worker_api"],
+        "depthByNodeId": {
+          "svc_db": 0,
+          "svc_api": 1,
+          "svc_worker": 2
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "environmentId": "env_local_compose",
+  "capturedAt": "2026-09-14T10:00:00Z",
+  "topologyRevision": "fixture-mixed-kind:1",
+  "nodes": [
+    {"id": "svc:demo:web", "kind": "service", "label": "web", "status": "healthy"},
+    {"id": "svc:demo:api", "kind": "service", "label": "api", "status": "healthy"},
+    {"id": "svc:demo:db", "kind": "service", "label": "db", "status": "healthy"},
+    {"id": "net:demo_default", "kind": "network", "label": "demo_default", "status": "healthy"},
+    {"id": "vol:demo_db_data", "kind": "volume", "label": "demo_db_data", "status": "healthy"},
+    {"id": "host:env_local_compose", "kind": "host", "label": "Docker host", "status": "healthy"},
+    {"id": "ext:internet", "kind": "external", "label": "Internet", "status": "unknown"}
+  ],
+  "edges": [
+    {"id": "depends_on:svc:demo:web>svc:demo:api", "source": "svc:demo:web", "target": "svc:demo:api", "kind": "depends_on"},
+    {"id": "depends_on:svc:demo:api>svc:demo:db", "source": "svc:demo:api", "target": "svc:demo:db", "kind": "depends_on"},
+    {"id": "connects_to:svc:demo:web>net:demo_default", "source": "svc:demo:web", "target": "net:demo_default", "kind": "connects_to"},
+    {"id": "connects_to:svc:demo:api>net:demo_default", "source": "svc:demo:api", "target": "net:demo_default", "kind": "connects_to"},
+    {"id": "connects_to:svc:demo:db>net:demo_default", "source": "svc:demo:db", "target": "net:demo_default", "kind": "connects_to"},
+    {"id": "mounts:svc:demo:db>vol:demo_db_data", "source": "svc:demo:db", "target": "vol:demo_db_data", "kind": "mounts"},
+    {"id": "runs_on:svc:demo:web>host:env_local_compose", "source": "svc:demo:web", "target": "host:env_local_compose", "kind": "runs_on"},
+    {"id": "runs_on:svc:demo:api>host:env_local_compose", "source": "svc:demo:api", "target": "host:env_local_compose", "kind": "runs_on"},
+    {"id": "runs_on:svc:demo:db>host:env_local_compose", "source": "svc:demo:db", "target": "host:env_local_compose", "kind": "runs_on"},
+    {"id": "exposes:ext:internet>svc:demo:web", "source": "ext:internet", "target": "svc:demo:web", "kind": "exposes"}
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "environmentId": "env_local_compose",
+  "capturedAt": "2026-09-14T10:00:00Z",
+  "topologyRevision": "fixture-cycle:1",
+  "nodes": [
+    {"id": "svc:demo:a", "kind": "service", "label": "a", "status": "healthy"},
+    {"id": "svc:demo:b", "kind": "service", "label": "b", "status": "healthy"},
+    {"id": "svc:demo:c", "kind": "service", "label": "c", "status": "healthy"}
+  ],
+  "edges": [
+    {"id": "depends_on:svc:demo:a>svc:demo:b", "source": "svc:demo:a", "target": "svc:demo:b", "kind": "depends_on"},
+    {"id": "depends_on:svc:demo:b>svc:demo:c", "source": "svc:demo:b", "target": "svc:demo:c", "kind": "depends_on"},
+    {"id": "depends_on:svc:demo:c>svc:demo:a", "source": "svc:demo:c", "target": "svc:demo:a", "kind": "depends_on"}
+  ]
+}
