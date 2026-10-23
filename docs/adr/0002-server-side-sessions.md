@@ -1,6 +1,6 @@
 # ADR 0002: Server-side sessions with an opaque cookie
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-28
 
 ## Context
