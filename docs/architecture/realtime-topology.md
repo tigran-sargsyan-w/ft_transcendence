@@ -24,6 +24,7 @@ Nest sends a full snapshot, then small deltas. Analyses are not part of this pro
 | `FORBIDDEN` | the `Origin` header is not the application's |
 
 - After a refusal Socket.IO does not reconnect: `socket.active` is `false` in the `connect_error` handler, and `socket.connect()` would have to be called by hand ([Socket.IO docs](https://socket.io/docs/v4/client-socket-instance/#connect_error)). On `UNAUTHORIZED` the client sends the user to the login page. A network failure also raises `connect_error`, but the socket retries by itself (`socket.active` is `true`).
+- A session that ends closes its sockets at once, since logout and revocation are immediate ([ADR 0002](../adr/0002-server-side-sessions.md)). On logout, and when the session's expiry date passes, the server disconnects every socket of that session. The client receives `disconnect` with the reason `io server disconnect`, after which Socket.IO does not reconnect by itself ([Socket.IO docs](https://socket.io/docs/v4/client-socket-instance/#disconnect)): the client calls `socket.connect()` once, and the refused handshake (`UNAUTHORIZED`) sends the user to the login page.
 
 ## Reconnection
 
@@ -77,7 +78,13 @@ For `subscribe` and `resync`, the acknowledgement comes first, then `topology:sn
 | `topology:delta` | the changes of one revision | to the room, after each change |
 | `topology:status` | `{ stale, since }` | to a socket after its snapshot; to the room when `stale` changes |
 
-A socket that subscribes gets a snapshot of revision `R`, then every delta after it, the first one with `baseRevision` `R`: none falls between.
+A socket that subscribes gets a snapshot of revision `R`, then every delta after it, the first one with `baseRevision` `R`: none falls between. The gateway joins the room first, then reads the current snapshot and sends it in the same synchronous step:
+
+- a change published before the join is already in that snapshot;
+- a change published after the read reaches the socket through the room, after the snapshot;
+- the topology module publishes each change in the same step as it applies it, so a snapshot never holds a change whose delta is still to come.
+
+Joining a room may not be immediate (`socket.join()` returns `void | Promise`, [server API](https://socket.io/docs/v4/server-api/#socketjoinroom)). A delta already contained in the snapshot can then arrive just before it; the client, still waiting for its snapshot, ignores it.
 
 ### `topology:snapshot`
 
@@ -109,7 +116,7 @@ A delta is never empty: a change with no effect produces no delta and no revisio
 
 ### `topology:status`
 
-`{ stale: boolean, since: string | null }`. `stale: true` means the collector has not answered for a while: the graph on screen is the last known one and may be out of date. `since` is when the outage began (ISO 8601 UTC), `null` when `stale` is `false`. See [Collector outages](#collector-outages).
+`{ stale: boolean, since: string | null }`. `stale: true` means Nest has failed to reach the collector for at least 10 s: the graph on screen is the last known one and may be out of date. `since` is the time of the first failed request (ISO 8601 UTC), `null` when `stale` is `false`. See [Collector outages](#collector-outages).
 
 ### TypeScript sketch (informative)
 
@@ -157,9 +164,10 @@ connect            emit topology:subscribe
 topology:snapshot  replace the whole graph, remember (epoch, revision), compare nothing
 topology:delta     if epoch and baseRevision equal the remembered ones:
                      apply the operations in order, remember the new revision
-                   otherwise ignore it and emit topology:resync
-                   (at most one resync until the next snapshot)
+                   otherwise ignore it, and emit topology:resync unless a
+                   snapshot is already on its way (after subscribe or resync)
 topology:status    show or hide the "may be out of date" notice, keep the graph
+disconnect         reason "io server disconnect": call socket.connect() once
 ```
 
 A snapshot is always adopted as it is, even when its revision is lower than the client's: a different `epoch` means Nest restarted and the revision started over at `1`, so the two numbers cannot be compared.
@@ -170,7 +178,9 @@ A delta that does not follow means a change was missed. Over one connection Sock
 
 While the collector cannot be reached, Nest publishes nothing and keeps the last graph. It tries again after 1 s, then doubles the pause up to 30 s.
 
-- After 10 s without an answer, the server sends the room `topology:status { stale: true, since }`. A shorter break sends nothing, so a blip does not make the interface flicker.
+- The 10 s count from the first failed request, not from the last answer: a long poll that waits up to 25 s for news is normal. A failure is a request that fails: connection refused, an error answer, or a timeout (10 s for the snapshot, 35 s for the events). A reset of the collector's stream or an expired sequence is not a failure.
+- After 10 s of failures, the server sends the room `topology:status { stale: true, since }`. A shorter break sends nothing, so a blip does not make the interface flicker.
+- A collector that stops answering without refusing connections is only noticed when its long poll times out: `stale` can then come up to about 45 s after its last answer.
 - The graph stays on screen with a notice. The last graph is the best information there is; only its age is uncertain.
 - When the collector answers, Nest loads a new snapshot (revision +1, same `epoch`) and sends the room `topology:snapshot`, then `topology:status { stale: false, since: null }`. The status comes second so the notice never disappears while the old graph is still on screen.
 - This can take up to 30 s after the collector is back, the longest pause between tries. The client sees a jump in revision, not a series of deltas.
@@ -207,8 +217,6 @@ Handshake errors are in [Connection](#connection). The acknowledgement of a comm
 | Commands | 10 per 10 s and per connection |
 | Size of a snapshot | Not limited: the whole graph travels in one message |
 | Delivery | At most once. Order is kept on one connection, nothing is replayed after a drop: recovery is `subscribe`, then a snapshot ([delivery guarantees](https://socket.io/docs/v4/delivery-guarantees#at-most-once)). |
-| Session | Checked at the handshake only: an open socket stays open after a logout or when its session expires |
-
 ## Examples
 
 ### First connection
