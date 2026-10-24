@@ -80,17 +80,22 @@ export class TopologyState {
 
   // Replaces everything. A resynchronization is a new revision, never a
   // reset: clients that hold an older one simply adopt this snapshot.
+  // All or nothing: the graph is built before anything is replaced, so a
+  // snapshot that cannot be built leaves the state as it was.
   loadSnapshot(snapshot: CollectorSnapshot): TopologySnapshot {
-    this.containers = new Map(
+    const containers = new Map(
       snapshot.containers.map((container) => [container.id, container]),
     );
+    const graph = buildGraph(snapshot.environmentId, containers.values());
+
+    this.containers = containers;
+    this.graph = graph;
     this.environmentId = snapshot.environmentId;
     this.updatedAt = snapshot.capturedAt;
     this.position = {
       streamId: snapshot.streamId,
       sequence: snapshot.sequence,
     };
-    this.graph = buildGraph(this.environmentId, this.containers.values());
     this.count += 1;
 
     return this.snapshot()!;
