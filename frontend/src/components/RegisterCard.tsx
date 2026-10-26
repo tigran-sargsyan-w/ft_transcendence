@@ -12,16 +12,17 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { FieldLabel } from "@/components/ui/field";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 
 type FormStatus = "idle" | "submitting" | "success";
+type RegisterCardProps = { onSwitch: () => void };
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-export function RegisterPage() {
+export function RegisterCard({ onSwitch }: RegisterCardProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState<FormStatus>("idle");
@@ -98,52 +99,61 @@ export function RegisterPage() {
   const isSubmitting = status === "submitting";
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-12">
-      <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
-        <Card>
-          <CardHeader>
-            <CardTitle>Create account</CardTitle>
-            <CardDescription>Register with email and password.</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            <FieldLabel>Email</FieldLabel>
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              disabled={isSubmitting}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-            <FieldLabel>Password</FieldLabel>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="new-password"
-              required
-              minLength={8}
-              maxLength={64}
-              value={password}
-              disabled={isSubmitting}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </CardContent>
-          <CardFooter className="flex flex-col">
-            <Button type="submit" disabled={isSubmitting} className="w-full">
-              {isSubmitting ? "Creating account…" : "Create account"}
+    <form noValidate className="w-full max-w-100">
+      <Card>
+        <CardHeader>
+          <CardTitle>Sign up</CardTitle>
+          <CardDescription>Register with email and password.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col">
+          <FieldGroup>
+            <Field>
+              <FieldLabel>Email</FieldLabel>
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                required
+                value={email}
+                disabled={isSubmitting}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </Field>
+            <Field>
+              <FieldLabel>Password</FieldLabel>
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="new-password"
+                required
+                minLength={8}
+                maxLength={64}
+                value={password}
+                disabled={isSubmitting}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </Field>
+          </FieldGroup>
+        </CardContent>
+        <CardFooter className="flex flex-col">
+          <Button type="submit" disabled={isSubmitting} className="w-full">
+            {isSubmitting ? "Signing up…" : "Signup up"}
+          </Button>
+          <CardAction>
+            Already have an account?{" "}
+            <Button onClick={onSwitch} variant="link">
+              Sign in
             </Button>
-            <CardAction>Already have an account?</CardAction>
-            {error ? (
-              <p className="text-sm text-red-700" role="alert">
-                {error}
-              </p>
-            ) : null}
-          </CardFooter>
-        </Card>
-      </form>
-    </main>
+          </CardAction>
+          {error ? (
+            <p className="text-sm text-red-700" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </CardFooter>
+      </Card>
+    </form>
   );
 }
