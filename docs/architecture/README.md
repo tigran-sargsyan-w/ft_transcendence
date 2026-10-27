@@ -13,8 +13,10 @@ Documents here should stay short and stable. Concrete stack and product decision
 - [Collector contract](./collector-contract.md) (Docker collector snapshot and events, draft v0)
 - [Topology mapping](./topology-mapping.md) (collector containers to graph nodes and edges)
 - [Security baseline](./security-baseline.md)
+- [Vault secret delivery contract v1 — proposed](./vault-secret-delivery.md)
 - [Testing strategy](./testing-strategy.md)
 - [Real-time conventions](./realtime-conventions.md)
+- [Realtime topology protocol](./realtime-topology.md) (Socket.IO: snapshot, deltas, revisions)
 - [Architecture Decision Records](../adr/README.md)
 
 ## Current status
@@ -27,10 +29,14 @@ Documents here should stay short and stable. Concrete stack and product decision
 - database/ORM — PostgreSQL + Prisma
 - Graph Engine (product-specific) — Python FastAPI + NetworkX, plain HTTP/JSON — [ADR 0001](../adr/0001-python-graph-engine.md), [graph contract](./graph-contract.md)
 - authentication — server-side sessions with an opaque cookie — [ADR 0002](../adr/0002-server-side-sessions.md)
+- realtime transport — Socket.IO — [realtime topology protocol](./realtime-topology.md)
+
+**Proposed / pending team review:**
+
+- Vault secret management — KV v2 + AppRole + Vault Agent file delivery, isolated POC first — [ADR 0003](../adr/0003-vault-secret-delivery.md) and [delivery contract v1](./vault-secret-delivery.md) (issue #92)
 
 **Still open:**
 
-- concrete WebSocket library
 - product-specific modules and events (beyond the graph contract v0)
 
 These documents should evolve through pull requests and ADRs when a decision becomes concrete.
