@@ -21,16 +21,16 @@ You can request several analyses in one `POST /api/v1/analyze` (`analyses` array
 - Several seeds are allowed (union of results).
 - `critical_nodes` ignores seeds.
 
-## Edge kinds today (`depends_on` only for traversal)
+## Edge kinds today (`depends_on` for blast / attack)
 
 For **blast** and **attack**, only `depends_on` edges are walked.  
-`connects_to`, `exposes`, `runs_on`, and `mounts` are present in the snapshot but **ignored** by those two traversals.
+`connects_to`, `exposes`, `runs_on`, and `mounts` are present in the snapshot but **ignored** by those two traversals. Scoring details for `critical_nodes`: [graph-contract.md](./graph-contract.md).
 
 | Analysis | Walk | Meaning |
 |----------|------|---------|
 | `blast_radius` | **Reversed** `depends_on` | Dependents of the seed (impact cone) |
 | `attack_paths` | **Forward** `depends_on` | Paths from the seed toward its dependencies |
-| `critical_nodes` | Ranking (not a walk) | Betweenness on the **full** graph + direct `depends_on` dependents |
+| `critical_nodes` | Ranking (not a walk) | v1: `0.6` betweenness on linked `depends_on` nodes + `0.4` transitive dependents; may flag `exposed_to_internet` |
 
 Example (`api --depends_on--> db`):
 

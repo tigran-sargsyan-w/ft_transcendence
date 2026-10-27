@@ -2,7 +2,7 @@
 
 Stateless Python service for infrastructure graph analysis (blast radius, attack paths, critical nodes).
 
-See `docs/architecture/graph-contract.md` and `docs/adr/0001-python-graph-engine.md`.
+See `docs/architecture/graph-contract.md`, the Nest/frontend [analyses cheat-sheet](../../docs/architecture/graph-engine-analyses.md), and `docs/adr/0001-python-graph-engine.md`.
 
 ## Requirements
 
