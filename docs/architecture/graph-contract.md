@@ -189,7 +189,7 @@ score = 0.6 × betweenness + 0.4 × transitive_dependents_normalized
 
 | Signal | Definition | Weight |
 |--------|------------|--------|
-| Betweenness | Normalized betweenness on the **`depends_on` subgraph only** (pivot / bridge). Other edge kinds do not contribute. | `0.6` |
+| Betweenness | Normalized betweenness on nodes that participate in **`depends_on`** (degree > 0), so isolated host/network/volume nodes do not dilute the score. Other edge kinds do not contribute. | `0.6` |
 | Transitive dependents | How many **other** nodes fail if this node fails (blast size on reversed `depends_on`, excluding self), normalized by the max in the graph. | `0.4` |
 
 Reason codes (opaque strings for Nest; new codes may be added later):

@@ -37,7 +37,8 @@ def compute_critical_nodes(graph: nx.DiGraph) -> Dict:
     Rank nodes by how critical they are in the topology.
 
     v1 metric mix (risk map):
-    - betweenness on the depends_on subgraph only (bridge / pivot role)
+    - betweenness on nodes that participate in depends_on (degree > 0), so
+      isolated host/network/volume nodes do not dilute normalization
     - transitive dependents on depends_on (impact if the node fails)
     - reason `exposed_to_internet` when an `exposes` edge points at the node
     """
@@ -58,7 +59,12 @@ def compute_critical_nodes(graph: nx.DiGraph) -> Dict:
         }
 
     dependency_graph = dependency_subgraph(graph)
-    betweenness = nx.betweenness_centrality(dependency_graph, normalized=True)
+    linked = [node for node, degree in dependency_graph.degree() if degree > 0]
+    betweenness = (
+        nx.betweenness_centrality(dependency_graph.subgraph(linked), normalized=True)
+        if linked
+        else {}
+    )
     dependent_counts = _transitive_dependent_counts(dependency_graph)
     max_dependents = max(dependent_counts.values(), default=0)
     exposed_ids = _exposed_node_ids(graph)
@@ -82,7 +88,7 @@ def compute_critical_nodes(graph: nx.DiGraph) -> Dict:
         if betweenness_score >= THRESHOLD_HIGH_BETWEENNESS:
             reasons.append("high_betweenness")
         if max_dependents > 0 and dependent_count >= max(
-            1, int(THRESHOLD_MANY_DEPENDENTS_RATIO * max_dependents)
+            1, THRESHOLD_MANY_DEPENDENTS_RATIO * max_dependents
         ):
             reasons.append("many_dependents")
         if node_id in exposed_ids:

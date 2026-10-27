@@ -158,9 +158,9 @@ def test_dependency_chain_bridge_and_transitive_reasons():
     assert "exposed_to_internet" not in by_id["web"]["reasons"]
 
 
-def test_mixed_kind_ranking_prefers_db_impact_and_flags_exposure():
-    # Nest-style mixed edges: betweenness ignores exposes/mounts/runs_on/connects_to;
-    # transitive depends_on impact ranks db above api; web is internet-facing.
+def test_mixed_kind_ranking_prefers_api_bridge_and_flags_exposure():
+    # Nest-style mixed edges: betweenness uses linked depends_on nodes only (not
+    # diluted by host/net/volume) - api ranks above db; web is internet-facing.
     topology = _topology(
         nodes=[
             GraphNode(id="web", kind="service", label="web", status="healthy"),
@@ -230,8 +230,9 @@ def test_mixed_kind_ranking_prefers_db_impact_and_flags_exposure():
     result = compute_critical_nodes(build_digraph(topology))
     by_id = {item["nodeId"]: item for item in result["nodes"]}
 
-    assert by_id["db"]["score"] > by_id["api"]["score"]
-    assert by_id["db"]["score"] > by_id["web"]["score"]
+    assert by_id["api"]["score"] > by_id["db"]["score"]
+    assert by_id["api"]["score"] > by_id["web"]["score"]
+    assert "high_betweenness" in by_id["api"]["reasons"]
     assert "many_dependents" in by_id["db"]["reasons"]
     assert "exposed_to_internet" in by_id["web"]["reasons"]
     assert "high_betweenness" not in by_id["web"]["reasons"]
