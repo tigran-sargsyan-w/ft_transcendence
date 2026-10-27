@@ -13,6 +13,7 @@ import type {
 import {
   type TopologyChange,
   TopologyService,
+  type TopologyStatus,
 } from '../../src/modules/topology/topology.service.js';
 import {
   ENVIRONMENT_ID,
@@ -29,6 +30,7 @@ import {
 // nothing ever ends: it waits until the service stops.
 class FakeCollector implements CollectorClient {
   snapshotCalls = 0;
+  readonly snapshotTimes: number[] = [];
   readonly eventCalls: number[] = [];
 
   constructor(
@@ -38,6 +40,7 @@ class FakeCollector implements CollectorClient {
 
   snapshot(signal: AbortSignal) {
     this.snapshotCalls += 1;
+    this.snapshotTimes.push(Date.now());
 
     return this.next(this.snapshots, signal);
   }
@@ -67,7 +70,13 @@ class FakeCollector implements CollectorClient {
   }
 }
 
-const timings = { retryMinMs: 10, retryMaxMs: 40, batchWindowMs: 5 };
+// The stale delay is long enough for these tests to never reach it.
+const timings = {
+  retryMinMs: 10,
+  retryMaxMs: 40,
+  batchWindowMs: 5,
+  staleAfterMs: 1_000,
+};
 
 function setup(
   snapshots: (CollectorSnapshot | Error)[],
@@ -382,6 +391,7 @@ describe('TopologyService', () => {
     await service.onModuleDestroy();
 
     expect(service.snapshot()).toBeNull();
+    expect(service.status()).toEqual({ stale: false, since: null });
   });
 
   it('stops for good, even in the middle of a long poll', async () => {
@@ -414,5 +424,107 @@ describe('TopologyService', () => {
     await stopping;
 
     expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('reports the topology as stale once the failures last long enough', async () => {
+    const collector = new FakeCollector([
+      new Error('connect ECONNREFUSED'),
+      new Error('connect ECONNREFUSED'),
+      new Error('connect ECONNREFUSED'),
+    ]);
+    // Real pauses of 10 then 20 ms: the third try comes after the 25 ms.
+    const service = new TopologyService(collector, {
+      ...timings,
+      staleAfterMs: 25,
+    });
+    const reported = firstValueFrom(service.status$);
+
+    service.onModuleInit();
+
+    const status = await reported;
+
+    await service.onModuleDestroy();
+
+    const since = Date.parse(status.since ?? '');
+
+    expect(status.stale).toBe(true);
+    // Counted from the first failure, not from the one before the report.
+    expect(since).toBeGreaterThanOrEqual(collector.snapshotTimes[0]);
+    expect(since).toBeLessThan(collector.snapshotTimes[1]);
+    expect(service.status()).toEqual(status);
+  });
+
+  it('reports nothing when the collector answers before the delay', async () => {
+    const collector = new FakeCollector([
+      new Error('connect ECONNREFUSED'),
+      snapshotAfterUp,
+    ]);
+    // Pauses are not waited for: the outage lasts no time at all.
+    const service = new TopologyService(
+      collector,
+      { ...timings, staleAfterMs: 40 },
+      async () => {},
+    );
+    const statuses: TopologyStatus[] = [];
+
+    service.status$.subscribe((status) => statuses.push(status));
+    service.onModuleInit();
+    await until(() => service.snapshot() !== null);
+    // Twice the delay: a report that was not cancelled would be in by now.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    await service.onModuleDestroy();
+
+    expect(statuses).toEqual([]);
+    expect(service.status()).toEqual({ stale: false, since: null });
+  });
+
+  it('does not take a reset of the collector for an outage', async () => {
+    // After the reset the collector says nothing: were the reset a failure,
+    // the outage would never end and be reported.
+    const collector = new FakeCollector(
+      [snapshotAfterUp],
+      [new SequenceExpiredError()],
+    );
+    const service = new TopologyService(
+      collector,
+      { ...timings, staleAfterMs: 40 },
+      async () => {},
+    );
+    const statuses: TopologyStatus[] = [];
+
+    service.status$.subscribe((status) => statuses.push(status));
+    service.onModuleInit();
+    await until(() => collector.snapshotCalls >= 2);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    await service.onModuleDestroy();
+
+    expect(statuses).toEqual([]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('announces the end of an outage after the snapshot that ends it', async () => {
+    const collector = new FakeCollector([
+      new Error('connect ECONNREFUSED'),
+      snapshotAfterUp,
+    ]);
+    // Real pause of 60 ms: the report (after 20) comes before the snapshot.
+    const service = new TopologyService(collector, {
+      retryMinMs: 60,
+      retryMaxMs: 60,
+      batchWindowMs: 5,
+      staleAfterMs: 20,
+    });
+    const log: string[] = [];
+
+    service.changes$.subscribe((change) => log.push(change.type));
+    service.status$.subscribe((status) =>
+      log.push(status.stale ? 'stale' : 'fresh'),
+    );
+    service.onModuleInit();
+    await until(() => log.length >= 3);
+    await service.onModuleDestroy();
+
+    expect(log).toEqual(['stale', 'snapshot', 'fresh']);
+    expect(service.status()).toEqual({ stale: false, since: null });
   });
 });
