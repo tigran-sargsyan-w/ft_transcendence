@@ -13,6 +13,8 @@ import {
   Ack,
   ConnectedSocket,
   MessageBody,
+  type OnGatewayConnection,
+  type OnGatewayDisconnect,
   type OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
@@ -33,12 +35,17 @@ import {
 } from '../topology/topology.service.js';
 import { CommandLimitGuard } from './command-limit.guard.js';
 import { SubscribeDto } from './dto/subscribe.dto.js';
+import { disconnectAt } from './session-expiry.js';
 import { WsErrorFilter } from './ws-error.filter.js';
 
 type AckFn = (response: { data: unknown } | { error: unknown }) => void;
 
 // One room per environment.
 const room = (environmentId: string) => `env:${environmentId}`;
+
+// One room per session, to close its sockets when it ends. It is named after
+// the hash of the session token, which is never sent to a client.
+const sessionRoom = (tokenHash: string) => `session:${tokenHash}`;
 
 // What the server sends: the envelope of docs/architecture/realtime-conventions.md.
 function send(
@@ -55,7 +62,13 @@ function send(
 @WebSocketGateway({ maxHttpBufferSize: 16 * 1024 })
 @UseGuards(CommandLimitGuard)
 @UseFilters(WsErrorFilter)
-export class RealtimeGateway implements OnGatewayInit, OnModuleDestroy {
+export class RealtimeGateway
+  implements
+    OnGatewayInit,
+    OnGatewayConnection,
+    OnGatewayDisconnect,
+    OnModuleDestroy
+{
   @WebSocketServer() server!: Server;
 
   private readonly logger = new Logger(RealtimeGateway.name);
@@ -92,6 +105,11 @@ export class RealtimeGateway implements OnGatewayInit, OnModuleDestroy {
         }
 
         socket.data.user = session.user;
+        socket.data.session = {
+          tokenHash: session.tokenHash,
+          expiresAt: session.expiresAt,
+        };
+        await socket.join(sessionRoom(session.tokenHash));
         next();
       } catch (error) {
         // `connect_error` on the client, with `error.data = { code, message }`.
@@ -109,11 +127,28 @@ export class RealtimeGateway implements OnGatewayInit, OnModuleDestroy {
       this.topology.status$.subscribe((status) =>
         this.toRoom('topology:status', status),
       ),
+      // A logout closes the sockets of that session at once.
+      this.authService.sessionEnded$.subscribe((tokenHash) =>
+        this.server.in(sessionRoom(tokenHash)).disconnectSockets(true),
+      ),
     );
   }
 
   onModuleDestroy() {
     this.relays.forEach((relay) => relay.unsubscribe());
+  }
+
+  // A socket lasts as long as its session: it is closed at the expiry date,
+  // unless a logout closes it before. The client then receives `disconnect`
+  // with the reason `io server disconnect`.
+  handleConnection(socket: Socket) {
+    socket.data.stopExpiry = disconnectAt(socket.data.session.expiresAt, () =>
+      socket.disconnect(true),
+    );
+  }
+
+  handleDisconnect(socket: Socket) {
+    socket.data.stopExpiry?.();
   }
 
   @SubscribeMessage('topology:subscribe')

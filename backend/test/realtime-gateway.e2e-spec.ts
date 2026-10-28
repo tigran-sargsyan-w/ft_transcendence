@@ -188,4 +188,60 @@ describe('Realtime handshake (e2e)', () => {
       process.env.APP_ORIGIN = APP_ORIGIN;
     }
   });
+
+  // A connected socket: the test fails if the handshake is refused.
+  async function connected(cookie: string) {
+    const socket = io(url, {
+      transports: ['websocket'],
+      reconnection: false,
+      forceNew: true,
+      extraHeaders: { cookie },
+    });
+
+    sockets.push(socket);
+
+    await new Promise<void>((resolve, reject) => {
+      socket.once('connect', resolve);
+      socket.once('connect_error', reject);
+    });
+
+    return socket;
+  }
+
+  // The reason the server gave when it closed the socket.
+  const disconnection = (socket: Socket) =>
+    new Promise<string>((resolve) => socket.once('disconnect', resolve));
+
+  it('closes the sockets of a session when it logs out, and only those', async () => {
+    const token = await login();
+    const otherToken = await login();
+    const first = await connected(`sid=${token}`);
+    const second = await connected(`sid=${token}`);
+    const unrelated = await connected(`sid=${otherToken}`);
+    const closed = [disconnection(first), disconnection(second)];
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/logout')
+      .set('Cookie', `sid=${token}`)
+      .expect(204);
+
+    expect(await Promise.all(closed)).toEqual([
+      'io server disconnect',
+      'io server disconnect',
+    ]);
+    expect(unrelated.connected).toBe(true);
+  });
+
+  it('closes the socket when its session expires', async () => {
+    const token = await login();
+
+    await prisma.session.update({
+      where: { tokenHash: hashToken(token) },
+      data: { expiresAt: new Date(Date.now() + 500) },
+    });
+
+    const socket = await connected(`sid=${token}`);
+
+    expect(await disconnection(socket)).toBe('io server disconnect');
+  });
 });
