@@ -1,6 +1,13 @@
 import type { Socket } from 'socket.io';
 import { RealtimeGateway } from '../../src/modules/realtime/realtime.gateway.js';
 
+// The gateway does not use it in this spec, and the real one imports the
+// generated Prisma client, which the CI creates only at the build step, after
+// the unit tests.
+vi.mock('../../src/modules/auth/auth.service.js', () => ({
+  AuthService: class AuthService {},
+}));
+
 describe('RealtimeGateway connection lifecycle', () => {
   beforeEach(() => {
     vi.useFakeTimers();
