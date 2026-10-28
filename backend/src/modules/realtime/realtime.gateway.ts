@@ -1,22 +1,72 @@
 import {
+  ConflictException,
   ForbiddenException,
   Logger,
+  NotFoundException,
+  type OnModuleDestroy,
+  ServiceUnavailableException,
   UnauthorizedException,
+  UseFilters,
+  UseGuards,
 } from '@nestjs/common';
-import { type OnGatewayInit, WebSocketGateway } from '@nestjs/websockets';
+import {
+  Ack,
+  ConnectedSocket,
+  MessageBody,
+  type OnGatewayInit,
+  SubscribeMessage,
+  WebSocketGateway,
+  WebSocketServer,
+} from '@nestjs/websockets';
 import cookieParser from 'cookie-parser';
 import type { Request } from 'express';
-import type { Server } from 'socket.io';
+import type { Subscription } from 'rxjs';
+import type { Server, Socket } from 'socket.io';
+import { createValidationPipe, validationError } from '../../app.setup.js';
 import { toErrorResponse } from '../../shared/api-envelope.js';
 import { AuthService } from '../auth/auth.service.js';
 import { SESSION_COOKIE } from '../auth/session-cookie.js';
+import type { TopologySnapshot } from '../topology/graph.types.js';
+import {
+  type TopologyChange,
+  TopologyService,
+} from '../topology/topology.service.js';
+import { CommandLimitGuard } from './command-limit.guard.js';
+import { SubscribeDto } from './dto/subscribe.dto.js';
+import { WsErrorFilter } from './ws-error.filter.js';
 
-// Socket.IO on the path of its default (/socket.io/), on the port of the API.
-@WebSocketGateway()
-export class RealtimeGateway implements OnGatewayInit {
+type AckFn = (response: { data: unknown } | { error: unknown }) => void;
+
+// One room per environment.
+const room = (environmentId: string) => `env:${environmentId}`;
+
+// What the server sends: the envelope of docs/architecture/realtime-conventions.md.
+function send(
+  target: { emit: (event: string, ...args: unknown[]) => unknown },
+  event: string,
+  payload: unknown,
+) {
+  target.emit(event, { event, payload, timestamp: new Date().toISOString() });
+}
+
+// The messages of docs/architecture/realtime-topology.md, on Socket.IO's
+// default path (/socket.io/) and the port of the API. A message over 16 KB
+// closes the socket.
+@WebSocketGateway({ maxHttpBufferSize: 16 * 1024 })
+@UseGuards(CommandLimitGuard)
+@UseFilters(WsErrorFilter)
+export class RealtimeGateway implements OnGatewayInit, OnModuleDestroy {
+  @WebSocketServer() server!: Server;
+
   private readonly logger = new Logger(RealtimeGateway.name);
+  private readonly relays: Subscription[] = [];
+  // Known from the first snapshot: a delta does not name its environment.
+  private environmentId: string | null = null;
 
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly topology: TopologyService,
+  ) {}
 
   afterInit(server: Server) {
     // Fills `request.cookies` for the handshake request, as for the API routes.
@@ -51,5 +101,106 @@ export class RealtimeGateway implements OnGatewayInit {
         next(Object.assign(new Error(message), { data: { code, message } }));
       }
     });
+
+    // What the topology publishes goes to the room in the same step, so no
+    // change falls between the snapshot a socket gets and what follows it.
+    this.relays.push(
+      this.topology.changes$.subscribe((change) => this.relay(change)),
+      this.topology.status$.subscribe((status) =>
+        this.toRoom('topology:status', status),
+      ),
+    );
+  }
+
+  onModuleDestroy() {
+    this.relays.forEach((relay) => relay.unsubscribe());
+  }
+
+  @SubscribeMessage('topology:subscribe')
+  async subscribe(
+    @ConnectedSocket() socket: Socket,
+    // The pipe is on the body only: the socket is not something to validate.
+    @MessageBody(createValidationPipe()) body: SubscribeDto,
+    @Ack() ack?: AckFn,
+  ) {
+    // A primitive gets through the pipe: it has no property to check.
+    if (typeof body !== 'object') {
+      throw validationError({ body: ['body must be an object'] });
+    }
+
+    const known = this.topology.snapshot();
+
+    if (!known) {
+      throw new ServiceUnavailableException(
+        'The topology is not available yet',
+        { errorCode: 'TOPOLOGY_UNAVAILABLE' },
+      );
+    }
+
+    const environmentId = body.environmentId ?? known.environmentId;
+
+    if (environmentId !== known.environmentId) {
+      throw new NotFoundException('Unknown environment', {
+        errorCode: 'TOPOLOGY_UNKNOWN_ENVIRONMENT',
+      });
+    }
+
+    // The room first, then the snapshot. Joining may not be immediate, and a
+    // change published while it lasts is in the snapshot read just after.
+    this.environmentId = environmentId;
+    await socket.join(room(environmentId));
+
+    // No await from here on: nothing can be published between the read of the
+    // snapshot and its sending, and what comes later reaches the room.
+    this.answer(socket, ack, this.topology.snapshot() ?? known);
+  }
+
+  @SubscribeMessage('topology:unsubscribe')
+  async unsubscribe(@ConnectedSocket() socket: Socket, @Ack() ack?: AckFn) {
+    if (this.environmentId) {
+      await socket.leave(room(this.environmentId));
+    }
+
+    ack?.({ data: {} });
+  }
+
+  @SubscribeMessage('topology:resync')
+  resync(@ConnectedSocket() socket: Socket, @Ack() ack?: AckFn) {
+    const snapshot = this.topology.snapshot();
+
+    if (!snapshot || !socket.rooms.has(room(snapshot.environmentId))) {
+      throw new ConflictException('Not subscribed to the topology', {
+        errorCode: 'TOPOLOGY_NOT_SUBSCRIBED',
+      });
+    }
+
+    this.answer(socket, ack, snapshot);
+  }
+
+  // The acknowledgement, then the snapshot, then the status: Socket.IO keeps
+  // the order of what it sends on one connection.
+  private answer(
+    socket: Socket,
+    ack: AckFn | undefined,
+    snapshot: TopologySnapshot,
+  ) {
+    ack?.({ data: { environmentId: snapshot.environmentId } });
+    send(socket, 'topology:snapshot', snapshot);
+    send(socket, 'topology:status', this.topology.status());
+  }
+
+  private relay(change: TopologyChange) {
+    if (change.type === 'snapshot') {
+      this.environmentId = change.snapshot.environmentId;
+      this.toRoom('topology:snapshot', change.snapshot);
+    } else {
+      this.toRoom('topology:delta', change.delta);
+    }
+  }
+
+  private toRoom(event: string, payload: unknown) {
+    if (this.environmentId) {
+      send(this.server.to(room(this.environmentId)), event, payload);
+    }
   }
 }

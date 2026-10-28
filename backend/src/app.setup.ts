@@ -6,23 +6,26 @@ import {
   ResponseEnvelopeInterceptor,
 } from './shared/api-envelope.js';
 
-// Also bound to the realtime gateway with @UsePipes.
+// details = { field: [messages] }.
+export function validationError(details: Record<string, string[]>) {
+  return new BadRequestException(
+    { message: 'Request validation failed', details },
+    { errorCode: 'VALIDATION_ERROR' },
+  );
+}
+
+// Also bound to the body of the commands of the realtime gateway.
 export function createValidationPipe() {
   return new ValidationPipe({
     whitelist: true,
     forbidNonWhitelisted: true,
     transform: true,
-    // details = { field: [messages] }.
     // Limit: flat DTOs only, a nested field is listed with no messages.
     exceptionFactory: (errors) =>
-      new BadRequestException(
-        {
-          message: 'Request validation failed',
-          details: Object.fromEntries(
-            errors.map((e) => [e.property, Object.values(e.constraints ?? {})]),
-          ),
-        },
-        { errorCode: 'VALIDATION_ERROR' },
+      validationError(
+        Object.fromEntries(
+          errors.map((e) => [e.property, Object.values(e.constraints ?? {})]),
+        ),
       ),
   });
 }

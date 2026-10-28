@@ -18,6 +18,12 @@ export class SessionGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext) {
+    // It also runs for the messages of a gateway, where there is no request
+    // and no cookie: a socket is authenticated once, at its handshake.
+    if (context.getType() !== 'http') {
+      return true;
+    }
+
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC, [
       context.getHandler(),
       context.getClass(),
