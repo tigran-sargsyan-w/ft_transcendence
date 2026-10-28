@@ -11,8 +11,8 @@ The workflow uses five independent jobs. A failure in one job does not prevent t
 | Frontend | `npm ci`, lint, production build |
 | Backend | `npm ci`, lint, existing unit test command, Nest build (including Prisma client generation) |
 | Collector | `npm ci`, typecheck, Vitest coverage thresholds, TypeScript build |
-| Graph Engine | Python dependencies, pytest |
-| Docker Compose | Static `docker compose config --quiet` validation with dummy database variables |
+| Graph Engine | Python dependencies, pytest, Docker image build (`services/graph-engine/Dockerfile`) |
+| Docker Compose | Static `docker compose config --quiet` validation with dummy database variables, plus an assert that the `graph-engine` service is listed |
 
 Node services run with Node.js 22; Graph Engine runs with Python 3.12. Each job installs its own dependencies and caches package downloads using the matching lock/requirements file. On a PR, a superseded in-progress CI run is cancelled.
 
@@ -39,12 +39,18 @@ npm --prefix services/collector run build
   cd services/graph-engine
   python3 -m pip install -r requirements.txt
   python3 -m pytest -q
+  docker build -t graph-engine:ci .
 )
 
 POSTGRES_USER=transcendence_ci \
 POSTGRES_PASSWORD=placeholder_for_ci_only \
 POSTGRES_DB=transcendence_ci \
   docker compose -f compose.yml config --quiet
+
+POSTGRES_USER=transcendence_ci \
+POSTGRES_PASSWORD=placeholder_for_ci_only \
+POSTGRES_DB=transcendence_ci \
+  docker compose -f compose.yml config --services | grep -qx graph-engine
 ```
 
 ## How to interpret a CI result
@@ -52,7 +58,8 @@ POSTGRES_DB=transcendence_ci \
 - A failed job should be investigated before a PR is merged. Open the job's step logs in the GitHub Actions tab.
 - Backend `npm run test` currently uses `vitest run --passWithNoTests`. This means a green backend test step **does not establish that any tests ran**. Backend test coverage is a separate owner follow-up.
 - Collector coverage thresholds are enforced by `services/collector/vitest.config.ts`.
-- Docker Compose validation checks only the configuration syntax and interpolation; it is not a running integration test.
+- Docker Compose validation checks only the configuration syntax and interpolation (plus that `graph-engine` is still declared); it is not a running integration test and does not call `docker compose up`.
+- The Graph Engine image build proves the Dockerfile still builds; it does not start the container or hit `/health`.
 - This first version does not include an `npm audit` blocking gate: known pre-existing vulnerabilities must be evaluated by the respective frontend/backend owners separately.
 - CI is not a production deployment or a substitute for browser/API/realtime integration tests.
 
