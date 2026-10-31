@@ -1,0 +1,27 @@
+
+# Local Vault data (if bind mounts are used)
+/data/
+/vault-data/
+
+# Locally generated TLS certificates and keys
+/tls/
+/certs/
+
+# Local secret material and runtime files
+/secrets/
+/bootstrap/
+/runtime/
+
+# Local environment configuration
+.env
+.env.*
+!.env.example
+
+# Sensitive files accidentally placed outside ignored directories
+*.key
+*.pem
+*.p12
+*.pfx
+*.token
+*.secret
+*.unseal
