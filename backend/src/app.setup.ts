@@ -33,6 +33,11 @@ export function createValidationPipe() {
 // The app must be created with { bodyParser: false }: only JSON bodies are
 // parsed, so a cross-site HTML form cannot post a usable body (ADR 0002).
 export function configureApp(app: NestExpressApplication) {
+  // One proxy in front (Nginx): req.ip is the client address it appends to
+  // X-Forwarded-For, so the login limit counts each client (ADR 0002).
+  // No other way in may let a client pick that address: port 3000 is
+  // published on loopback only, and the Vite proxy appends it too (`xfwd`).
+  app.set('trust proxy', 1);
   app.useBodyParser('json');
   app.use(cookieParser());
 
