@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes } from 'node:crypto';
+import { type Observable, Subject } from 'rxjs';
 import { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../shared/prisma/prisma.service.js';
 import { LoginDto } from './dto/login.dto.js';
@@ -31,6 +32,12 @@ export function hashToken(token: string) {
 
 @Injectable()
 export class AuthService {
+  private readonly sessionEnded = new Subject<string>();
+
+  // The token hash of each session that a logout ends, for the realtime
+  // gateway to close the sockets of that session.
+  readonly sessionEnded$: Observable<string> = this.sessionEnded.asObservable();
+
   constructor(private readonly prisma: PrismaService) {}
 
   async register(dto: RegisterDto) {
@@ -100,20 +107,23 @@ export class AuthService {
   }
 
   async logout(token: string) {
-    await this.prisma.session.deleteMany({
-      where: { tokenHash: hashToken(token) },
-    });
+    const tokenHash = hashToken(token);
+
+    await this.prisma.session.deleteMany({ where: { tokenHash } });
+
+    this.sessionEnded.next(tokenHash);
   }
 
-  // The user behind a session cookie, or null if the session is unknown or
+  // The session behind a session cookie, or null if it is unknown or
   // expired. An expired session is deleted on the way.
-  async findSessionUser(token: string | undefined) {
+  async findSession(token: string | undefined) {
     if (!token) {
       return null;
     }
 
+    const tokenHash = hashToken(token);
     const session = await this.prisma.session.findUnique({
-      where: { tokenHash: hashToken(token) },
+      where: { tokenHash },
       include: { user: { select: PUBLIC_USER } },
     });
 
@@ -126,6 +136,10 @@ export class AuthService {
       return null;
     }
 
-    return session.user;
+    return { tokenHash, expiresAt: session.expiresAt, user: session.user };
+  }
+
+  async findSessionUser(token: string | undefined) {
+    return (await this.findSession(token))?.user ?? null;
   }
 }

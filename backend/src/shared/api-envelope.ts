@@ -28,46 +28,59 @@ export class ResponseEnvelopeInterceptor implements NestInterceptor {
 // `expose` is true only when the message is safe to show to the client.
 type HttpError = Error & { status?: number; expose?: boolean };
 
-// Every error leaves as { error: { code, message } }. The code is the
-// exception's `errorCode`, else its HTTP status name (404 -> NOT_FOUND).
-@Catch()
-export class ApiExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(ApiExceptionFilter.name);
+// The status and the body of an error, wherever it is sent (an HTTP response,
+// a Socket.IO acknowledgement). Every error is { error: { code, message } }.
+// The code is the exception's `errorCode`, else its HTTP status name
+// (404 -> NOT_FOUND).
+export function toErrorResponse(exception: unknown, logger: Logger) {
+  if (exception instanceof HttpException) {
+    const status = exception.getStatus();
+    // Optional `details`: set by the validation factory and by /health.
+    const { details } = exception.getResponse() as { details?: unknown };
 
-  catch(exception: unknown, host: ArgumentsHost) {
-    const response = host.switchToHttp().getResponse<Response>();
-
-    if (exception instanceof HttpException) {
-      const status = exception.getStatus();
-      // Optional `details`: set by the validation factory and by /health.
-      const { details } = exception.getResponse() as { details?: unknown };
-
-      response.status(status).json({
+    return {
+      status,
+      body: {
         error: {
           code: exception.errorCode ?? HttpStatus[status],
           message: exception.message,
           details,
         },
-      });
-      return;
-    }
+      },
+    };
+  }
 
-    if (exception instanceof Error) {
-      const { status, expose } = exception as HttpError;
+  if (exception instanceof Error) {
+    const { status, expose } = exception as HttpError;
 
-      if (expose && status) {
-        response.status(status).json({
+    if (expose && status) {
+      return {
+        status,
+        body: {
           error: { code: HttpStatus[status], message: exception.message },
-        });
-        return;
-      }
+        },
+      };
     }
+  }
 
-    // Unknown error: log the real one, send nothing that could leak.
-    this.logger.error(exception);
+  // Unknown error: log the real one, send nothing that could leak.
+  logger.error(exception);
 
-    response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+  return {
+    status: HttpStatus.INTERNAL_SERVER_ERROR,
+    body: {
       error: { code: 'INTERNAL_ERROR', message: 'Internal server error' },
-    });
+    },
+  };
+}
+
+@Catch()
+export class ApiExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(ApiExceptionFilter.name);
+
+  catch(exception: unknown, host: ArgumentsHost) {
+    const { status, body } = toErrorResponse(exception, this.logger);
+
+    host.switchToHttp().getResponse<Response>().status(status).json(body);
   }
 }

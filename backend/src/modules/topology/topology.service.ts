@@ -16,6 +16,10 @@ export type TopologyChange =
   | { type: 'snapshot'; snapshot: TopologySnapshot }
   | { type: 'delta'; delta: TopologyDelta };
 
+// Whether the topology may be out of date: the collector could not be reached
+// for `staleAfterMs`. `since` is the time of the first failure.
+export type TopologyStatus = { stale: boolean; since: string | null };
+
 export type TopologyTimings = {
   // Pause before asking again after a failure, doubled up to the maximum.
   retryMinMs: number;
@@ -23,12 +27,16 @@ export type TopologyTimings = {
   // After a change, wait this long before reading on: a burst of events (a
   // `docker compose up`) then comes back as one batch, hence one delta.
   batchWindowMs: number;
+  // How long the collector must stay unreachable before the topology is
+  // reported as stale.
+  staleAfterMs: number;
 };
 
 const DEFAULT_TIMINGS: TopologyTimings = {
   retryMinMs: 1_000,
   retryMaxMs: 30_000,
   batchWindowMs: 300,
+  staleAfterMs: 10_000,
 };
 
 type Sleep = (ms: number, signal: AbortSignal) => Promise<void>;
@@ -79,12 +87,19 @@ export class TopologyService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TopologyService.name);
   private readonly state = new TopologyState();
   private readonly changes = new Subject<TopologyChange>();
+  private readonly statusChanges = new Subject<TopologyStatus>();
   private readonly stop = new AbortController();
   private running: Promise<void> | null = null;
   // The pause before the next try; grows while the collector keeps failing.
   private retryMs: number;
+  // The first failure of the current outage, null while the collector answers.
+  private failingSince: Date | null = null;
+  private staleTimer: NodeJS.Timeout | undefined;
+  private currentStatus: TopologyStatus = { stale: false, since: null };
 
   readonly changes$: Observable<TopologyChange> = this.changes.asObservable();
+  readonly status$: Observable<TopologyStatus> =
+    this.statusChanges.asObservable();
 
   // `client` is null when no collector is configured: nothing is built.
   constructor(
@@ -100,6 +115,12 @@ export class TopologyService implements OnModuleInit, OnModuleDestroy {
     return this.state.snapshot();
   }
 
+  // Whether that topology may be out of date, for the same client. It only
+  // means something once there is a topology.
+  status() {
+    return this.currentStatus;
+  }
+
   onModuleInit() {
     if (!this.client) {
       this.logger.log('COLLECTOR_URL is not set: the topology is not built');
@@ -113,7 +134,9 @@ export class TopologyService implements OnModuleInit, OnModuleDestroy {
   async onModuleDestroy() {
     this.stop.abort();
     await this.running;
+    clearTimeout(this.staleTimer);
     this.changes.complete();
+    this.statusChanges.complete();
   }
 
   private async run(client: CollectorClient) {
@@ -124,6 +147,7 @@ export class TopologyService implements OnModuleInit, OnModuleDestroy {
         const snapshot = this.state.loadSnapshot(await client.snapshot(signal));
 
         this.changes.next({ type: 'snapshot', snapshot });
+        this.endOutage();
 
         // Returns when a new snapshot is needed.
         await this.follow(client, signal);
@@ -132,6 +156,7 @@ export class TopologyService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
+        this.startOutage();
         this.logger.warn(
           `Collector unavailable, retrying in ${this.retryMs} ms: ${errorMessage(error)}`,
         );
@@ -181,5 +206,39 @@ export class TopologyService implements OnModuleInit, OnModuleDestroy {
         await this.sleep(this.timings.batchWindowMs, signal);
       }
     }
+  }
+
+  // The first failure of an outage starts the count. The next ones do not
+  // restart it, however far apart they are, and a reset of the stream or an
+  // expired sequence is not a failure: neither reaches the `catch` of `run`.
+  private startOutage() {
+    if (this.failingSince) {
+      return;
+    }
+
+    const since = new Date();
+
+    this.failingSince = since;
+    this.staleTimer = setTimeout(
+      () => this.setStatus({ stale: true, since: since.toISOString() }),
+      this.timings.staleAfterMs,
+    );
+  }
+
+  // A snapshot ends the outage; a short one announced nothing. The status
+  // goes out after the snapshot, so the notice is still there while the old
+  // graph is on screen. If the events then fail again, a new outage starts.
+  private endOutage() {
+    clearTimeout(this.staleTimer);
+    this.failingSince = null;
+
+    if (this.currentStatus.stale) {
+      this.setStatus({ stale: false, since: null });
+    }
+  }
+
+  private setStatus(status: TopologyStatus) {
+    this.currentStatus = status;
+    this.statusChanges.next(status);
   }
 }

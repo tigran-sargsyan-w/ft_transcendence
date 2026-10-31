@@ -11,7 +11,7 @@ The development environment provides:
 - HTTPS termination at Nginx
 - Automatic HTTP-to-HTTPS redirection
 - REST API routing through the same origin
-- WebSocket proxy support for Vite HMR and future Socket.IO functionality
+- WebSocket proxy support for Vite HMR and Socket.IO
 - Docker Compose orchestration through a root Makefile
 - Managed local domain mappings and CA trust
 
@@ -153,7 +153,7 @@ Browser / Client
        |
        +-- /api/        -> Backend / NestJS :3000
        |
-       +-- /socket.io/  -> Backend / future Socket.IO
+       +-- /socket.io/  -> Backend / Socket.IO
 ```
 
 Nginx terminates TLS. Communication from Nginx to application services currently uses HTTP inside the Docker network.
@@ -318,7 +318,7 @@ Changing a React component should update the interface without manually reloadin
 
 Stop Docker Compose Watch with `Ctrl+C`.
 
-**Socket.IO note:** Nginx already includes the `/socket.io/` forwarding configuration. The backend Socket.IO Gateway has not yet been implemented, so full Socket.IO connectivity testing is deferred. HTTP 404 is currently expected for the standard Socket.IO handshake endpoint.
+**Socket.IO note:** Nginx forwards `/socket.io/` to the backend, whose Socket.IO gateway is implemented. A connection needs a valid session cookie, and the backend must be given `APP_ORIGIN` (`https://transcendence.test:8443`): see the [realtime topology protocol](../architecture/realtime-topology.md). Testing it through Nginx and ModSecurity is still to do.
 
 ## 9. Cleanup and recovery
 
@@ -484,7 +484,7 @@ The following work remains:
 - Add comprehensive dependency and port-conflict preflight diagnostics.
 - Implement safe automatic renewal/replacement of existing invalid or expiring certificates.
 - Verify authenticated secure session cookie attributes when the relevant backend route is available.
-- Complete Socket.IO connectivity testing once the backend Gateway is implemented.
+- Complete Socket.IO connectivity testing through Nginx and ModSecurity (the backend gateway is implemented).
 - Confirm that the required GitHub Actions jobs pass on the final pull request.
 
 The current release should not claim those capabilities as completed until they have been implemented and verified.

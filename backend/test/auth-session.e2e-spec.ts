@@ -4,7 +4,7 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app.setup.js';
-import { hashToken } from '../src/modules/auth/auth.service.js';
+import { AuthService, hashToken } from '../src/modules/auth/auth.service.js';
 import { PrismaService } from '../src/shared/prisma/prisma.service.js';
 
 describe('Sessions (e2e)', () => {
@@ -199,6 +199,39 @@ describe('Sessions (e2e)', () => {
 
   it('refuses a logout without a session', async () => {
     await request(app.getHttpServer()).post('/api/v1/auth/logout').expect(401);
+  });
+
+  it('announces the session that a logout ends', async () => {
+    const token = await login();
+    const ended: string[] = [];
+    const subscription = app
+      .get(AuthService)
+      .sessionEnded$.subscribe((hash) => ended.push(hash));
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/logout')
+      .set('Cookie', `sid=${token}`)
+      .expect(204);
+
+    subscription.unsubscribe();
+
+    expect(ended).toEqual([hashToken(token)]);
+  });
+
+  it('finds a session with its expiry date', async () => {
+    const token = await login();
+    const authService = app.get(AuthService);
+    const stored = await prisma.session.findUniqueOrThrow({
+      where: { tokenHash: hashToken(token) },
+    });
+
+    expect(await authService.findSession(token)).toEqual({
+      tokenHash: hashToken(token),
+      expiresAt: stored.expiresAt,
+      user: expect.objectContaining({ email }),
+    });
+    expect(await authService.findSession('made-up-token')).toBeNull();
+    expect(await authService.findSession(undefined)).toBeNull();
   });
 
   it('refuses an expired session and deletes it', async () => {
