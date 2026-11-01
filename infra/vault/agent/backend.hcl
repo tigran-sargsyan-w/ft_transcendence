@@ -25,7 +25,7 @@ template {
 
   destination = "/vault/rendered/database_url"
 
-  perms = "0400"
+  perms = "0440"
   backup = false
   error_on_missing_key = true
 }

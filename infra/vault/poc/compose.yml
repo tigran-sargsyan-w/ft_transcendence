@@ -29,6 +29,10 @@ services:
           /vault/backend-auth \
           /vault/backend-rendered
 
+        # Dedicated group for backend secret delivery.
+        chown 100:20000 /vault/backend-rendered
+        chmod 0750 /vault/backend-rendered
+
     volumes:
       - vault_data:/vault/data
       - vault_agent_auth:/vault/auth
@@ -172,7 +176,7 @@ services:
     profiles:
       - backend-integration
 
-    user: "100:1000"
+    user: "100:20000"
 
     command:
       - vault
