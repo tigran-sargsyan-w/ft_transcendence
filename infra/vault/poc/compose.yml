@@ -8,11 +8,23 @@ services:
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
-        mkdir -p /vault/data
-        chown vault:vault /vault/data
-        chmod 0700 /vault/data
+        mkdir -p /vault/data /vault/auth /vault/rendered
+
+        chown vault:vault \
+          /vault/data \
+          /vault/auth \
+          /vault/rendered
+
+        chmod 0700 \
+          /vault/data \
+          /vault/auth \
+          /vault/rendered
+
     volumes:
       - vault_data:/vault/data
+      - vault_agent_auth:/vault/auth
+      - vault_rendered:/vault/rendered
+
     network_mode: none
     restart: "no"
 
@@ -41,8 +53,46 @@ services:
 
     restart: unless-stopped
 
+  vault-agent:
+    image: hashicorp/vault:2.2.1
+    user: "100:1000"
+
+    command:
+      - vault
+      - agent
+      - -config=/vault/config/agent.hcl
+
+    environment:
+      VAULT_ADDR: https://vault:8200
+      VAULT_CACERT: /vault/tls/ca.crt
+
+    volumes:
+      - ./agent.hcl:/vault/config/agent.hcl:ro
+      - ./tls/ca.crt:/vault/tls/ca.crt:ro
+      - vault_agent_auth:/vault/auth:ro
+      - vault_rendered:/vault/rendered
+
+    networks:
+      - vault_private
+
+    depends_on:
+      vault:
+        condition: service_started
+      vault-storage-permissions:
+        condition: service_completed_successfully
+
+    cap_drop:
+      - ALL
+
+    security_opt:
+      - no-new-privileges:true
+
+    restart: unless-stopped
+
 volumes:
   vault_data:
+  vault_agent_auth:
+  vault_rendered:
 
 networks:
   vault_private:
