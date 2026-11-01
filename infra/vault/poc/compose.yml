@@ -220,9 +220,12 @@ services:
         - >
           test -s /vault/rendered/database_url &&
           test -r /vault/rendered/database_url &&
-          vault status >/dev/null 2>&1
-      interval: 5s
-      timeout: 3s
+          test -s /vault/runtime/agent/token &&
+          VAULT_TOKEN="$$(cat /vault/runtime/agent/token)"
+          vault kv get -field=database_url -mount=kv
+          ft-transcendence/dev/backend >/dev/null 2>&1
+      interval: 10s
+      timeout: 5s
       retries: 3
       start_period: 15s
 
