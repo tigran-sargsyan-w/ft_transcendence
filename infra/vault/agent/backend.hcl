@@ -18,6 +18,12 @@ auto_auth {
       remove_secret_id_file_after_reading = false
     }
   }
+  sink "file" {
+    config = {
+      path = "/vault/runtime/agent/token"
+      mode = 0400
+    }
+  }
 }
 
 template {
