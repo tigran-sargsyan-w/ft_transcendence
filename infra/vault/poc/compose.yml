@@ -89,6 +89,74 @@ services:
 
     restart: unless-stopped
 
+
+  vault-approle-provision:
+    image: hashicorp/vault:2.2.1
+    profiles:
+      - setup
+
+    user: "100:1000"
+    entrypoint: ["/bin/sh", "-ec"]
+
+    command:
+      - |
+        umask 077
+
+        # Authenticate with Root Token
+        printf "Vault root token (hidden): "
+        IFS= read -r -s VAULT_TOKEN
+        printf "\n"
+        export VAULT_TOKEN
+
+        if ! vault token lookup >/dev/null 2>&1; then
+          echo "Vault authentication failed"
+          exit 1
+        fi
+
+        # Clean up temporary files on exit
+        trap 'rm -f /vault/auth/.role_id.next /vault/auth/.secret_id.next' EXIT
+
+        # Generate new AppRole credentials
+        vault read -field=role_id \
+          auth/approle/role/poc-reader/role-id \
+          > /vault/auth/.role_id.next
+
+        vault write -force -field=secret_id \
+          auth/approle/role/poc-reader/secret-id \
+          > /vault/auth/.secret_id.next
+
+        # Validate generated credentials
+        test -s /vault/auth/.role_id.next
+        test -s /vault/auth/.secret_id.next
+
+        # Restrict file permissions
+        chmod 0400 \
+          /vault/auth/.role_id.next \
+          /vault/auth/.secret_id.next
+
+        # Replace existing credentials
+        mv -f /vault/auth/.role_id.next /vault/auth/role_id
+        mv -f /vault/auth/.secret_id.next /vault/auth/secret_id
+
+        # Clear administrative token
+        unset VAULT_TOKEN
+
+        echo "AppRole credentials provisioned successfully"
+
+    environment:
+      VAULT_ADDR: https://vault:8200
+      VAULT_CACERT: /vault/tls/ca.crt
+
+    volumes:
+      - ./tls/ca.crt:/vault/tls/ca.crt:ro
+      - vault_agent_auth:/vault/auth
+
+    networks:
+      - vault_private
+
+    restart: "no"
+
+
 volumes:
   vault_data:
   vault_agent_auth:
