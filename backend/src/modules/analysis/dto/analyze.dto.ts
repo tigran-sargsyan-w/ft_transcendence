@@ -11,9 +11,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
-
-// The analyses of the Graph Engine (docs/architecture/graph-contract.md).
-const ANALYSES = ['blast_radius', 'attack_paths', 'critical_nodes'];
+import { ANALYSES } from '../analyses.js';
 
 export class AnalyzeDto {
   @IsArray()

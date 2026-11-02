@@ -14,6 +14,7 @@ import {
   errorMessage,
   type TopologyService,
 } from '../topology/topology.service.js';
+import { RESULT_KEYS } from './analyses.js';
 import {
   type AnalyzeData,
   type AnalyzeRequest,
@@ -50,6 +51,13 @@ export type AnalysisResult = {
 
 // `echoed`: the engine sent the revision back, and `run` has checked that it
 // is the one it was sent.
+// The result of an analysis, if the engine sent one.
+const hasResult = (results: AnalyzeData['results'], id: string) => {
+  const result = results[(RESULT_KEYS as Record<string, string>)[id]];
+
+  return typeof result === 'object' && result !== null;
+};
+
 const freshnessOf = (
   echoed: boolean,
   sent: string,
@@ -148,6 +156,18 @@ export class AnalysisService {
       ) {
         throw new Error(
           `The Graph Engine answered about ${data.environmentId} at ${data.topologyRevision}, not ${snapshot.environmentId} at ${sent}`,
+        );
+      }
+
+      // Every analysis that was asked for must have its result: an answer
+      // without one would read as "nothing found".
+      const missing = request.analyses.filter(
+        (id) => !hasResult(data.results, id),
+      );
+
+      if (missing.length > 0) {
+        throw new Error(
+          `The Graph Engine sent no result for ${missing.join(', ')}`,
         );
       }
 

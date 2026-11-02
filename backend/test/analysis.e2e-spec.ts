@@ -12,6 +12,7 @@ import { EMPTY } from 'rxjs';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app.setup.js';
+import { RESULT_KEYS } from '../src/modules/analysis/analyses.js';
 import type { AnalyzeRequest } from '../src/modules/analysis/graph-engine-client.js';
 import { buildGraph } from '../src/modules/topology/build-graph.js';
 import type { TopologySnapshot } from '../src/modules/topology/graph.types.js';
@@ -52,7 +53,7 @@ describe('POST /environments/:environmentId/analyses (e2e)', () => {
 
   // The engine, as the contract describes it: it echoes the revision it is sent.
   const answer: Handler = (_request, response) => {
-    const { topology } = received[received.length - 1].body;
+    const { topology, analyses } = received[received.length - 1].body;
 
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(
@@ -62,7 +63,13 @@ describe('POST /environments/:environmentId/analyses (e2e)', () => {
           environmentId: topology.environmentId,
           topologyRevision: topology.topologyRevision,
           analyzedAt: '2026-11-02T10:00:01Z',
-          results: { criticalNodes: { nodes: [] } },
+          // A result for each analysis that was asked for, as the engine does.
+          results: Object.fromEntries(
+            analyses.map((id) => [
+              RESULT_KEYS[id as keyof typeof RESULT_KEYS],
+              { analysis: id },
+            ]),
+          ),
         },
       }),
     );
@@ -167,7 +174,10 @@ describe('POST /environments/:environmentId/analyses (e2e)', () => {
         topologyRevision: 'epoch-a:4',
         analyzedAt: '2026-11-02T10:00:01Z',
         freshness: 'current',
-        results: { criticalNodes: { nodes: [] } },
+        results: {
+          blastRadius: { analysis: 'blast_radius' },
+          criticalNodes: { analysis: 'critical_nodes' },
+        },
       },
     });
     expect(received).toHaveLength(1);
@@ -199,6 +209,29 @@ describe('POST /environments/:environmentId/analyses (e2e)', () => {
 
     expect(response.body.data.freshness).toBe('stale');
     expect(response.body.data.topologyRevision).toBe('epoch-a:4');
+  });
+
+  it('refuses an answer of the engine without the result that was asked for', async () => {
+    handler = (_request, response) => {
+      const { topology } = received[received.length - 1].body;
+
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({
+          data: {
+            schemaVersion: 1,
+            environmentId: topology.environmentId,
+            topologyRevision: topology.topologyRevision,
+            analyzedAt: '2026-11-02T10:00:01Z',
+            results: {},
+          },
+        }),
+      );
+    };
+
+    const response = await post({ analyses: ['critical_nodes'] }).expect(503);
+
+    expect(response.body.error.code).toBe('ANALYSIS_UNAVAILABLE');
   });
 
   it('refuses an answer of the engine about another topology', async () => {

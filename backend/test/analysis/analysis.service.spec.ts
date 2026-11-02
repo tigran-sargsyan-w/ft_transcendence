@@ -6,6 +6,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { RESULT_KEYS } from '../../src/modules/analysis/analyses.js';
 import { AnalysisService } from '../../src/modules/analysis/analysis.service.js';
 import {
   type AnalyzeData,
@@ -30,13 +31,22 @@ const snapshotAt = (revision: number): TopologySnapshot => ({
   ...graph,
 });
 
+// A result for each analysis that was asked for, as the engine does.
+const resultsFor = (analyses: string[]) =>
+  Object.fromEntries(
+    analyses.map((id) => [
+      RESULT_KEYS[id as keyof typeof RESULT_KEYS],
+      { analysis: id },
+    ]),
+  );
+
 // What a well behaved engine answers: the revision it was sent, echoed.
 const echoing = (request: AnalyzeRequest): AnalyzeData => ({
   schemaVersion: 1,
   environmentId: request.topology.environmentId,
   topologyRevision: request.topology.topologyRevision,
   analyzedAt: '2026-11-02T10:00:01Z',
-  results: { criticalNodes: { nodes: [] } },
+  results: resultsFor(request.analyses),
 });
 
 class FakeEngine implements GraphEngineClient {
@@ -92,7 +102,10 @@ describe('AnalysisService', () => {
       topologyRevision: 'epoch-a:1',
       analyzedAt: '2026-11-02T10:00:01Z',
       freshness: 'current',
-      results: { criticalNodes: { nodes: [] } },
+      results: {
+        attackPaths: { analysis: 'attack_paths' },
+        blastRadius: { analysis: 'blast_radius' },
+      },
     });
   });
 
@@ -160,7 +173,9 @@ describe('AnalysisService', () => {
     );
 
     expect(result.freshness).toBe('unverifiable');
-    expect(result.results).toEqual({ criticalNodes: { nodes: [] } });
+    expect(result.results).toEqual({
+      criticalNodes: { analysis: 'critical_nodes' },
+    });
   });
 
   it('asks the engine once for the same analysis at the same time', async () => {
@@ -339,6 +354,44 @@ describe('AnalysisService', () => {
 
       expect(failure).toBeInstanceOf(ServiceUnavailableException);
       expect(failure).toMatchObject({ errorCode: 'ANALYSIS_UNAVAILABLE' });
+    });
+
+    it.each([
+      ['no result at all', {}],
+      ['a null result', { criticalNodes: null }],
+      ['a result of another analysis', { blastRadius: {} }],
+    ])(
+      'rejects an answer with %s for the analysis asked',
+      async (_name, results) => {
+        const failure = await failWith(async (sent) => ({
+          ...echoing(sent),
+          results,
+        }));
+
+        expect(failure).toBeInstanceOf(ServiceUnavailableException);
+        expect(failure).toMatchObject({ errorCode: 'ANALYSIS_UNAVAILABLE' });
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('no result for critical_nodes'),
+        );
+      },
+    );
+
+    it('rejects an answer that leaves out one of the analyses asked', async () => {
+      const engine = new FakeEngine(async (sent) => ({
+        ...echoing(sent),
+        results: { blastRadius: {} },
+      }));
+      const failure = await new AnalysisService(topology, engine)
+        .analyze(ENVIRONMENT_ID, {
+          analyses: ['blast_radius', 'critical_nodes'],
+          seedNodeIds: ['svc:demo:db'],
+        })
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(ServiceUnavailableException);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('no result for critical_nodes'),
+      );
     });
 
     it('does not call the engine without a topology', async () => {
