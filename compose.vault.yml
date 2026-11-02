@@ -77,7 +77,205 @@ services:
 
     restart: unless-stopped
 
+  vault-migrator-storage-init:
+    image: hashicorp/vault:2.2.1
+    user: "0:0"
+
+    profiles:
+      - vault-setup
+
+    entrypoint: ["/bin/sh", "-ec"]
+
+    command:
+      - |
+        mkdir -p /vault/auth /vault/rendered
+
+        # AppRole credentials: accessible only to UID 100.
+        chown 100:1000 /vault/auth
+        chmod 0700 /vault/auth
+
+        # Rendered secret: shared group for Prisma Migrate.
+        chown 100:20010 /vault/rendered
+        chmod 0750 /vault/rendered
+
+    volumes:
+      - migrator_vault_auth:/vault/auth
+      - migrator_vault_rendered:/vault/rendered
+
+    network_mode: none
+    restart: "no"
+
+  vault-migrator-provision:
+    image: hashicorp/vault:2.2.1
+    user: "100:1000"
+
+    # Provisioning must only run explicitly.
+    profiles:
+      - vault-setup
+
+    entrypoint: ["/bin/sh", "-ec"]
+
+    command:
+      - |
+        umask 077
+
+        printf "Vault admin token: "
+        IFS= read -r -s VAULT_TOKEN
+        printf "\n"
+        export VAULT_TOKEN
+
+        # Verify administrative access.
+        vault token lookup >/dev/null
+
+        # Retrieve credentials for the migration AppRole.
+        role_id="$$(vault read -field=role_id \
+          auth/approle/role/migrator-reader/role-id)"
+
+        secret_id="$$(vault write -force -field=secret_id \
+          auth/approle/role/migrator-reader/secret-id)"
+
+        test -n "$$role_id"
+        test -n "$$secret_id"
+
+        # Clean up temporary files on exit.
+        trap 'rm -f /vault/auth/role_id.tmp /vault/auth/secret_id.tmp' EXIT
+
+        # Write credentials with restrictive permissions.
+        printf '%s' "$$role_id" > /vault/auth/role_id.tmp
+        printf '%s' "$$secret_id" > /vault/auth/secret_id.tmp
+
+        chmod 0400 /vault/auth/role_id.tmp
+        chmod 0400 /vault/auth/secret_id.tmp
+
+        mv -f /vault/auth/role_id.tmp /vault/auth/role_id
+        mv -f /vault/auth/secret_id.tmp /vault/auth/secret_id
+
+        unset role_id secret_id VAULT_TOKEN
+
+        echo "Migration AppRole credentials provisioned successfully"
+
+    environment:
+      VAULT_ADDR: https://vault:8200
+      VAULT_CACERT: /vault/tls/ca.crt
+
+    volumes:
+      - ./infra/vault/poc/tls/ca.crt:/vault/tls/ca.crt:ro
+      - migrator_vault_auth:/vault/auth
+
+    networks:
+      - vault_private
+
+    cap_drop:
+      - ALL
+
+    security_opt:
+      - no-new-privileges:true
+
+    restart: "no"
+
+  vault-migrator-agent:
+    image: hashicorp/vault:2.2.1
+    profiles:
+      - vault-migration
+    user: "100:20010"
+
+    entrypoint: ["/bin/sh", "-ec"]
+
+    command:
+      - |
+        umask 077
+
+        # Remove the previous secret before each execution.
+        rm -f /vault/rendered/database_url
+
+        # Authenticate, render the migration secret, then exit.
+        exec vault agent -config=/vault/config/migrator.hcl
+
+    environment:
+      VAULT_ADDR: https://vault:8200
+      VAULT_CACERT: /vault/tls/ca.crt
+
+    volumes:
+      - ./infra/vault/agent/migrator.hcl:/vault/config/migrator.hcl:ro
+      - ./infra/vault/poc/tls/ca.crt:/vault/tls/ca.crt:ro
+      - migrator_vault_auth:/vault/auth:ro
+      - migrator_vault_rendered:/vault/rendered
+
+    networks:
+      - vault_private
+
+    cap_drop:
+      - ALL
+
+    security_opt:
+      - no-new-privileges:true
+
+    restart: "no"
+
+  backend-migrate:
+    build:
+      context: ./backend
+
+    profiles:
+      - vault-migration
+
+    user: "10011:20010"
+
+    environment:
+      DATABASE_URL_FILE: /run/secrets/migrator/database_url
+
+    volumes:
+      - migrator_vault_rendered:/run/secrets/migrator:ro
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vault-migrator-agent:
+        condition: service_completed_successfully
+
+    command:
+      - sh
+      - -ec
+      - |
+        sh scripts/wait-for-database-secret.sh
+        exec ./node_modules/.bin/prisma migrate deploy
+
+    restart: "no"
+
+  vault-migrator-cleanup:
+    image: hashicorp/vault:2.2.1
+    user: "100:20010"
+
+    # Never run as part of the normal application startup.
+    profiles:
+      - vault-maintenance
+
+    entrypoint: ["/bin/sh", "-ec"]
+
+    command:
+      - |
+        rm -f /vault/rendered/database_url
+
+        test ! -e /vault/rendered/database_url
+
+        echo "Migration secret cleaned up successfully"
+
+    volumes:
+      - migrator_vault_rendered:/vault/rendered
+
+    network_mode: none
+
+    cap_drop:
+      - ALL
+
+    security_opt:
+      - no-new-privileges:true
+
+    restart: "no"
+
 volumes:
+  migrator_vault_auth:
+  migrator_vault_rendered:
   backend_vault_rendered:
     external: true
     name: transcendence-vault-poc_backend_rendered
