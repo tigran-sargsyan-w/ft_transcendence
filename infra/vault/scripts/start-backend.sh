@@ -37,6 +37,6 @@ echo "=== Step 2: Run database migrations ==="
 
 echo "=== Step 3: Start backend ==="
 
-"${COMPOSE[@]}" up -d --wait backend
+"${COMPOSE[@]}" up -d --wait --build backend
 
 echo "=== Vault-backed backend startup completed ==="
