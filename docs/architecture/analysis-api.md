@@ -25,8 +25,8 @@ Implemented in the `analysis` module. It needs `GRAPH_ENGINE_URL`; without it ev
 |-------|----------|-------|
 | `analyses` | yes | Not empty, no repeat. `blast_radius`, `attack_paths`, `critical_nodes` |
 | `seedNodeIds` | for `blast_radius` and `attack_paths` | At most 50 ids of nodes of the topology |
-| `maxDepth` | no | Integer, 1 to 10 (engine default 5) |
-| `maxPaths` | no | Integer, 1 to 100 (engine default 20) |
+| `maxDepth` | no | Integer, 1 to 10. Without it, `attack_paths` goes 5 levels deep and `blast_radius` has no limit |
+| `maxPaths` | no | Integer, 1 to 100. Only `attack_paths` uses it, and it stops at 20 paths without it |
 
 An unknown field, or a value out of these limits, is refused with `VALIDATION_ERROR` before the engine is called. Which nodes each analysis walks, and the shape of the results, are in the [Graph contract](./graph-contract.md).
 
@@ -58,7 +58,7 @@ An unknown field, or a value out of these limits, is refused with `VALIDATION_ER
 
 Show `stale` and `unverifiable` results as such, never as "no risk found": an empty list means something only when `freshness` is `current`.
 
-The same analysis of the same revision, asked by several users at once, is one call to the engine.
+While a call to the engine is in progress, the same analysis of the same revision asked by other users waits for it instead of starting another one. Once it has answered, the next request makes a new call: nothing is cached.
 
 ## Errors
 

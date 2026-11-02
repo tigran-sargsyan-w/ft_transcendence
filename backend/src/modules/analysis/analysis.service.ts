@@ -106,8 +106,9 @@ const freshnessOf = (
 // Runs the analyses of the Graph Engine on the current topology.
 export class AnalysisService {
   private readonly logger = new Logger(AnalysisService.name);
-  // The calls in progress, by revision and request: the same analysis of the
-  // same topology is asked of the engine once, whoever asks.
+  // The calls in progress, by revision and request: while one is running, the
+  // same analysis of the same topology waits for it instead of starting
+  // another.
   private readonly pending = new Map<string, Promise<AnalyzeData>>();
 
   // `client` is null when no engine is configured: nothing can be analysed.

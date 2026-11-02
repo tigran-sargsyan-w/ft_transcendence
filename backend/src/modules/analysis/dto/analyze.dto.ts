@@ -30,7 +30,8 @@ export class AnalyzeDto {
   @IsNotEmpty({ each: true })
   seedNodeIds?: string[];
 
-  // The engine's own defaults are 5 levels and 20 paths.
+  // Without them, attack_paths goes 5 levels deep and stops at 20 paths, and
+  // blast_radius has no depth limit.
   @IsOptional()
   @IsInt()
   @Min(1)
