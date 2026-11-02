@@ -280,25 +280,43 @@ describe('POST /environments/:environmentId/analyses (e2e)', () => {
     expect(received).toHaveLength(0);
   });
 
-  it('passes on the error of the engine for a request it refuses', async () => {
+  it.each([
+    ['without seeds', { analyses: ['blast_radius'] }, 'required'],
+    [
+      'with a seed that is not a node',
+      { analyses: ['blast_radius'], seedNodeIds: ['svc:demo:nope'] },
+      'svc:demo:nope is not a node of the topology',
+    ],
+  ])(
+    'refuses blast_radius %s before calling the engine',
+    async (_name, body, message) => {
+      const response = await post(body).expect(400);
+
+      expect(response.body.error.code).toBe('VALIDATION_ERROR');
+      expect(response.body.error.details.seedNodeIds[0]).toContain(message);
+      expect(received).toHaveLength(0);
+    },
+  );
+
+  it('answers 502 when the engine refuses a request that was valid', async () => {
     handler = (_request, response) => {
       response.writeHead(400, { 'content-type': 'application/json' });
       response.end(
         JSON.stringify({
           error: {
-            code: 'GRAPH_MISSING_SEEDS',
-            message: 'Analysis blast_radius requires options.seedNodeIds',
+            code: 'GRAPH_INVALID_TOPOLOGY',
+            message: 'Unknown node kind: widget',
           },
         }),
       );
     };
 
-    const response = await post({ analyses: ['blast_radius'] }).expect(400);
+    const response = await post({ analyses: ['critical_nodes'] }).expect(502);
 
     expect(response.body).toEqual({
       error: {
-        code: 'GRAPH_MISSING_SEEDS',
-        message: 'Analysis blast_radius requires options.seedNodeIds',
+        code: 'GRAPH_ENGINE_FAILURE',
+        message: 'The Graph Engine failed',
       },
     });
   });

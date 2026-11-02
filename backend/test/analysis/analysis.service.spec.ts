@@ -7,7 +7,10 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { RESULT_KEYS } from '../../src/modules/analysis/analyses.js';
-import { AnalysisService } from '../../src/modules/analysis/analysis.service.js';
+import {
+  type AnalysisRequest,
+  AnalysisService,
+} from '../../src/modules/analysis/analysis.service.js';
 import {
   type AnalyzeData,
   type AnalyzeRequest,
@@ -21,6 +24,9 @@ import type { TopologyStatus } from '../../src/modules/topology/topology.service
 import { ENVIRONMENT_ID, api, db, web } from '../topology/fixtures.js';
 
 const graph = buildGraph(ENVIRONMENT_ID, [db(), api(), web()]);
+
+// Nodes of that topology.
+const [DB, API, WEB] = ['db', 'api', 'web'].map((name) => `svc:demo:${name}`);
 
 const snapshotAt = (revision: number): TopologySnapshot => ({
   schemaVersion: 1,
@@ -86,7 +92,7 @@ describe('AnalysisService', () => {
 
     const result = await service.analyze(ENVIRONMENT_ID, {
       analyses: ['blast_radius', 'attack_paths'],
-      seedNodeIds: ['b', 'a'],
+      seedNodeIds: [WEB, API],
       maxDepth: 3,
     });
 
@@ -94,7 +100,7 @@ describe('AnalysisService', () => {
       {
         topology: toEngineTopology(snapshotAt(1)),
         analyses: ['attack_paths', 'blast_radius'],
-        options: { seedNodeIds: ['a', 'b'], maxDepth: 3 },
+        options: { seedNodeIds: [API, WEB], maxDepth: 3 },
       },
     ]);
     expect(result).toEqual({
@@ -191,11 +197,11 @@ describe('AnalysisService', () => {
     // The seeds come in another order: it is still the same analysis.
     const first = service.analyze(ENVIRONMENT_ID, {
       analyses: ['blast_radius'],
-      seedNodeIds: ['a', 'b'],
+      seedNodeIds: [API, WEB],
     });
     const second = service.analyze(ENVIRONMENT_ID, {
       analyses: ['blast_radius'],
-      seedNodeIds: ['b', 'a'],
+      seedNodeIds: [WEB, API],
     });
 
     release();
@@ -211,16 +217,16 @@ describe('AnalysisService', () => {
     await Promise.all([
       service.analyze(ENVIRONMENT_ID, {
         analyses: ['blast_radius'],
-        seedNodeIds: ['a'],
+        seedNodeIds: [API],
       }),
       service.analyze(ENVIRONMENT_ID, {
         analyses: ['blast_radius'],
-        seedNodeIds: ['b'],
+        seedNodeIds: [WEB],
       }),
     ]);
     await service.analyze(ENVIRONMENT_ID, {
       analyses: ['blast_radius'],
-      seedNodeIds: ['a'],
+      seedNodeIds: [API],
     });
 
     expect(engine.calls).toHaveLength(3);
@@ -291,23 +297,76 @@ describe('AnalysisService', () => {
       expect(failure).toMatchObject({ errorCode: 'ANALYSIS_UNAVAILABLE' });
     });
 
-    it('keeps the code and the message of a request the engine refuses', async () => {
+    it('answers a bad gateway when the engine refuses a request that was valid', async () => {
       const failure = await failWith(async () => {
         throw new GraphEngineError(
           400,
-          'GRAPH_MISSING_SEEDS',
-          'Analysis blast_radius requires options.seedNodeIds',
+          'GRAPH_INVALID_TOPOLOGY',
+          'Unknown node kind: widget',
         );
       });
 
-      expect(failure).toBeInstanceOf(BadRequestException);
-      expect(failure).toMatchObject({
-        errorCode: 'GRAPH_MISSING_SEEDS',
-        message: 'Analysis blast_radius requires options.seedNodeIds',
-      });
-      // The caller's mistake, not a failure of the engine.
-      expect(warn).not.toHaveBeenCalled();
+      expect(failure).toBeInstanceOf(BadGatewayException);
+      expect(failure).toMatchObject({ errorCode: 'GRAPH_ENGINE_FAILURE' });
+      expect((failure as Error).message).not.toContain('widget');
+      // Not the user's doing: the log has the engine's own words.
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          '400 GRAPH_INVALID_TOPOLOGY: Unknown node kind: widget',
+        ),
+      );
     });
+
+    const withoutEngineCall = async (request: AnalysisRequest) => {
+      const engine = new FakeEngine(async (sent) => echoing(sent));
+      const failure = await new AnalysisService(topology, engine)
+        .analyze(ENVIRONMENT_ID, request)
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(BadRequestException);
+      expect(failure).toMatchObject({ errorCode: 'VALIDATION_ERROR' });
+      expect(engine.calls).toHaveLength(0);
+
+      return (failure as BadRequestException).getResponse();
+    };
+
+    it.each([
+      ['blast_radius', undefined],
+      ['attack_paths', []],
+    ])(
+      'refuses %s without seeds, before calling the engine',
+      async (analysis, seedNodeIds) => {
+        expect(
+          await withoutEngineCall({ analyses: [analysis], seedNodeIds }),
+        ).toMatchObject({
+          details: {
+            seedNodeIds: [
+              'seedNodeIds is required for blast_radius and attack_paths',
+            ],
+          },
+        });
+      },
+    );
+
+    it.each([['blast_radius'], ['critical_nodes']])(
+      'refuses seeds that are not nodes of the topology (%s), before calling the engine',
+      async (analysis) => {
+        // The engine refuses them whatever the analysis.
+        expect(
+          await withoutEngineCall({
+            analyses: [analysis],
+            seedNodeIds: ['x', API, 'svc:demo:nope'],
+          }),
+        ).toMatchObject({
+          details: {
+            seedNodeIds: [
+              'svc:demo:nope is not a node of the topology',
+              'x is not a node of the topology',
+            ],
+          },
+        });
+      },
+    );
 
     it('answers a bad gateway when the engine itself fails', async () => {
       const failure = await failWith(async () => {
@@ -384,7 +443,7 @@ describe('AnalysisService', () => {
       const failure = await new AnalysisService(topology, engine)
         .analyze(ENVIRONMENT_ID, {
           analyses: ['blast_radius', 'critical_nodes'],
-          seedNodeIds: ['svc:demo:db'],
+          seedNodeIds: [DB],
         })
         .catch((error: unknown) => error);
 

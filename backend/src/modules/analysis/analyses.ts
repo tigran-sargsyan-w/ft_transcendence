@@ -7,3 +7,6 @@ export const RESULT_KEYS = {
 } as const;
 
 export const ANALYSES = Object.keys(RESULT_KEYS);
+
+// The ones that need nodes to start from (graph-contract.md).
+export const NEEDS_SEEDS = ['blast_radius', 'attack_paths'];

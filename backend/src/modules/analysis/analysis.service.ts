@@ -1,9 +1,9 @@
 import {
   BadGatewayException,
-  BadRequestException,
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { validationError } from '../../app.setup.js';
 import {
   toEngineTopology,
   topologyRevisionOf,
@@ -14,7 +14,7 @@ import {
   errorMessage,
   type TopologyService,
 } from '../topology/topology.service.js';
-import { RESULT_KEYS } from './analyses.js';
+import { NEEDS_SEEDS, RESULT_KEYS } from './analyses.js';
 import {
   type AnalyzeData,
   type AnalyzeRequest,
@@ -51,6 +51,36 @@ export type AnalysisResult = {
 
 // `echoed`: the engine sent the revision back, and `run` has checked that it
 // is the one it was sent.
+// The seeds are the user's input, so what is wrong with them is said here,
+// with the name of the field, now that the topology is at hand. Whatever the
+// engine still refuses after this is not the user's doing.
+function checkSeeds(
+  snapshot: TopologySnapshot,
+  analyses: string[],
+  seedNodeIds: string[] | undefined,
+) {
+  if (!seedNodeIds?.length) {
+    if (analyses.some((id) => NEEDS_SEEDS.includes(id))) {
+      throw validationError({
+        seedNodeIds: [
+          `seedNodeIds is required for ${NEEDS_SEEDS.join(' and ')}`,
+        ],
+      });
+    }
+
+    return;
+  }
+
+  const nodes = new Set(snapshot.nodes.map((node) => node.id));
+  const unknown = seedNodeIds.filter((id) => !nodes.has(id));
+
+  if (unknown.length > 0) {
+    throw validationError({
+      seedNodeIds: unknown.map((id) => `${id} is not a node of the topology`),
+    });
+  }
+}
+
 // The result of an analysis, if the engine sent one.
 const hasResult = (results: AnalyzeData['results'], id: string) => {
   const result = results[(RESULT_KEYS as Record<string, string>)[id]];
@@ -96,6 +126,8 @@ export class AnalysisService {
     // what the engine echoes back.
     const analyses = [...request.analyses].sort();
     const seedNodeIds = request.seedNodeIds && [...request.seedNodeIds].sort();
+
+    checkSeeds(snapshot, analyses, seedNodeIds);
     const { maxDepth, maxPaths } = request;
     const key = JSON.stringify([
       topologyRevision,
@@ -173,15 +205,17 @@ export class AnalysisService {
 
       return data;
     } catch (error) {
-      // A request the engine refuses is the caller's mistake: it keeps the
-      // engine's code and is not worth a line in the log.
-      if (error instanceof GraphEngineError && error.status < 500) {
-        throw new BadRequestException(error.message, { errorCode: error.code });
-      }
+      this.logger.warn(
+        `Graph Engine call failed: ${
+          error instanceof GraphEngineError
+            ? `answered ${error.status} ${error.code}: ${error.message}`
+            : errorMessage(error)
+        }`,
+      );
 
-      this.logger.warn(`Graph Engine call failed: ${errorMessage(error)}`);
-
-      // The engine failed on its own, or cannot be used at all.
+      // The engine failed on its own, or refused a request that was valid
+      // here (a topology it does not accept, a version that moved on): never
+      // the user's doing. Or it cannot be used at all.
       throw error instanceof GraphEngineError
         ? new BadGatewayException('The Graph Engine failed', {
             errorCode: 'GRAPH_ENGINE_FAILURE',
