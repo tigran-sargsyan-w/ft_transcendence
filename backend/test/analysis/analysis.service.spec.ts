@@ -1,3 +1,4 @@
+import type { MockInstance } from 'vitest';
 import {
   BadGatewayException,
   BadRequestException,
@@ -53,12 +54,13 @@ class FakeEngine implements GraphEngineClient {
 
 describe('AnalysisService', () => {
   let current: TopologySnapshot | null;
+  let warn: MockInstance<Logger['warn']>;
   const topology = { snapshot: () => current };
   const ask = { analyses: ['critical_nodes'] };
 
   beforeEach(() => {
     current = snapshotAt(1);
-    vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+    warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -224,6 +226,9 @@ describe('AnalysisService', () => {
 
       expect(failure).toBeInstanceOf(ServiceUnavailableException);
       expect(failure).toMatchObject({ errorCode: 'ANALYSIS_UNAVAILABLE' });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('fetch failed'),
+      );
     });
 
     it('says the same when no engine is configured', async () => {
@@ -249,6 +254,8 @@ describe('AnalysisService', () => {
         errorCode: 'GRAPH_MISSING_SEEDS',
         message: 'Analysis blast_radius requires options.seedNodeIds',
       });
+      // The caller's mistake, not a failure of the engine.
+      expect(warn).not.toHaveBeenCalled();
     });
 
     it('answers a bad gateway when the engine itself fails', async () => {
@@ -263,6 +270,10 @@ describe('AnalysisService', () => {
       expect(failure).toBeInstanceOf(BadGatewayException);
       expect(failure).toMatchObject({ errorCode: 'GRAPH_ENGINE_FAILURE' });
       expect((failure as Error).message).not.toContain('secret detail');
+      // The detail goes to the log, not to the client.
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('secret detail'),
+      );
     });
 
     it('does not call the engine without a topology', async () => {

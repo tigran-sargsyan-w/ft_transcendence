@@ -125,19 +125,20 @@ export class AnalysisService {
         ...request,
       });
     } catch (error) {
-      this.logger.warn(`Graph Engine call failed: ${errorMessage(error)}`);
-
-      // An error of the engine keeps its code; any other failure is an
-      // engine that cannot be used.
-      if (error instanceof GraphEngineError) {
-        throw error.status >= 500
-          ? new BadGatewayException('The Graph Engine failed', {
-              errorCode: 'GRAPH_ENGINE_FAILURE',
-            })
-          : new BadRequestException(error.message, { errorCode: error.code });
+      // A request the engine refuses is the caller's mistake: it keeps the
+      // engine's code and is not worth a line in the log.
+      if (error instanceof GraphEngineError && error.status < 500) {
+        throw new BadRequestException(error.message, { errorCode: error.code });
       }
 
-      throw this.unavailable();
+      this.logger.warn(`Graph Engine call failed: ${errorMessage(error)}`);
+
+      // The engine failed on its own, or cannot be used at all.
+      throw error instanceof GraphEngineError
+        ? new BadGatewayException('The Graph Engine failed', {
+            errorCode: 'GRAPH_ENGINE_FAILURE',
+          })
+        : this.unavailable();
     }
   }
 
