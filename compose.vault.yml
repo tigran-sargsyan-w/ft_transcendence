@@ -1,18 +1,18 @@
 services:
   backend:
-    # Dedicated backend identity with read-only secret group access.
     user: "10001:20000"
 
     environment:
-      # Remove the DATABASE_URL inherited from compose.yml.
       DATABASE_URL: !reset null
       DATABASE_URL_FILE: /run/secrets/backend/database_url
 
     volumes:
-      # Read-only access to the Vault Agent rendered secret.
       - backend_vault_rendered:/run/secrets/backend:ro
 
-    # Wait for the secret before running migrations and NestJS.
+    depends_on:
+      vault-backend-agent:
+        condition: service_healthy
+
     command:
       - sh
       - -ec
@@ -21,7 +21,73 @@ services:
         npx prisma migrate deploy
         exec npm run start
 
+  vault-backend-agent:
+    image: hashicorp/vault:2.2.1
+    user: "100:20000"
+
+    entrypoint: ["/bin/sh", "-ec"]
+
+    command:
+      - |
+        umask 077
+
+        mkdir -p /vault/runtime/agent
+        chmod 0700 /vault/runtime/agent
+
+        rm -f /vault/runtime/agent/token
+        rm -f /vault/rendered/database_url
+
+        exec vault agent -config=/vault/config/backend.hcl
+
+    environment:
+      VAULT_ADDR: https://vault:8200
+      VAULT_CACERT: /vault/tls/ca.crt
+
+    volumes:
+      - ./infra/vault/agent/backend.hcl:/vault/config/backend.hcl:ro
+      - ./infra/vault/poc/tls/ca.crt:/vault/tls/ca.crt:ro
+      - backend_vault_auth:/vault/auth:ro
+      - backend_vault_rendered:/vault/rendered
+
+    tmpfs:
+      - /vault/runtime:mode=1777
+
+    networks:
+      - vault_private
+
+    cap_drop:
+      - ALL
+
+    security_opt:
+      - no-new-privileges:true
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          test -s /vault/rendered/database_url &&
+          test -r /vault/rendered/database_url &&
+          test -s /vault/runtime/agent/token &&
+          expected="$$(VAULT_TOKEN="$$(cat /vault/runtime/agent/token)" vault kv get -field=database_url -mount=kv ft-transcendence/dev/backend 2>/dev/null)" &&
+          actual="$$(cat /vault/rendered/database_url)" &&
+          test "$$actual" = "$$expected"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+    restart: unless-stopped
+
 volumes:
   backend_vault_rendered:
     external: true
     name: transcendence-vault-poc_backend_rendered
+
+  backend_vault_auth:
+    external: true
+    name: transcendence-vault-poc_backend_agent_auth
+
+networks:
+  vault_private:
+    external: true
+    name: transcendence-vault-poc_vault_private
