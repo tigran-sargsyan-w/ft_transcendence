@@ -71,4 +71,4 @@ Shape and codes: [API conventions](./api-conventions.md).
 | 404 | `TOPOLOGY_UNKNOWN_ENVIRONMENT` | The server does not follow that environment |
 | 502 | `GRAPH_ENGINE_FAILURE` | The engine failed on its own |
 | 503 | `TOPOLOGY_UNAVAILABLE` | No topology yet |
-| 503 | `ANALYSIS_UNAVAILABLE` | No engine configured, not reachable, no answer within 5 seconds, or an answer that is not the contract's |
+| 503 | `ANALYSIS_UNAVAILABLE` | No engine configured, not reachable, no answer within 5 seconds, or an answer that is not the contract's (including one about another environment, or another revision than the one sent) |

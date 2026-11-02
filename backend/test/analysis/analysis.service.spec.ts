@@ -214,7 +214,9 @@ describe('AnalysisService', () => {
   });
 
   describe('errors', () => {
-    const failWith = async (answer: () => Promise<AnalyzeData>) =>
+    const failWith = async (
+      answer: (sent: AnalyzeRequest) => Promise<AnalyzeData>,
+    ) =>
       new AnalysisService(topology, new FakeEngine(answer))
         .analyze(ENVIRONMENT_ID, ask)
         .catch((error: unknown) => error);
@@ -274,6 +276,35 @@ describe('AnalysisService', () => {
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('secret detail'),
       );
+    });
+
+    it.each([
+      ['another revision than the one sent', { topologyRevision: 'epoch-a:9' }],
+      ['another environment', { environmentId: 'env_other' }],
+    ])('rejects an answer about %s', async (_name, other) => {
+      const failure = await failWith(async (sent) => ({
+        ...echoing(sent),
+        ...other,
+      }));
+
+      expect(failure).toBeInstanceOf(ServiceUnavailableException);
+      expect(failure).toMatchObject({ errorCode: 'ANALYSIS_UNAVAILABLE' });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('answered about'),
+      );
+    });
+
+    it('rejects the current revision when it is not the one that was sent', async () => {
+      // The topology moves on while the engine works, and the engine answers
+      // with the new revision: that says nothing about the topology it got.
+      const failure = await failWith(async (sent) => {
+        current = snapshotAt(2);
+
+        return { ...echoing(sent), topologyRevision: 'epoch-a:2' };
+      });
+
+      expect(failure).toBeInstanceOf(ServiceUnavailableException);
+      expect(failure).toMatchObject({ errorCode: 'ANALYSIS_UNAVAILABLE' });
     });
 
     it('does not call the engine without a topology', async () => {

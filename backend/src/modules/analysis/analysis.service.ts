@@ -46,15 +46,18 @@ export type AnalysisResult = {
   results: AnalyzeData['results'];
 };
 
+// `echoed`: the engine sent the revision back, and `run` has checked that it
+// is the one it was sent.
 const freshnessOf = (
-  echo: string | undefined,
+  echoed: boolean,
+  sent: string,
   current: TopologySnapshot | null,
 ): Freshness => {
-  if (echo === undefined) {
+  if (!echoed) {
     return 'unverifiable';
   }
 
-  return current && topologyRevisionOf(current) === echo ? 'current' : 'stale';
+  return current && topologyRevisionOf(current) === sent ? 'current' : 'stale';
 };
 
 // Runs the analyses of the Graph Engine on the current topology.
@@ -105,7 +108,11 @@ export class AnalysisService {
       environmentId: snapshot.environmentId,
       topologyRevision,
       analyzedAt: data.analyzedAt,
-      freshness: freshnessOf(data.topologyRevision, this.topology.snapshot()),
+      freshness: freshnessOf(
+        data.topologyRevision !== undefined,
+        topologyRevision,
+        this.topology.snapshot(),
+      ),
       results: data.results,
     };
   }
@@ -120,10 +127,25 @@ export class AnalysisService {
     }
 
     try {
-      return await this.client.analyze({
+      const data = await this.client.analyze({
         topology: toEngineTopology(snapshot),
         ...request,
       });
+      const sent = topologyRevisionOf(snapshot);
+
+      // The answer must be about what was sent. An echo of another revision,
+      // even the current one, or of another environment, says nothing about
+      // this topology.
+      if (
+        data.environmentId !== snapshot.environmentId ||
+        (data.topologyRevision !== undefined && data.topologyRevision !== sent)
+      ) {
+        throw new Error(
+          `The Graph Engine answered about ${data.environmentId} at ${data.topologyRevision}, not ${snapshot.environmentId} at ${sent}`,
+        );
+      }
+
+      return data;
     } catch (error) {
       // A request the engine refuses is the caller's mistake: it keeps the
       // engine's code and is not worth a line in the log.
