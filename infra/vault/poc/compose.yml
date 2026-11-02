@@ -221,9 +221,9 @@ services:
           test -s /vault/rendered/database_url &&
           test -r /vault/rendered/database_url &&
           test -s /vault/runtime/agent/token &&
-          VAULT_TOKEN="$$(cat /vault/runtime/agent/token)"
-          vault kv get -field=database_url -mount=kv
-          ft-transcendence/dev/backend >/dev/null 2>&1
+          expected="$$(VAULT_TOKEN="$$(cat /vault/runtime/agent/token)" vault kv get -field=database_url -mount=kv ft-transcendence/dev/backend 2>/dev/null)" &&
+          actual="$$(cat /vault/rendered/database_url)" &&
+          test "$$actual" = "$$expected"
       interval: 10s
       timeout: 5s
       retries: 3

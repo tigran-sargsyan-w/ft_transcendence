@@ -1,0 +1,27 @@
+services:
+  backend:
+    # Dedicated backend identity with read-only secret group access.
+    user: "10001:20000"
+
+    environment:
+      # Remove the DATABASE_URL inherited from compose.yml.
+      DATABASE_URL: !reset null
+      DATABASE_URL_FILE: /run/secrets/backend/database_url
+
+    volumes:
+      # Read-only access to the Vault Agent rendered secret.
+      - backend_vault_rendered:/run/secrets/backend:ro
+
+    # Wait for the secret before running migrations and NestJS.
+    command:
+      - sh
+      - -ec
+      - |
+        sh scripts/wait-for-database-secret.sh
+        npx prisma migrate deploy
+        exec npm run start
+
+volumes:
+  backend_vault_rendered:
+    external: true
+    name: transcendence-vault-poc_backend_rendered
