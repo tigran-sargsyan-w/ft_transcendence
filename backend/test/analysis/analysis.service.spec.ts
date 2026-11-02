@@ -16,6 +16,7 @@ import {
 import { buildGraph } from '../../src/modules/topology/build-graph.js';
 import { toEngineTopology } from '../../src/modules/topology/engine-topology.js';
 import type { TopologySnapshot } from '../../src/modules/topology/graph.types.js';
+import type { TopologyStatus } from '../../src/modules/topology/topology.service.js';
 import { ENVIRONMENT_ID, api, db, web } from '../topology/fixtures.js';
 
 const graph = buildGraph(ENVIRONMENT_ID, [db(), api(), web()]);
@@ -55,11 +56,13 @@ class FakeEngine implements GraphEngineClient {
 describe('AnalysisService', () => {
   let current: TopologySnapshot | null;
   let warn: MockInstance<Logger['warn']>;
-  const topology = { snapshot: () => current };
+  let collector: TopologyStatus;
+  const topology = { snapshot: () => current, status: () => collector };
   const ask = { analyses: ['critical_nodes'] };
 
   beforeEach(() => {
     current = snapshotAt(1);
+    collector = { stale: false, since: null };
     warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
   });
 
@@ -112,6 +115,37 @@ describe('AnalysisService', () => {
     expect(result.freshness).toBe('stale');
     expect(result.topologyRevision).toBe('epoch-a:1');
   });
+
+  it.each([
+    ['is unreachable when the analysis starts', true],
+    ['becomes unreachable while the engine works', false],
+  ])(
+    'flags the results as stale when the collector %s',
+    async (_name, downFirst) => {
+      const down = { stale: true, since: '2026-11-02T10:00:00Z' };
+
+      if (downFirst) {
+        collector = down;
+      }
+
+      const engine = new FakeEngine(async (request) => {
+        if (!downFirst) {
+          collector = down;
+        }
+
+        return echoing(request);
+      });
+
+      // The revision never changes: only the collector is down.
+      const result = await new AnalysisService(topology, engine).analyze(
+        ENVIRONMENT_ID,
+        ask,
+      );
+
+      expect(result.topologyRevision).toBe('epoch-a:1');
+      expect(result.freshness).toBe('stale');
+    },
+  );
 
   it('flags the results as unverifiable when the revision is not echoed', async () => {
     const engine = new FakeEngine(async (request) => {

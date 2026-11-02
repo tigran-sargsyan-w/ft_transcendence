@@ -15,7 +15,10 @@ import { configureApp } from '../src/app.setup.js';
 import type { AnalyzeRequest } from '../src/modules/analysis/graph-engine-client.js';
 import { buildGraph } from '../src/modules/topology/build-graph.js';
 import type { TopologySnapshot } from '../src/modules/topology/graph.types.js';
-import { TopologyService } from '../src/modules/topology/topology.service.js';
+import {
+  type TopologyStatus,
+  TopologyService,
+} from '../src/modules/topology/topology.service.js';
 import { PrismaService } from '../src/shared/prisma/prisma.service.js';
 import { ENVIRONMENT_ID, api, db, web } from './topology/fixtures.js';
 
@@ -43,6 +46,7 @@ describe('POST /environments/:environmentId/analyses (e2e)', () => {
   let handler: Handler;
   let cookie: string;
   let current: TopologySnapshot | null;
+  let collector: TopologyStatus;
   const received: { url?: string; body: AnalyzeRequest }[] = [];
   const previousEngineUrl = process.env.GRAPH_ENGINE_URL;
 
@@ -95,7 +99,7 @@ describe('POST /environments/:environmentId/analyses (e2e)', () => {
         changes$: EMPTY,
         status$: EMPTY,
         snapshot: () => current,
-        status: () => ({ stale: false, since: null }),
+        status: () => collector,
       })
       .compile();
 
@@ -135,6 +139,7 @@ describe('POST /environments/:environmentId/analyses (e2e)', () => {
 
   beforeEach(() => {
     current = snapshot;
+    collector = { stale: false, since: null };
     handler = answer;
     received.length = 0;
   });
@@ -184,6 +189,39 @@ describe('POST /environments/:environmentId/analyses (e2e)', () => {
     // The engine would ignore these two and echo nothing.
     expect(received[0].body.topology).not.toHaveProperty('epoch');
     expect(received[0].body.topology).not.toHaveProperty('revision');
+  });
+
+  it('flags the results as stale while the collector is unreachable', async () => {
+    // Same revision, but the topology is the last one known, not the live one.
+    collector = { stale: true, since: '2026-11-02T10:00:00Z' };
+
+    const response = await post({ analyses: ['critical_nodes'] }).expect(200);
+
+    expect(response.body.data.freshness).toBe('stale');
+    expect(response.body.data.topologyRevision).toBe('epoch-a:4');
+  });
+
+  it('refuses an answer of the engine about another topology', async () => {
+    handler = (_request, response) => {
+      const { topology } = received[received.length - 1].body;
+
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({
+          data: {
+            schemaVersion: 1,
+            environmentId: topology.environmentId,
+            topologyRevision: 'epoch-a:99',
+            analyzedAt: '2026-11-02T10:00:01Z',
+            results: { criticalNodes: { nodes: [] } },
+          },
+        }),
+      );
+    };
+
+    const response = await post({ analyses: ['critical_nodes'] }).expect(503);
+
+    expect(response.body.error.code).toBe('ANALYSIS_UNAVAILABLE');
   });
 
   it.each([

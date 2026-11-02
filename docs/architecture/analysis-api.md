@@ -52,8 +52,8 @@ An unknown field, or a value out of these limits, is refused with `VALIDATION_ER
 
 | Value | Meaning |
 |-------|---------|
-| `current` | The engine echoed that revision, and the topology is still at it |
-| `stale` | The topology changed while the engine worked |
+| `current` | The topology is still at the revision that was sent, and the collector is reachable |
+| `stale` | The topology changed while the engine worked, or the collector has been unreachable for a while: the topology is the last one known, not necessarily the live one (see `topology:status` in the [Realtime topology protocol](./realtime-topology.md)) |
 | `unverifiable` | The engine did not echo a revision: nothing proves which topology the results are about |
 
 Show `stale` and `unverifiable` results as such, never as "no risk found": an empty list means something only when `freshness` is `current`.

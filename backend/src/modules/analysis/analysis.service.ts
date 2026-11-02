@@ -28,10 +28,12 @@ export type AnalysisRequest = {
   maxPaths?: number;
 };
 
-// Whether the results describe the topology as it is now:
-// - current: the engine echoed the revision it was sent, and it is still the
-//   one of the topology;
-// - stale: the topology changed while the engine was working;
+// Whether the results describe the infrastructure as it is now:
+// - current: the topology is still at the revision that was sent, and the
+//   collector is reachable;
+// - stale: the topology changed while the engine was working, or the
+//   collector has been unreachable for a while, so the topology is the last
+//   one known and not necessarily the live one;
 // - unverifiable: the engine did not echo the revision, so nothing proves
 //   which topology the results are about.
 // Neither of the last two may be shown as "no risk found".
@@ -52,12 +54,15 @@ const freshnessOf = (
   echoed: boolean,
   sent: string,
   current: TopologySnapshot | null,
+  collectorUnreachable: boolean,
 ): Freshness => {
   if (!echoed) {
     return 'unverifiable';
   }
 
-  return current && topologyRevisionOf(current) === sent ? 'current' : 'stale';
+  const unchanged = current !== null && topologyRevisionOf(current) === sent;
+
+  return unchanged && !collectorUnreachable ? 'current' : 'stale';
 };
 
 // Runs the analyses of the Graph Engine on the current topology.
@@ -69,7 +74,7 @@ export class AnalysisService {
 
   // `client` is null when no engine is configured: nothing can be analysed.
   constructor(
-    private readonly topology: Pick<TopologyService, 'snapshot'>,
+    private readonly topology: Pick<TopologyService, 'snapshot' | 'status'>,
     private readonly client: GraphEngineClient | null,
   ) {}
 
@@ -112,6 +117,7 @@ export class AnalysisService {
         data.topologyRevision !== undefined,
         topologyRevision,
         this.topology.snapshot(),
+        this.topology.status().stale,
       ),
       results: data.results,
     };
