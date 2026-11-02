@@ -48,13 +48,15 @@ An unknown field, or a value out of these limits, is refused with `VALIDATION_ER
 
 `results` is the engine's, as it sends it. Its `reasons` are opaque strings: the engine may add codes, and a client must not reject one it does not know.
 
-`topologyRevision` is the revision of the topology that was sent (`<epoch>:<revision>`, the one of the realtime snapshot). `freshness` says what the results are worth now:
+`topologyRevision` is the revision of the topology that was sent (`<epoch>:<revision>`, built from the `epoch` and the `revision` of the realtime snapshot). `freshness` says what the results are worth now:
 
 | Value | Meaning |
 |-------|---------|
-| `current` | The topology is still at the revision that was sent, and the collector is reachable |
-| `stale` | The topology changed while the engine worked, or the collector has been unreachable for a while: the topology is the last one known, not necessarily the live one (see `topology:status` in the [Realtime topology protocol](./realtime-topology.md)) |
+| `current` | The topology is still at the revision that was sent, and `topology:status` does not report the collector as unreachable |
+| `stale` | The topology changed while the engine worked, or the collector has been unreachable for more than 10 seconds, the threshold of `topology:status` ([Realtime topology protocol](./realtime-topology.md)): the topology is the last one known, not necessarily the live one |
 | `unverifiable` | The engine did not echo a revision: nothing proves which topology the results are about |
+
+`stale` is only as quick as `topology:status`: a collector that stops answering without refusing connections is noticed later, up to about 45 s after its last answer ([Realtime topology protocol](./realtime-topology.md)).
 
 Show `stale` and `unverifiable` results as such, never as "no risk found": an empty list means something only when `freshness` is `current`.
 
