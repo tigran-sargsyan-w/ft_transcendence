@@ -7,6 +7,7 @@ services:
       DATABASE_URL_FILE: /run/secrets/backend/database_url
 
     volumes:
+      - ./backend/prisma:/app/prisma:ro
       - backend_vault_rendered:/run/secrets/backend:ro
 
     depends_on:
@@ -19,6 +20,50 @@ services:
       - |
         sh scripts/wait-for-database-secret.sh
         exec npm run start:prod
+
+    # Runtime container hardening
+    cap_drop:
+      - ALL
+
+    security_opt:
+      - no-new-privileges:true
+
+    # Prevent modifications to the container root filesystem.
+    read_only: true
+
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - |
+          (async () => {
+            const response = await fetch(
+              "http://127.0.0.1:3000/api/v1/health",
+              { signal: AbortSignal.timeout(3000) }
+            );
+
+            if (!response.ok) {
+              throw new Error(`HTTP $${response.status}`);
+            }
+
+            const body = await response.json();
+
+            if (
+              body?.data?.status !== "ok" ||
+              body?.data?.database !== "ok"
+            ) {
+              throw new Error("Backend or database is unhealthy");
+            }
+          })().catch((error) => {
+            console.error(`Healthcheck failed: $${error.message}`);
+            process.exitCode = 1;
+          });
+
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   vault-backend-agent:
     image: hashicorp/vault:2.2.1
@@ -272,6 +317,11 @@ services:
       - no-new-privileges:true
 
     restart: "no"
+
+  postgres:
+    # Vault mode: PostgreSQL is accessible only through Docker networks.
+    # Do not publish port 5432 on the host.
+    ports: !reset []
 
 volumes:
   migrator_vault_auth:
