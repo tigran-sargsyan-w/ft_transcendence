@@ -11,8 +11,13 @@ if ! command -v flock >/dev/null 2>&1; then
 fi
 
 # Use the script file itself as the lock target.
-# No separate lock file is created in the repository.
-exec 9< "$ROOT_DIR/infra/vault/scripts/run-migrations.sh"
+LOCK_FILE="$ROOT_DIR/infra/vault/scripts/run-migrations.sh"
+
+# Reuse the inherited lock descriptor when called by start-backend.sh.
+# Otherwise, open our own descriptor for standalone migration runs.
+if [[ ! -e /proc/self/fd/9 || ! "$LOCK_FILE" -ef /proc/self/fd/9 ]]; then
+  exec 9< "$LOCK_FILE"
+fi
 
 if ! flock -n 9; then
   echo "ERROR: Another migration workflow is already running" >&2
