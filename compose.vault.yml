@@ -18,7 +18,7 @@ services:
       - -ec
       - |
         sh scripts/wait-for-database-secret.sh
-        exec npm run start
+        exec npm run start:prod
 
   vault-backend-agent:
     image: hashicorp/vault:2.2.1
