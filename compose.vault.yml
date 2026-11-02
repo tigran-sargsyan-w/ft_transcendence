@@ -18,7 +18,6 @@ services:
       - -ec
       - |
         sh scripts/wait-for-database-secret.sh
-        npx prisma migrate deploy
         exec npm run start
 
   vault-backend-agent:
