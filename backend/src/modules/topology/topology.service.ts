@@ -62,7 +62,7 @@ const sleepUnlessAborted: Sleep = (ms, signal) =>
 
 // `fetch failed` says nothing: the reason (ECONNREFUSED, ENOTFOUND...) is in
 // its `cause`, as a code, or only as a message.
-function errorMessage(error: unknown) {
+export function errorMessage(error: unknown) {
   if (!(error instanceof Error)) {
     return String(error);
   }
