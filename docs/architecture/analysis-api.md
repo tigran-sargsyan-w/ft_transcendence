@@ -70,6 +70,7 @@ Shape and codes: [API conventions](./api-conventions.md).
 |--------|------|------|
 | 400 | `VALIDATION_ERROR` | The request breaks the table above, or its `seedNodeIds` are missing for `blast_radius` / `attack_paths`, or name a node that is not in the topology (`details.seedNodeIds`) |
 | 404 | `TOPOLOGY_UNKNOWN_ENVIRONMENT` | The server does not follow that environment |
+| 429 | `TOO_MANY_REQUESTS` | More than 30 requests in a minute from the same client address, whatever their content. The count is kept in memory by the server and is separate from the login's |
 | 502 | `GRAPH_ENGINE_FAILURE` | The engine failed on its own, or refused a request that Nest had validated (a topology it does not accept, for example). Never the user's doing: the cause is in the log, not in the answer |
 | 503 | `TOPOLOGY_UNAVAILABLE` | No topology yet |
 | 503 | `ANALYSIS_UNAVAILABLE` | No engine configured, not reachable, no answer within 5 seconds, or an answer that is not the contract's (including one about another environment or another revision than the one sent, or one with no result for an analysis that was asked) |
