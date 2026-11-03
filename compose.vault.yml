@@ -89,7 +89,7 @@ services:
 
     volumes:
       - ./infra/vault/agent/backend.hcl:/vault/config/backend.hcl:ro
-      - ./infra/vault/poc/tls/ca.crt:/vault/tls/ca.crt:ro
+      - ./infra/vault/server/tls/ca.crt:/vault/tls/ca.crt:ro
       - backend_vault_auth:/vault/auth:ro
       - backend_vault_rendered:/vault/rendered
 
@@ -204,7 +204,7 @@ services:
       VAULT_CACERT: /vault/tls/ca.crt
 
     volumes:
-      - ./infra/vault/poc/tls/ca.crt:/vault/tls/ca.crt:ro
+      - ./infra/vault/server/tls/ca.crt:/vault/tls/ca.crt:ro
       - migrator_vault_auth:/vault/auth
 
     networks:
@@ -242,7 +242,7 @@ services:
 
     volumes:
       - ./infra/vault/agent/migrator.hcl:/vault/config/migrator.hcl:ro
-      - ./infra/vault/poc/tls/ca.crt:/vault/tls/ca.crt:ro
+      - ./infra/vault/server/tls/ca.crt:/vault/tls/ca.crt:ro
       - migrator_vault_auth:/vault/auth:ro
       - migrator_vault_rendered:/vault/rendered
 
