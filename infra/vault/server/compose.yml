@@ -182,6 +182,34 @@ services:
 
     restart: "no"
 
+  vault-tls-files:
+    image: hashicorp/vault:2.2.1
+    profiles:
+      - maintenance
+
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/vault/scripts/tls-files.sh"]
+    command: ["help"]
+
+    volumes:
+      - ./tls:/vault/tls
+      - ./tls-files.sh:/vault/scripts/tls-files.sh:ro
+
+    network_mode: none
+    read_only: true
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+
+    security_opt:
+      - no-new-privileges:true
+
+    restart: "no"
+
 volumes:
   vault_data:
   backend_agent_auth:
