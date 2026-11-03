@@ -2,9 +2,7 @@ import {
   ConflictException,
   ForbiddenException,
   Logger,
-  NotFoundException,
   type OnModuleDestroy,
-  ServiceUnavailableException,
   UnauthorizedException,
   UseFilters,
   UseGuards,
@@ -29,6 +27,7 @@ import { toErrorResponse } from '../../shared/api-envelope.js';
 import { AuthService } from '../auth/auth.service.js';
 import { SESSION_COOKIE } from '../auth/session-cookie.js';
 import type { TopologySnapshot } from '../topology/graph.types.js';
+import { knownSnapshot } from '../topology/known-snapshot.js';
 import {
   type TopologyChange,
   TopologyService,
@@ -163,22 +162,8 @@ export class RealtimeGateway
       throw validationError({ body: ['body must be an object'] });
     }
 
-    const known = this.topology.snapshot();
-
-    if (!known) {
-      throw new ServiceUnavailableException(
-        'The topology is not available yet',
-        { errorCode: 'TOPOLOGY_UNAVAILABLE' },
-      );
-    }
-
-    const environmentId = body.environmentId ?? known.environmentId;
-
-    if (environmentId !== known.environmentId) {
-      throw new NotFoundException('Unknown environment', {
-        errorCode: 'TOPOLOGY_UNKNOWN_ENVIRONMENT',
-      });
-    }
+    const known = knownSnapshot(this.topology.snapshot(), body.environmentId);
+    const { environmentId } = known;
 
     // The room first, then the snapshot. Joining may not be immediate, and a
     // change published while it lasts is in the snapshot read just after.

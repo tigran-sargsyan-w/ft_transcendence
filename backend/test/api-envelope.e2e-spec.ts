@@ -55,6 +55,25 @@ describe('API response format (e2e)', () => {
     });
   });
 
+  it('reports the migrations the database has not applied', async () => {
+    // The first query (SELECT 1) answers, the second finds nothing applied.
+    vi.spyOn(app.get(PrismaService), '$queryRaw')
+      .mockResolvedValueOnce([{ '?column?': 1 }])
+      .mockResolvedValueOnce([]);
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/health')
+      .expect(503);
+
+    expect(response.body).toEqual({
+      error: {
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'Service unavailable',
+        details: { migrations: 'pending' },
+      },
+    });
+  });
+
   it('formats an unknown route as a 404 error', async () => {
     const response = await request(app.getHttpServer())
       .get('/api/v1/nope')
