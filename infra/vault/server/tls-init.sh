@@ -6,7 +6,7 @@ umask 077
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 TLS_DIR="$PWD/tls"
-CA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ft-transcendence/vault-poc-ca"
+CA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ft-transcendence/vault-ca"
 
 command -v openssl >/dev/null || {
     echo "Error: OpenSSL is required"
@@ -39,7 +39,7 @@ openssl req -x509 \
     -days 365 \
     -keyout "$CA_DIR/ca.key" \
     -out "$TLS_DIR/ca.crt" \
-    -subj "/CN=Transcendence Vault POC CA" \
+    -subj "/CN=Transcendence Vault Development CA" \
     -addext "basicConstraints=critical,CA:TRUE" \
     -addext "keyUsage=critical,keyCertSign,cRLSign"
 
