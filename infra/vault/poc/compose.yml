@@ -70,6 +70,8 @@ services:
 
   vault-agent:
     image: hashicorp/vault:2.2.1
+    profiles:
+      - poc-demo
     user: "100:1000"
 
     command:
@@ -169,73 +171,6 @@ services:
       - vault_private
 
     restart: "no"
-
-  vault-backend-agent:
-    image: hashicorp/vault:2.2.1
-
-    profiles:
-      - backend-integration
-
-    user: "100:20000"
-
-    entrypoint: ["/bin/sh", "-ec"]
-
-    command:
-      - |
-        umask 077
-
-        mkdir -p /vault/runtime/agent
-        chmod 0700 /vault/runtime/agent
-
-        rm -f /vault/runtime/agent/token
-        rm -f /vault/rendered/database_url
-
-        exec vault agent -config=/vault/config/backend.hcl
-
-    environment:
-      VAULT_ADDR: https://vault:8200
-      VAULT_CACERT: /vault/tls/ca.crt
-
-    volumes:
-      - ../agent/backend.hcl:/vault/config/backend.hcl:ro
-      - ./tls/ca.crt:/vault/tls/ca.crt:ro
-      - backend_agent_auth:/vault/auth:ro
-      - backend_rendered:/vault/rendered
-
-    tmpfs:
-      - /vault/runtime:mode=1777
-
-    networks:
-      - vault_private
-
-    depends_on:
-      vault:
-        condition: service_started
-      vault-storage-permissions:
-        condition: service_completed_successfully
-
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - >
-          test -s /vault/rendered/database_url &&
-          test -r /vault/rendered/database_url &&
-          test -s /vault/runtime/agent/token &&
-          expected="$$(VAULT_TOKEN="$$(cat /vault/runtime/agent/token)" vault kv get -field=database_url -mount=kv ft-transcendence/dev/backend 2>/dev/null)" &&
-          actual="$$(cat /vault/rendered/database_url)" &&
-          test "$$actual" = "$$expected"
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-
-    cap_drop:
-      - ALL
-
-    security_opt:
-      - no-new-privileges:true
-
-    restart: unless-stopped
 
   vault-backend-provision:
     image: hashicorp/vault:2.2.1
