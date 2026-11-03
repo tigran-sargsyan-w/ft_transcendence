@@ -65,4 +65,18 @@ describe('Analyses rate limit (e2e)', () => {
     expect(response.body.error.code).toBe('TOO_MANY_REQUESTS');
     await attemptFrom('203.0.113.2').expect(400);
   });
+
+  // Same client, blocked on the analyses: its login has its own counter.
+  it('does not count the analyses with the login', async () => {
+    for (let i = 0; i < 30; i++) {
+      await attemptFrom('203.0.113.3').expect(400);
+    }
+
+    await attemptFrom('203.0.113.3').expect(429);
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('X-Forwarded-For', '203.0.113.3')
+      .send({ email, password })
+      .expect(200);
+  });
 });
