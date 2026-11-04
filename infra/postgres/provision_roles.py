@@ -2,17 +2,14 @@
 """PostgreSQL role inspection and credential verification."""
 
 import subprocess
+from compose_runtime import compose_command
 from pathlib import Path
 
 from credential_contract import parse_database_url
 from scram import make_scram_verifier
 
 
-COMPOSE = [
-    "docker", "compose",
-    "-f", "compose.yml",
-    "-f", "compose.vault.yml",
-]
+COMPOSE = compose_command()
 
 ROLES = {
     "backend": "transcendence_app",
@@ -123,6 +120,11 @@ def provision_missing_role(username: str, password: str) -> str:
     # Verifier is generated internally, never accepted as SQL input.
     sql = f"""
 BEGIN;
+
+-- Do not log the SCRAM verifier during this transaction,
+-- including when ALTER ROLE fails.
+SET LOCAL log_statement = 'none';
+SET LOCAL log_min_error_statement = 'PANIC';
 
 SELECT pg_advisory_xact_lock(
     hashtext('ft_transcendence_postgres_roles')

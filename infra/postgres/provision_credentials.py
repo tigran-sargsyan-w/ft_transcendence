@@ -4,6 +4,7 @@
 import argparse
 import secrets
 import subprocess
+from compose_runtime import compose_command
 from contextlib import contextmanager
 
 from credential_contract import parse_database_url
@@ -15,12 +16,7 @@ from provision_roles import (
 )
 
 
-COMPOSE = [
-    "docker",
-    "compose",
-    "-f", "compose.yml",
-    "-f", "compose.vault.yml",
-]
+COMPOSE = compose_command()
 
 
 @contextmanager

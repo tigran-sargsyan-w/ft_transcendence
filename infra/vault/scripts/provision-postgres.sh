@@ -4,11 +4,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT_DIR"
 
-COMPOSE=(
-  docker compose
-  -f compose.yml
-  -f compose.vault.yml
-)
+source "$ROOT_DIR/infra/vault/scripts/app-compose.sh"
 
 # Share the migration workflow lock.
 if ! command -v flock >/dev/null 2>&1; then

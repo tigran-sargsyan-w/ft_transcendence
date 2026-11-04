@@ -26,11 +26,7 @@ fi
 
 echo "Migration workflow lock acquired"
 
-COMPOSE=(
-  docker compose
-  -f compose.yml
-  -f compose.vault.yml
-)
+source "$ROOT_DIR/infra/vault/scripts/app-compose.sh"
 
 cleanup() {
   local status=$?
