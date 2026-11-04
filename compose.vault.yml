@@ -270,6 +270,40 @@ services:
 
     restart: "no"
 
+  vault-postgres-provisioner-cleanup:
+    image: hashicorp/vault:2.2.1
+    user: "100:20020"
+
+    profiles:
+      - vault-maintenance
+
+    entrypoint: ["/bin/sh", "-ec"]
+
+    command:
+      - |
+        set -eu
+
+        rm -f /vault/rendered/backend_database_url
+        rm -f /vault/rendered/migrator_database_url
+
+        test ! -e /vault/rendered/backend_database_url
+        test ! -e /vault/rendered/migrator_database_url
+
+        echo "PostgreSQL provisioning credentials cleaned up successfully"
+
+    volumes:
+      - postgres_provisioner_rendered:/vault/rendered
+
+    network_mode: none
+
+    cap_drop:
+      - ALL
+
+    security_opt:
+      - no-new-privileges:true
+
+    restart: "no"
+
   vault-migrator-storage-init:
     image: hashicorp/vault:2.2.1
     user: "0:0"
