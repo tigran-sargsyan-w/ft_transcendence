@@ -52,6 +52,10 @@ vault policy write \
   migrator-readonly \
   /vault/policies/migrator-readonly.hcl
 
+vault policy write \
+  postgres-provisioner-readonly \
+  /vault/policies/postgres-provisioner-readonly.hcl
+
 read_field() {
   printf '%s\n' "$role_state" |
     awk -v field="$1" '$1 == field { print $2; exit }'
@@ -105,5 +109,6 @@ ensure_role() {
 
 ensure_role backend-reader backend-readonly
 ensure_role migrator-reader migrator-readonly
+ensure_role postgres-provisioner-reader postgres-provisioner-readonly
 
 echo "Vault bootstrap completed successfully"
