@@ -81,4 +81,10 @@ echo "=== Step 4: Prisma migrate deploy ==="
   --profile vault-migration \
   run --rm --no-deps --build backend-migrate
 
-echo "=== Prisma migrations completed successfully ==="
+echo "=== Step 5: Reconcile PostgreSQL grants ==="
+
+"${COMPOSE[@]}" exec -T postgres \
+  sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < "$ROOT_DIR/infra/postgres/reconcile-grants.sql"
+
+echo "=== Prisma migrations and PostgreSQL grants completed successfully ==="
