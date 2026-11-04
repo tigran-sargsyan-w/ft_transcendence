@@ -122,6 +122,154 @@ services:
 
     restart: unless-stopped
 
+  vault-postgres-provisioner-storage-init:
+    image: hashicorp/vault:2.2.1
+    user: "0:0"
+
+    profiles:
+      - vault-setup
+
+    entrypoint: ["/bin/sh", "-ec"]
+
+    command:
+      - |
+        mkdir -p /vault/auth /vault/rendered
+
+        # AppRole credentials: accessible only to UID 100.
+        chown 100:1000 /vault/auth
+        chmod 0700 /vault/auth
+
+        # Rendered credentials: dedicated provisioning group.
+        chown 100:20020 /vault/rendered
+        chmod 0750 /vault/rendered
+
+    volumes:
+      - postgres_provisioner_vault_auth:/vault/auth
+      - postgres_provisioner_rendered:/vault/rendered
+
+    network_mode: none
+    restart: "no"
+
+  vault-postgres-provisioner-provision:
+    image: hashicorp/vault:2.2.1
+    user: "100:1000"
+
+    profiles:
+      - vault-setup
+
+    entrypoint: ["/bin/sh", "-ec"]
+
+    command:
+      - |
+        set -eu
+        umask 077
+
+        printf "Vault admin token (hidden): "
+        IFS= read -r -s VAULT_TOKEN
+        printf "\\n"
+        export VAULT_TOKEN
+
+        vault token lookup >/dev/null
+
+        trap 'rm -f /vault/auth/.role_id.next /vault/auth/.secret_id.next' EXIT
+
+        vault read -field=role_id \
+          auth/approle/role/postgres-provisioner-reader/role-id \
+          > /vault/auth/.role_id.next
+
+        vault write -force -field=secret_id \
+          auth/approle/role/postgres-provisioner-reader/secret-id \
+          > /vault/auth/.secret_id.next
+
+        test -s /vault/auth/.role_id.next
+        test -s /vault/auth/.secret_id.next
+
+        chmod 0400 \
+          /vault/auth/.role_id.next \
+          /vault/auth/.secret_id.next
+
+        mv -f /vault/auth/.role_id.next /vault/auth/role_id
+        mv -f /vault/auth/.secret_id.next /vault/auth/secret_id
+
+        unset VAULT_TOKEN
+
+        echo "PostgreSQL Provisioner AppRole credentials provisioned successfully"
+
+    environment:
+      VAULT_ADDR: https://vault:8200
+      VAULT_CACERT: /vault/tls/ca.crt
+
+    volumes:
+      - ./infra/vault/server/tls/ca.crt:/vault/tls/ca.crt:ro
+      - postgres_provisioner_vault_auth:/vault/auth
+
+    networks:
+      - vault_private
+
+    cap_drop:
+      - ALL
+
+    security_opt:
+      - no-new-privileges:true
+
+    restart: "no"
+
+  vault-postgres-provisioner-agent:
+    image: hashicorp/vault:2.2.1
+    user: "100:20020"
+
+    profiles:
+      - vault-setup
+
+    entrypoint: ["/bin/sh", "-ec"]
+
+    command:
+      - |
+        set -eu
+        umask 077
+
+        # Remove stale credentials before each provisioning attempt.
+        rm -f /vault/rendered/backend_database_url
+        rm -f /vault/rendered/migrator_database_url
+
+        cleanup_on_failure() {
+          status=$?
+          if [ "$$status" -ne 0 ]; then
+            rm -f /vault/rendered/backend_database_url
+            rm -f /vault/rendered/migrator_database_url
+          fi
+        }
+
+        trap cleanup_on_failure EXIT
+
+        vault agent -config=/vault/config/postgres-provisioner.hcl
+
+        test -s /vault/rendered/backend_database_url
+        test -s /vault/rendered/migrator_database_url
+
+        echo "PostgreSQL provisioning credentials rendered successfully"
+
+    environment:
+      VAULT_ADDR: https://vault:8200
+      VAULT_CACERT: /vault/tls/ca.crt
+
+    volumes:
+      - ./infra/vault/agent/postgres-provisioner.hcl:/vault/config/postgres-provisioner.hcl:ro
+      - ./infra/vault/server/tls/ca.crt:/vault/tls/ca.crt:ro
+      - postgres_provisioner_vault_auth:/vault/auth:ro
+      - postgres_provisioner_rendered:/vault/rendered
+
+    networks:
+      - vault_private
+
+    cap_drop:
+      - ALL
+
+    security_opt:
+      - no-new-privileges:true
+
+    restart: "no"
+
   vault-migrator-storage-init:
     image: hashicorp/vault:2.2.1
     user: "0:0"
@@ -334,6 +482,9 @@ volumes:
     external: true
     name: transcendence-vault-poc_backend_agent_auth
 
+
+  postgres_provisioner_vault_auth:
+  postgres_provisioner_rendered:
 networks:
   vault_private:
     external: true
