@@ -1,7 +1,7 @@
 # Vault Server — Development Infrastructure
 
-> **Status:** Local development infrastructure, not production-ready.  
-> **Tracking:** [Issue #104](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/104) (infrastructure), [#105](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/105) (credential lifecycle), [#106](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/106) (recovery).  
+> **Status:** Local development infrastructure, not production-ready.
+> **Tracking:** [Issue #104](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/104) (infrastructure), [#105](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/105) (credential lifecycle), [#106](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/106) (recovery).
 > **Scope:** Vault Server, TLS, Raft persistence, ACL/AppRole bootstrap, and agent integration with the backend and Prisma migrations.
 
 Vault is operated as a **single-node**, TLS-protected server backed by integrated Raft storage. Separate Vault Agents deliver PostgreSQL connection strings to the NestJS backend and the one-shot Prisma migration process. Application containers do not receive Vault root tokens.
@@ -57,10 +57,11 @@ The Vault Compose file deliberately retains the project name **`transcendence-va
 | Configure Vault | `vault-bootstrap` (`setup` profile) | KV v2, policies, AppRoles; no KV values or SecretIDs created |
 | Issue backend AppRole credentials | `vault-backend-provision` (`setup` profile) | Generates and writes a new SecretID |
 | Issue migration AppRole credentials | `vault-migrator-provision` in `compose.vault.yml` | Generates and writes a new SecretID |
+| Reconcile PostgreSQL credentials | `infra/vault/scripts/provision-postgres.sh` | Ensures roles exist and verifies Vault credentials against PostgreSQL without rotating existing passwords |
 | Run migrations | `infra/vault/scripts/run-migrations.sh` | One-shot migration Agent, Prisma deploy, cleanup |
 | Start backend | `infra/vault/scripts/start-backend.sh` | Stops backend, runs migrations, starts backend |
 
-**Not fully automated yet:** PostgreSQL role/database grants and initial values in Vault KV. Those are operator prerequisites. A clean end-to-end installation has not yet been validated; do not treat this document as proof of production readiness.
+**Automation boundary:** PostgreSQL role creation, credential reconciliation, migrations, and grants are implemented through the infrastructure scripts. Initial Vault KV secret values and AppRole SecretID provisioning still require controlled operator steps. The Vault/PostgreSQL/Prisma/NestJS integration has been validated in an isolated Docker Clean-Room, including repeated migrations and backend startup. A fresh-machine installation and production deployment have not been validated; these results are not proof of production readiness.
 
 ## 2. Prerequisites and security boundaries
 
@@ -131,18 +132,18 @@ Supply the Vault administrative token at the hidden prompt. The bootstrap:
 
 - enables `kv/` as **KV v2** if missing;
 - enables `approle/` authentication if missing;
-- applies `backend-readonly` and `migrator-readonly` ACL policy files;
-- creates `backend-reader` and `migrator-reader` if absent;
+- applies `backend-readonly`, `migrator-readonly`, and `postgres-provisioner-readonly` ACL policies;
+- creates `backend-reader`, `migrator-reader`, and `postgres-provisioner-reader` if absent;
 - verifies existing role parameters instead of silently overwriting an existing role;
 - does **not** write database secrets or generate SecretIDs.
 
-Both AppRoles require a SecretID (`bind_secret_id=true`), use a 7-day SecretID lifetime, a maximum of 20 logins per SecretID, a 1-hour token TTL, a 4-hour token maximum TTL, and exclude the default token policy.
+All three AppRoles require a SecretID (`bind_secret_id=true`), use a 7-day SecretID lifetime, a maximum of 20 logins per SecretID, a 1-hour token TTL, a 4-hour token maximum TTL, and exclude the default token policy.
 
 Running bootstrap again is supported; note that it **reapplies ACL policies** from the repository. Review policy changes before running it on a shared deployment.
 
 ### 3.5. Create database roles and populate the two KV secrets
 
-Prepare **distinct PostgreSQL credentials** for the application runtime and Prisma migrations, using a trusted operator process. The appropriate SQL grants, role creation, and provisioning of an existing Postgres volume are **not yet automated by this repository**; do not assume `vault-bootstrap` performs them. The migration role needs permissions to run the project's Prisma migrations; the runtime role should not be granted migration privileges.
+Prepare **distinct PostgreSQL credentials** for the application runtime and Prisma migrations, using a trusted operator process. The operator must populate the corresponding Vault KV secrets; `vault-bootstrap` does not write their values. The migration workflow invokes `provision-postgres.sh`, which runs `ensure-roles.sql` and verifies or initializes PostgreSQL role credentials. Existing active roles are verified rather than silently rotated. After Prisma migrations, `reconcile-grants.sql` applies restricted runtime privileges. The runtime role does not receive schema migration permissions.
 
 Store the resulting **two distinct PostgreSQL DSNs** in KV v2:
 
@@ -203,7 +204,17 @@ docker compose -f compose.yml -f compose.vault.yml \
   run --rm --no-deps vault-migrator-provision
 ```
 
-Both provisioning commands request a privileged Vault token. They **create a new SecretID**; they are not read-only bootstrap operations. SecretID lifecycle management and revocation of old credentials remain [Issue #105](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/105).
+Also initialize and provision the PostgreSQL credential-reader AppRole using the application Compose files:
+
+```bash
+docker compose -f compose.yml -f compose.vault.yml \
+  --profile vault-setup run --rm --no-deps vault-postgres-provisioner-storage-init
+
+docker compose -f compose.yml -f compose.vault.yml \
+  --profile vault-setup run --rm --no-deps vault-postgres-provisioner-provision
+```
+
+The AppRole provisioning commands request a privileged Vault token. They **create a new SecretID**; they are not read-only bootstrap operations. SecretID lifecycle management and revocation of old credentials remain [Issue #105](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/105).
 
 Start and check the runtime Agent:
 
@@ -226,7 +237,7 @@ Expect `healthy` only after its AppRole authentication succeeds and the correct 
 
 Normally use **`start-backend.sh`** as the backend startup entry point: it already calls the migration workflow, so you do **not** need to run both commands every time. Both scripts use a host-side `flock` guard. The migration workflow cleans up its rendered migration secret on normal exit and handled interruption.
 
-**Current integration follow-up:** Backend `/api/v1/health` (PR #111) reads `public._prisma_migrations`. The restricted runtime PostgreSQL role may require `SELECT` on that table, applied reproducibly after the table exists. Until the grant is provisioned and tested, backend startup or health checks may fail even when Vault itself is healthy. Track this under [Issue #92](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/92); do not grant broad schema ownership to the runtime role as a workaround.
+**Verified application integration:** Backend `/api/v1/health` reads `public._prisma_migrations`. The required read-only `SELECT` grant is applied by `reconcile-grants.sql` after Prisma migrations. This was verified in the isolated Clean-Room with a restricted runtime PostgreSQL role, without granting schema ownership or migration privileges to the backend. See [Issue #92](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/92).
 
 ## 4. Routine operations
 
@@ -317,8 +328,8 @@ Replace `backup-ACTUAL_NAME` with the actual backup directory name. Verify the l
 - AppRole SecretID TTL is **168 hours**, with **20 uses**; credentials may need reprovisioning before expiry or on exhaustion. Automated rotation and revocation remain separate work.
 - Persistent Docker volumes contain authentication and rendered secret material; Docker host administrators can access them.
 - TLS rotation succeeded locally via `SIGHUP` without container restart, but interrupted-file replacement and rollback failure scenarios are not comprehensively tested.
-- Fresh-machine provisioning of PostgreSQL roles, grants, and KV values is not yet fully automated; a clean end-to-end install remains to be tested.
-- Backend `/health` permissions and the Migration Agent require final end-to-end verification against the latest backend code.
+- PostgreSQL role creation, credential reconciliation, and grants are automated and were tested in an isolated Clean-Room. Initial Vault KV values and AppRole provisioning still require operator setup; a fresh-machine installation remains untested.
+- Backend health permissions, one-shot migration Agent, repeated Prisma migrations, and the startup workflow passed Clean-Room integration tests. Production deployment, disaster recovery, and complete credential lifecycle handling remain separate work.
 - Certificates, CA keys, Vault root tokens, SecretIDs, Raft snapshots and Shamir shares **must not be committed or uploaded**.
 
 ## 8. Related documentation
@@ -330,4 +341,3 @@ Replace `backup-ACTUAL_NAME` with the actual backup directory name. Verify the l
 - [Issue #104 — development infrastructure](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/104)
 - [Vault KV CLI: writing values through stdin](https://developer.hashicorp.com/vault/docs/commands/kv/put)
 - [Vault TCP listener: certificate reload on SIGHUP](https://developer.hashicorp.com/vault/docs/configuration/listener/tcp)
-
