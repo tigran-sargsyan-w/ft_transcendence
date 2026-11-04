@@ -63,11 +63,9 @@ echo "=== Step 1: PostgreSQL readiness ==="
 "${COMPOSE[@]}" \
   up -d --no-deps --wait postgres
 
-echo "=== Step 1.5: Ensure PostgreSQL roles ==="
+echo "=== Step 1.5: Vault-backed PostgreSQL provisioning ==="
 
-"${COMPOSE[@]}" exec -T postgres \
-  sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
-  < "$ROOT_DIR/infra/postgres/ensure-roles.sql"
+"$ROOT_DIR/infra/vault/scripts/provision-postgres.sh"
 
 echo "=== Step 2: Remove previous migration secret ==="
 
