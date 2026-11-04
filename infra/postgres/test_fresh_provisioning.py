@@ -195,6 +195,71 @@ def run_test():
             )
 
     print("PASS: Repeated provisioning preserves existing roles")
+    print("=== Step 6: Verify SQL error logging protection ===")
+
+    synthetic_password = secrets.token_urlsafe(32)
+    synthetic_verifier = roles.make_scram_verifier(
+        synthetic_password
+    )
+
+    missing_role = "ft_missing_" + secrets.token_hex(6)
+
+    failing_sql = f"""
+BEGIN;
+
+SET LOCAL log_statement = 'none';
+SET LOCAL log_min_error_statement = 'PANIC';
+
+ALTER ROLE {missing_role}
+    WITH LOGIN PASSWORD '{synthetic_verifier}';
+
+COMMIT;
+"""
+
+    result = docker(
+        "exec", "-i", NAME,
+        "psql",
+        "-X", "-A", "-t",
+        "-v", "ON_ERROR_STOP=1",
+        "-U", ADMIN,
+        "-d", DATABASE,
+        input_text=failing_sql,
+    )
+
+    if result.returncode == 0:
+        raise RuntimeError(
+            "Expected ALTER ROLE failure did not occur"
+        )
+
+    print("PASS: Intentional ALTER ROLE error triggered")
+
+    logs = docker("logs", NAME)
+
+    if logs.returncode != 0:
+        raise RuntimeError("Could not inspect PostgreSQL logs")
+
+    log_text = logs.stdout + logs.stderr
+
+    if (
+        synthetic_password in log_text
+        or synthetic_verifier in log_text
+    ):
+        raise RuntimeError(
+            "SECURITY FAILURE: Credential material leaked "
+            "into PostgreSQL Docker logs"
+        )
+
+    print("PASS: Synthetic credentials absent from Docker logs")
+
+    setting = admin_sql("SHOW log_min_error_statement;")
+
+    if setting != "error":
+        raise RuntimeError(
+            "PostgreSQL logging configuration was not restored"
+        )
+
+    print("PASS: PostgreSQL logging setting remains unchanged")
+
     print("PASS: Fresh PostgreSQL provisioning integration test")
 
 
