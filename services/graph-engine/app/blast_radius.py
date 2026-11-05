@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, FrozenSet, List, Optional
 
 import networkx as nx
 
@@ -19,14 +19,22 @@ def build_digraph(topology: TopologySnapshot) -> nx.DiGraph:
     return graph
 
 
-def dependency_subgraph(graph: nx.DiGraph) -> nx.DiGraph:
-    """Keep all nodes; keep only edges whose kind is in DEPENDENCY_EDGE_KINDS."""
+def edge_kind_subgraph(
+    graph: nx.DiGraph,
+    edge_kinds: FrozenSet[str],
+) -> nx.DiGraph:
+    """Keep all nodes; keep only edges whose kind is in `edge_kinds`."""
     filtered = nx.DiGraph()
     filtered.add_nodes_from(graph.nodes())
     for source, target, data in graph.edges(data=True):
-        if data.get("kind") in DEPENDENCY_EDGE_KINDS:
+        if data.get("kind") in edge_kinds:
             filtered.add_edge(source, target, **data)
     return filtered
+
+
+def dependency_subgraph(graph: nx.DiGraph) -> nx.DiGraph:
+    """depends_on-only subgraph (critical_nodes and legacy callers)."""
+    return edge_kind_subgraph(graph, DEPENDENCY_EDGE_KINDS)
 
 
 def compute_blast_radius(
