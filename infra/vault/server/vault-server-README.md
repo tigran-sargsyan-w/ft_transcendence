@@ -334,7 +334,7 @@ Replace `backup-ACTUAL_NAME` with the actual backup directory name. Verify the l
 
 ## 8. Related documentation
 
-- [Original isolated Vault POC](../poc/README.md) — historical implementation; **do not use its commands for the new server**.
+- The original isolated Vault POC is preserved in Git history. Its commands and configuration are superseded by the development Vault Server.
 - [Vault secret delivery contract](../../../docs/architecture/vault-secret-delivery.md) — original proposal; may be stale relative to merged implementation.
 - [ADR 0003](../../../docs/adr/0003-vault-secret-delivery.md) — decision record.
 - [Issue #92 — application integration](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/92)
