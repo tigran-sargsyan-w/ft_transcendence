@@ -108,3 +108,33 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate configuration (do not start containers)
         run: docker compose -f compose.yml config --quiet
+
+  vault-infrastructure:
+    name: Vault infrastructure / static validation
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_USER: transcendence_ci
+      POSTGRES_PASSWORD: placeholder_for_ci_only
+      POSTGRES_DB: transcendence_ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate infrastructure shell scripts
+        run: |
+          for script in infra/vault/scripts/*.sh infra/vault/server/*.sh; do
+            if head -n 1 "$script" | grep -q 'bash'; then
+              bash -n "$script"
+            else
+              sh -n "$script"
+            fi
+          done
+
+      - name: Validate PostgreSQL Python syntax
+        run: |
+          python3 -c 'import ast, pathlib; paths = sorted(pathlib.Path("infra/postgres").glob("*.py")); assert paths, "No PostgreSQL Python files"; [ast.parse(p.read_text(encoding="utf-8"), filename=str(p)) for p in paths]'
+
+      - name: Validate Vault application Compose
+        run: docker compose --profile "*" -f compose.yml -f compose.vault.yml config --quiet
+
+      - name: Validate Vault server Compose
+        run: docker compose --profile "*" -f infra/vault/server/compose.yml config --quiet

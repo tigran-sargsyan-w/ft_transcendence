@@ -26,11 +26,7 @@ fi
 
 echo "Migration workflow lock acquired"
 
-COMPOSE=(
-  docker compose
-  -f compose.yml
-  -f compose.vault.yml
-)
+source "$ROOT_DIR/infra/vault/scripts/app-compose.sh"
 
 cleanup() {
   local status=$?
@@ -63,6 +59,10 @@ echo "=== Step 1: PostgreSQL readiness ==="
 "${COMPOSE[@]}" \
   up -d --no-deps --wait postgres
 
+echo "=== Step 1.5: Vault-backed PostgreSQL provisioning ==="
+
+"$ROOT_DIR/infra/vault/scripts/provision-postgres.sh"
+
 echo "=== Step 2: Remove previous migration secret ==="
 
 "${COMPOSE[@]}" \
@@ -81,4 +81,10 @@ echo "=== Step 4: Prisma migrate deploy ==="
   --profile vault-migration \
   run --rm --no-deps --build backend-migrate
 
-echo "=== Prisma migrations completed successfully ==="
+echo "=== Step 5: Reconcile PostgreSQL grants ==="
+
+"${COMPOSE[@]}" exec -T postgres \
+  sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < "$ROOT_DIR/infra/postgres/reconcile-grants.sql"
+
+echo "=== Prisma migrations and PostgreSQL grants completed successfully ==="

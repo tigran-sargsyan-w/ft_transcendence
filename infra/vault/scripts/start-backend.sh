@@ -21,11 +21,7 @@ fi
 
 echo "Backend startup lock acquired"
 
-COMPOSE=(
-  docker compose
-  -f compose.yml
-  -f compose.vault.yml
-)
+source "$ROOT_DIR/infra/vault/scripts/app-compose.sh"
 
 echo "=== Step 1: Stop existing backend ==="
 
