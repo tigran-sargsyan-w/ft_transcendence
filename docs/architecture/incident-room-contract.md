@@ -29,7 +29,8 @@ Following [Graph contract](./graph-contract.md) ("auth, history, pagination, and
 | ------------------------------------------------ | -------------------------------------------------------------- |
 | Load an incident, its timeline, its chat history | REST                                                           |
 | List incidents                                   | REST                                                           |
-| Run an analysis                                  | REST                                                           |
+| Run an analysis or a simulation                  | REST ([Analyses API](./analysis-api.md))                       |
+| Live graph of the environment                    | Socket: `topology:subscribe` ([Realtime topology protocol](./realtime-topology.md)) |
 | Actions (status, severity, notes, runbook steps) | REST, then the server broadcasts the change over the socket    |
 | Receive changes made by others                   | Socket                                                         |
 | Presence, typing indicator                       | Socket                                                         |
@@ -73,10 +74,14 @@ interface Incident extends IncidentSummary {
   latestAnalysis: IncidentAnalysis | null; // null = not computed yet, the impact panel shows a loading state
 }
 
+// The incident's blast radius, saved by the server. Same shape as the `data` of an
+// Analyses API response (./analysis-api.md), for `analyses: ["blast_radius"]`.
 interface IncidentAnalysis {
-  analyzedAt: string; // when the most recent of the results below was computed
-  topologyRevision: string; // topology revision the results were computed on (Graph contract)
-  results: AnalysisResults; // Graph contract `results`: `blastRadius` always, `attackPaths` once computed
+  environmentId: string;
+  topologyRevision: string; // "<epoch>:<revision>" of the topology that was analysed
+  analyzedAt: string;
+  freshness: "current" | "stale" | "unverifiable"; // as answered at computation time
+  results: AnalysisResults; // Graph contract `results`, holding `blastRadius`
 }
 
 interface UserRef {
@@ -109,7 +114,7 @@ interface TimelineEntry {
 type TimelineEntryData =
   | { kind: "status_change"; from: IncidentStatus; to: IncidentStatus }
   | { kind: "severity_change"; from: IncidentSeverity; to: IncidentSeverity }
-  | { kind: "analysis"; analysis: "blast_radius" | "attack_paths"; affectedCount: number }
+  | { kind: "analysis"; analysis: "blast_radius"; affectedCount: number } // only the incident's saved blast radius
   | {
       kind: "action";
       action: "step_done" | "step_undone" | "step_assigned" | "role_changed" | "node_compromised" | "seeds_changed";
@@ -193,8 +198,10 @@ interface ChatMessage {
   ],
   "myRole": "commander",
   "latestAnalysis": {
+    "environmentId": "env_local_compose",
+    "topologyRevision": "6f1c…:12",
     "analyzedAt": "2026-09-14T09:52:04Z",
-    "topologyRevision": "rev_42",
+    "freshness": "current",
     "results": {
       "blastRadius": {
         "seedNodeIds": ["svc_api"],
@@ -227,8 +234,8 @@ Pagination of `GET /incidents` follows the project strategy once it is chosen (s
 Rules for `seedNodeIds`, on `POST /incidents` and on `PATCH /incidents/:id`:
 
 - `seedNodeIds` must hold at least one node: the impact panel opens on the blast radius, which needs a starting point. An empty list returns `400 VALIDATION_ERROR`.
-- Each id must be a node of `environmentId`, otherwise `404 NODE_NOT_FOUND`. Duplicates are ignored.
-- The blast radius is computed right after creation (see [Analyses computed automatically](#analyses-computed-automatically)).
+- At most 50 ids, each one a node of the topology of `environmentId`, as in the [Analyses API](./analysis-api.md). Otherwise `400 VALIDATION_ERROR` with `details.seedNodeIds`. Duplicates are ignored.
+- The blast radius is computed right after creation (see [The incident's blast radius](#the-incidents-blast-radius)).
 - Changing `seedNodeIds` with `PATCH` is for when the team finds out the real origin is another service (for example the database rather than the API). The server replaces the list, adds an `action` timeline entry with `data.action: "seeds_changed"` (previous list in `data.fromNodeIds`, new list in the entry's `nodeIds`, for example "Pierre changed the origin to db"), broadcasts `incident.updated`, then recomputes the blast radius (`analysis.completed`).
 - Sending the same list (in any order) returns `200` and changes nothing.
 
@@ -382,28 +389,49 @@ Loading older messages:
 
 ### Impact and analyses
 
-| Method  | Path                                 | Body                                                             | Success                                                      | MVP |
-| ------- | ------------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------ | --- |
-| `GET`   | `/environments/:envId/topology`      | none                                                             | `200` `{ data: TopologySnapshot }` (Graph contract)          | yes |
-| `POST`  | `/incidents/:id/analyses`            | `{ analyses: ["blast_radius" \| "attack_paths"], seedNodeIds? }` | `200` `{ data: AnalysisResults }` (Graph contract `results`) | yes |
-| `POST`  | `/incidents/:id/compromised-nodes`   | `{ nodeId }`                                                     | `200` `{ data: GraphNode }`                                  | yes |
+The impact panel reuses what already exists on `main`:
 
-- Without `seedNodeIds`, `POST /incidents/:id/analyses` uses the incident's `seedNodeIds`, saves the result in `Incident.latestAnalysis` and broadcasts `analysis.completed`. With them, it is a simulation ("what if this node were compromised"): the result is returned to the caller only, not saved, not broadcast and not added to the timeline.
+- **The graph** comes from the [Realtime topology protocol](./realtime-topology.md): `topology:subscribe`, then `topology:snapshot` and `topology:delta`. There is no REST endpoint for the topology.
+- **Analyses** use the [Analyses API](./analysis-api.md): `POST /api/v1/environments/:envId/analyses`. Its limits, response (`topologyRevision`, `freshness`, `results`) and errors apply as written there. Its answer goes to the user who asked only, and nothing is stored.
 
-#### Analyses computed automatically
+This contract only adds what is specific to an incident: a blast radius saved with the incident and shared with the room, and the "Mark as compromised" action.
 
-The impact panel opens on **Blast radius** (frontend choice: it answers the first question of an incident, "what is affected?"). So the blast radius must be ready when someone opens the incident:
+| Method | Path                                       | Body                                     | Success                                   | MVP |
+| ------ | ------------------------------------------ | ---------------------------------------- | ----------------------------------------- | --- |
+| `POST` | `/incidents/:id/blast-radius`              | none                                     | `200` `{ data: IncidentAnalysis }`        | yes |
+| `POST` | `/incidents/:id/compromised-nodes`         | `{ nodeId }`                             | `200` `{ data: GraphNode }`               | yes |
+| `POST` | `/environments/:envId/analyses` (existing) | see [Analyses API](./analysis-api.md)    | `200`, answer to the caller only          | yes |
 
-| Analysis       | Computed                                                                                                                   |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `blast_radius` | automatically by the backend: when the incident is created, when its `seedNodeIds` change, when a node becomes `compromised` |
-| `attack_paths` | on demand: when the user opens the "Attack paths" tab, through `POST /incidents/:id/analyses`. **❓** Q7                    |
+#### The incident's blast radius
 
-- Each automatic computation saves the result in `Incident.latestAnalysis`, adds an `analysis` timeline entry and broadcasts `analysis.completed`.
-- `latestAnalysis.results` keeps the last `blastRadius` and the last `attackPaths`: computing one does not erase the other.
+The impact panel opens on **Blast radius** (frontend choice: it answers the first question of an incident, "what is affected?"). So it must be ready when someone opens the incident.
+
+- The backend computes it by itself, through the analysis module, with the incident's `seedNodeIds`: when the incident is created, when its `seedNodeIds` change, when a node becomes `compromised`.
+- `POST /incidents/:id/blast-radius` computes it again on demand (the "Re-run analysis" button), same rules.
+- Each computation saves the result in `Incident.latestAnalysis`, adds an `analysis` timeline entry and broadcasts `analysis.completed` to the room.
 - The frontend reads `latestAnalysis` from `GET /incidents/:id` on load and on reconnect: no extra call is needed. If it is `null`, the panel shows a loading state until `analysis.completed` arrives.
+- If the computation fails (`ANALYSIS_UNAVAILABLE`, `GRAPH_ENGINE_FAILURE`, `TOPOLOGY_UNAVAILABLE`, see the Analyses API), `POST …/blast-radius` answers that error, an automatic computation broadcasts `analysis.failed` with `{ incidentId, error: { code } }`, and `latestAnalysis` keeps its previous value. The panel shows the error with a "Re-run analysis" button.
+
+Reading the result, as the Analyses API asks:
+
+- `freshness` `stale` or `unverifiable` is shown as such, never as "no service affected": an empty list means something only when `freshness` is `current`.
+- The topology keeps moving after the computation. When `latestAnalysis.topologyRevision` differs from the `<epoch>:<revision>` of the snapshot or delta the panel shows, the panel marks the result as outdated and offers "Re-run analysis".
+
+#### Attack paths and simulations
+
+Both go straight to the Analyses API: the answer goes to the user who asked only, it is not saved, not broadcast and not added to the timeline.
+
+| Use                               | Body sent to `POST /environments/:envId/analyses`                                  |
+| --------------------------------- | ---------------------------------------------------------------------------------- |
+| "Attack paths" tab                | `{ "analyses": ["attack_paths"], "seedNodeIds": <the incident's seedNodeIds> }`  |
+| Simulation ("what if this node…") | `{ "analyses": ["blast_radius", "attack_paths"], "seedNodeIds": [<chosen node>] }` |
+
+The attack paths are computed each time the tab is opened, since nothing is stored. **❓** Q7.
+
+#### Mark as compromised
+
 - `POST /incidents/:id/compromised-nodes` is the manual "Mark as compromised" action. It goes through the incident so that the server knows which role to check and the action shows in the incident's timeline:
-  - the server checks the user's role in this incident (see [Permissions](#permissions)) and that `nodeId` belongs to the incident's environment, otherwise `404 NODE_NOT_FOUND`;
+  - the server checks the user's role in this incident (see [Permissions](#permissions)) and that `nodeId` is a node of the topology of the incident's environment, otherwise `400 VALIDATION_ERROR` with `details.nodeId` (same rule as the Analyses API);
   - it sets the node's status to `compromised` for the whole environment: every client watching the live graph receives it through the topology deltas;
   - it adds an `action` timeline entry with `data.action: "node_compromised"` and the node in `nodeIds` (for example "Pierre marked api as compromised"): it is a human action, not an infra event;
   - marking a node that is already `compromised` returns `200` and changes nothing (no new timeline entry).
@@ -412,7 +440,7 @@ The impact panel opens on **Blast radius** (frontend choice: it answers the firs
 
 ## Realtime
 
-Library: **❓** not officially chosen yet (Socket.IO expected). Every message uses the envelope from [Real-time conventions](./realtime-conventions.md):
+Library: Socket.IO, already used by the [Realtime topology protocol](./realtime-topology.md) (connection, session cookie, reconnection). Every message uses the envelope from [Real-time conventions](./realtime-conventions.md):
 
 ```json
 {
@@ -451,7 +479,8 @@ Every event sent to a room carries `incidentId` in its payload, even when the ob
 | `runbook.step_removed` | `{ incidentId, stepId }`                                   | a step is deleted (V2)                            |
 | `chat.message`         | `{ incidentId, message: ChatMessage }`                     | a new message                                     |
 | `chat.typing`          | `{ incidentId, userId }`                                   | someone is typing (the client hides it after 5 s) |
-| `analysis.completed`   | `{ incidentId, analysis: IncidentAnalysis }`               | the incident's analysis was (re)computed          |
+| `analysis.completed`   | `{ incidentId, analysis: IncidentAnalysis }`               | the incident's blast radius was (re)computed      |
+| `analysis.failed`      | `{ incidentId, error: { code } }`                          | an automatic blast radius computation failed      |
 
 Topology changes (a container dies, a node becomes `compromised`) go through the topology deltas of the live graph, not through these events. **❓** Q4.
 
@@ -507,7 +536,8 @@ On reconnect, the client sends `incident.join` again, then reloads in parallel:
 | Untick a runbook step                  | yes       | yes        | no       | no                |
 | Assign or reassign a runbook step      | yes       | yes        | no       | no                |
 | Send a chat message                    | yes       | yes        | no       | no                |
-| Run an analysis or a simulation        | yes       | yes        | yes      | no                |
+| Re-run the incident's blast radius     | yes       | yes        | yes      | no                |
+| Attack paths, simulation               | yes       | yes        | yes      | yes (Analyses API: any signed-in user) |
 | Mark a node as compromised             | yes       | yes        | no       | no                |
 | Switch own role (responder ↔ observer) | no        | yes        | yes      | no                |
 | Invite a teammate (V2)                 | yes       | **❓** Q9 | no       | no                |
@@ -539,14 +569,13 @@ To add to the table in [API conventions](./api-conventions.md) once agreed:
 | `RUNBOOK_INVALID_ASSIGNEE`    | 400    | the assignee is not a commander or responder of this incident           |
 | `RUNBOOK_STEP_NOT_FOUND`      | 404    | unknown step id in this incident                                        |
 | `USER_NOT_FOUND`              | 404    | unknown user, or user of another organization (invitation)              |
-| `NODE_NOT_FOUND`              | 404    | unknown node id in the incident's environment                           |
 | `FORBIDDEN`                   | 403    | the user's role does not allow the action                               |
 | `INCIDENT_ALREADY_PARTICIPANT` | 409  | the invited user is already a participant of the incident               |
 | `INCIDENT_INVALID_COMMANDER`  | 400    | the new commander is not a participant of the incident                  |
 | `INCIDENT_COMMANDER_REQUIRED` | 409    | the commander tried to change their own role without handing it over    |
 | `INCIDENT_INVALID_TRANSITION` | 409    | the status change is not allowed (for example reopening, if Q6 says no) |
 
-`VALIDATION_ERROR` (400) covers invalid bodies (empty note, unknown severity…), as everywhere else.
+`VALIDATION_ERROR` (400) covers invalid bodies (empty note, unknown severity, unknown node id in `seedNodeIds` or `nodeId`…), as everywhere else. The analysis errors (`ANALYSIS_UNAVAILABLE`, `GRAPH_ENGINE_FAILURE`, `TOPOLOGY_UNAVAILABLE`, `TOPOLOGY_UNKNOWN_ENVIRONMENT`) already exist: see the [Analyses API](./analysis-api.md).
 
 ## Open questions
 
@@ -558,7 +587,7 @@ To add to the table in [API conventions](./api-conventions.md) once agreed:
 | Q4  | Do topology changes reach the Incident Room through the topology deltas, or through incident events?                 | Topology deltas (same live graph as the Overview)                                                                      | Nathan          |
 | Q5  | Where does the `compromised` status come from? Manual only, WAF alerts, collector signals, a tool like Falco?        | Manual for the MVP                                                                                                     | Tigran + Nathan |
 | Q6  | Can a `resolved` incident be reopened?                                                                               | Yes, by the commander                                                                                                  | Team            |
-| Q7  | Should attack paths also be computed automatically when a node becomes `compromised`? (blast radius: decided, always automatic) | Yes, when a seed node is `compromised`; otherwise on demand | Team |
+| Q7  | Should the attack paths also be computed and saved with the incident (like the blast radius) when a node becomes `compromised`? Today they go through the Analyses API, on demand, not saved | Yes, when a seed node is `compromised`; otherwise on demand | Team |
 | Q8  | Where do runbook templates come from (hard-coded, database, per incident type)?                                      | Hard-coded "Service down" template for the MVP                                                                         | Team            |
 | Q9  | Invitations: who can invite (commander only, or responders too), and who can be invited (organization members only)? | Commander and responders; organization members only                                                                    | Team            |
 | Q10 | Live incident list: how does a new or changed incident reach the list without reloading? | V2: one room per organization (`org:<orgId>`), joined automatically on connect after the membership check; events `incident.created` and `incident.summary_updated`, both `{ incidentId, incident: IncidentSummary }`. MVP: REST reload when the user comes back to the list | Team |
