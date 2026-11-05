@@ -1,0 +1,19 @@
+# Generated local Clean-Room overrides
+/*.override.yml
+
+# Local configuration and runtime material
+/.env
+/.env.*
+/env.sh
+/tls/
+/secrets/
+/runtime/
+/data/
+/backups/
+*.key
+*.pem
+*.p12
+*.pfx
+*.token
+*.secret
+*.unseal
