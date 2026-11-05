@@ -16,5 +16,7 @@ import { SessionGuard } from './session.guard.js';
   ],
   controllers: [AuthController],
   providers: [AuthService, { provide: APP_GUARD, useClass: SessionGuard }],
+  // The realtime gateway checks the session cookie of a handshake with it.
+  exports: [AuthService],
 })
 export class AuthModule {}
