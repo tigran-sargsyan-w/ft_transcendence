@@ -1,6 +1,6 @@
 import { Hero } from "@/components/Hero";
-import { LoginCard } from "@/components/LoginCard";
-import { RegisterCard } from "@/components/RegisterCard";
+import { LoginCard } from "@/features/auth/LoginCard";
+import { RegisterCard } from "@/features/auth/RegisterCard";
 import { useState } from "react";
 
 type Mode = "login" | "register";

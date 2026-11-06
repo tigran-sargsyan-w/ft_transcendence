@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router";
-import { RegisterError, registerUser } from "../services/auth";
+import { RegisterError, registerUser } from "./auth";
 import { Input } from "@/components/ui/input";
 import {
   Card,
