@@ -4,7 +4,7 @@
 
 The `.github/workflows/ci.yml` workflow validates pull requests targeting `main`, commits pushed to `main`, and manual runs (`workflow_dispatch`). It does **not** deploy the application or start the Docker Compose stack.
 
-The workflow uses five independent jobs. A failure in one job does not prevent the other jobs from reporting their results.
+The workflow uses six independent jobs. A failure in one job does not prevent the other jobs from reporting their results.
 
 | Job | Checks |
 |---|---|
@@ -13,6 +13,7 @@ The workflow uses five independent jobs. A failure in one job does not prevent t
 | Collector | `npm ci`, typecheck, Vitest coverage thresholds, TypeScript build |
 | Graph Engine | Python dependencies, pytest, Docker image build (`services/graph-engine/Dockerfile`) |
 | Docker Compose | Static `docker compose config --quiet` validation with dummy database variables, plus an assert that the `graph-engine` service is listed |
+| Vault infrastructure | Shell/Python syntax checks and Vault Compose config validation (`compose.vault.yml`, vault server compose) |
 
 Node services run with Node.js 22; Graph Engine runs with Python 3.12. Each job installs its own dependencies and caches package downloads using the matching lock/requirements file. On a PR, a superseded in-progress CI run is cancelled.
 
