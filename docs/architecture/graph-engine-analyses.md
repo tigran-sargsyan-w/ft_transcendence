@@ -1,53 +1,67 @@
 # Graph Engine analyses (cheat-sheet)
 
-Short guide for **Nest** and **frontend** consumers. Full request/response shapes: [graph-contract.md](./graph-contract.md). Topology edge directions: [topology-mapping.md](./topology-mapping.md).
+Which analysis to call, and who talks to whom. Deep shapes and scoring live in linked docs — prefer those over copying rules here.
 
-The browser does **not** call the Graph Engine in production; Nest is the gateway (`GRAPH_ENGINE_URL`).
+| Audience | Doc |
+|----------|-----|
+| Frontend → Nest | [analysis-api.md](./analysis-api.md) |
+| Nest → Graph Engine | [graph-contract.md](./graph-contract.md) |
+| Edge directions in the topology | [topology-mapping.md](./topology-mapping.md) |
 
 ## Which analysis when?
 
-| Need | Call | Seeds? |
-|------|------|--------|
+| Need | Analysis id | Seeds? |
+|------|-------------|--------|
 | “If this node fails, what else breaks?” | `blast_radius` | **Yes** — the failed node(s) |
 | “If this node is compromised, what can an attacker reach next?” | `attack_paths` | **Yes** — the compromised node(s) |
 | “What are the most critical nodes in this topology?” | `critical_nodes` | **No** |
 
-You can request several analyses in one `POST /api/v1/analyze` (`analyses` array).
+You can request several analyses in one call.
 
-## Seeds
+## Frontend → Nest
 
-- Required for `blast_radius` and `attack_paths` (`options.seedNodeIds`).
-- Must be node ids that exist in the topology snapshot.
-- Several seeds are allowed (union of results).
-- `critical_nodes` ignores seeds.
+The browser does **not** call the Graph Engine. It calls Nest:
 
-## Edge kinds today (`depends_on` for blast / attack)
+`POST /api/v1/environments/{environmentId}/analyses`
 
-For **blast** and **attack**, only `depends_on` edges are walked.  
-`connects_to`, `exposes`, `runs_on`, and `mounts` are present in the snapshot but **ignored** by those two traversals. Scoring details for `critical_nodes`: [graph-contract.md](./graph-contract.md).
+Seeds are top-level `seedNodeIds` (not under `options`). Full request/response, limits, and errors: [analysis-api.md](./analysis-api.md).
 
-| Analysis | Walk | Meaning |
-|----------|------|---------|
-| `blast_radius` | **Reversed** `depends_on` | Dependents of the seed (impact cone) |
-| `attack_paths` | **Forward** `depends_on` | Paths from the seed toward its dependencies |
-| `critical_nodes` | Ranking (not a walk) | v1: `0.6` betweenness on linked `depends_on` nodes + `0.4` transitive dependents; may flag `exposed_to_internet` |
+Nest answers with engine `results` plus **freshness** (`current` / `stale` / `unverifiable`). Show `stale` and `unverifiable` as such — never treat an empty result as “no risk” unless `freshness` is `current`.
 
-Example (`api --depends_on--> db`):
+## Nest → Graph Engine
 
-- Seed `db` + `blast_radius` → nodes that depend on `db` (e.g. `api`, then `worker` if `worker → api`).
-- Seed `api` + `attack_paths` → paths such as `api → db`, `api → cache`.
-- Seed `ext:internet` + `attack_paths` → **no** path via `exposes` today (that edge kind is not traversed yet).
+Nest sends the current topology snapshot to `POST /api/v1/analyze` (`GRAPH_ENGINE_URL`). Contract details: [graph-contract.md](./graph-contract.md).
 
-## Result keys
-
-| Analysis id | Response key under `data.results` |
+| Analysis id | Result key under `data.results` |
 |-------------|-----------------------------------|
 | `blast_radius` | `blastRadius` |
 | `attack_paths` | `attackPaths` |
 | `critical_nodes` | `criticalNodes` |
 
-Envelope: `{ "data": { … } }` on success; `{ "error": { "code", "message" } }` on failure ([api-conventions.md](./api-conventions.md)).
+### Seeds (engine options)
+
+- Required for `blast_radius` and `attack_paths` (`options.seedNodeIds` on the engine request; Nest maps its top-level field).
+- Must exist in the topology.
+- `critical_nodes` ignores seeds.
+- **Several seeds:**
+  - `blast_radius` — union of impact cones.
+  - `attack_paths` — seeds are walked **in order**; `maxPaths` (default 20) is a **shared** cap for the whole request. An early seed can use up the budget so a later seed gets no paths.
+
+### Traversal (today)
+
+Walk direction and which edge kinds each analysis uses: [graph-contract.md](./graph-contract.md) (analysis direction / edge kinds). Do not duplicate that table here.
+
+Quick orientation:
+
+- `blast_radius` — reversed walk; `affectedNodeIds` **includes the seed** at depth `0` (e.g. seed `db` → list starts with `db`, then dependents).
+- `attack_paths` — forward walk from the seed(s).
+- `critical_nodes` — ranking / scoring, not a walk; formula and reason codes in [graph-contract.md](./graph-contract.md).
+
+Example with `api --depends_on--> db`:
+
+- Seed `db` + `blast_radius` → `db`, then nodes that depend on it (e.g. `api`, then `worker` if `worker → api`).
+- Seed `api` + `attack_paths` → paths such as `api → db`.
 
 ## Stable examples
 
-Checked-in topologies and golden analyze responses live under `services/graph-engine/fixtures/` (see Graph Engine README). Useful for Nest client tests without a live engine.
+Checked-in topologies and golden analyze responses: `services/graph-engine/fixtures/` (Graph Engine README). Useful for Nest tests without inventing shapes.
