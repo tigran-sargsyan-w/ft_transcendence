@@ -17,6 +17,11 @@ Today nothing about incidents is stored: Prisma has only `User` and `Session`. T
 - **B. Store the whole graph at each change:** the simplest replay, but the full graph is written for every change.
 - **C. A, plus a full snapshot every N changes:** faster replay, more code. Only useful at a larger scale.
 
+### History after a lost write
+
+- **A. A fresh snapshot once writes work again:** the replay restarts from it. The revisions lost before it cannot be rebuilt.
+- **B. Mark the affected history as incomplete:** an extra column or table, and the replay still needs a later snapshot to be useful.
+
 ### Concurrent updates
 
 - **A. Optimistic locking:** each incident has a `version`; an update says which version it read and is refused if the incident changed meanwhile.
@@ -30,15 +35,17 @@ Today nothing about incidents is stored: Prisma has only `User` and `Session`. T
 
 ## Decision
 
-Topology history A, concurrent updates A, append-only A (B is decided with the database roles, see below).
+Topology history A with a fresh snapshot after a lost write (A), concurrent updates A, append-only A (B is decided with the database roles, see below).
 
 **`incidents`:** `id` (UUID), `environmentId`, `title`, `severity` (`low`, `medium`, `high`, `critical`), `status` (`open`, `investigating`, `resolved`), `seedNodeIds` (node ids of the topology), `createdById` and `assignedToId` (users), `openedAtEpoch` and `openedAtRevision` (the server's current topology when the incident is created; empty if none is known yet), `version` (starts at 1), `createdAt`, `updatedAt`.
 
 **`incident_events`** (the timeline): `id`, `incidentId`, `version` (the incident version this event produced), `type` (`created`, `updated`, `status_changed`, `assigned`), `actorId` (user), `data`, `createdAt`. One request is one action (create, edit the title or severity, change the status, assign), so one version and one event. `data` lists each changed field as `{ "<field>": { "from": …, "to": … } }`; `created` holds every initial value. `(incidentId, version)` is unique, so the timeline has a total order with no gap or duplicate. Its relations have no cascading delete or update.
 
-**`topology_history`:** `id`, `environmentId`, `epoch`, `revision`, `kind` (`snapshot` or `delta`), `payload` (the `TopologySnapshot` or `TopologyDelta`), `recordedAt` (set by Nest when the message is published). `(environmentId, epoch, revision)` is unique. A subscriber to `TopologyService.changes$` writes it. A delta does not name its environment, so it takes the one of the last snapshot; on start the writer also stores the current snapshot, if any (a row already stored is skipped). It never delays or stops the live topology: a failed write is logged and dropped.
+**`topology_history`:** `id`, `environmentId`, `epoch`, `revision`, `kind` (`snapshot` or `delta`), `payload` (the `TopologySnapshot` or `TopologyDelta`), `recordedAt` (set by Nest when the message is published; for a snapshot written after a lost write, when it was read from the state). `(environmentId, epoch, revision)` is unique, which also serves the reads of the last snapshot at or below a revision and of the deltas in revision order. `(environmentId, recordedAt)` is indexed, because the replay looks for the last row recorded before a time (a tie within one millisecond goes to the higher revision). A subscriber to `TopologyService.changes$` writes it, one message at a time and in order. A delta does not name its environment, so it takes the one of the last snapshot; on start the writer also stores the current snapshot, if any (a row already stored is skipped). It never delays or stops the live topology.
 
-**Replay (later):** the last row recorded at or before a time T gives the epoch and revision. Start from the last snapshot of that epoch at or below that revision, then apply its deltas in revision order (never in `recordedAt` order). Each delta's `baseRevision` must be the revision stored just before it: a missing row leaves a gap until the next snapshot.
+**After a lost write:** a failed write is logged (once for the whole outage) and the writer remembers that the history may have a gap. The first write that succeeds afterwards stores a snapshot of the current topology (`TopologyService.snapshot()`) instead of the delta; a snapshot stored normally, such as a resynchronization, ends the gap too. The writer also retries that snapshot after a delay that grows, until it succeeds, so that the gap does not last until the next change. A row already stored is skipped. There is no "incomplete" marker in v1: the revisions lost before that snapshot cannot be rebuilt, and the replay can tell, because two consecutive rows of an epoch whose revisions differ by more than one mark a gap. If Nest restarts or crashes before that snapshot is written, the gap stays open and unmarked (the writer's memory is lost): the replay of that epoch ends at its last stored row.
+
+**Replay (later):** the last row recorded at or before a time T gives the epoch and revision. Start from the last snapshot of that epoch at or below that revision, then apply its deltas in revision order (never in `recordedAt` order). Each delta's `baseRevision` is the revision before it: if the row stored just before it has another revision, or two consecutive rows differ by more than one, there is a gap until the next snapshot.
 
 **Updating an incident**, in one transaction:
 
@@ -64,7 +71,7 @@ Under PostgreSQL's default isolation level (Read Committed), a second `UPDATE` o
 
 ### Negative / trade-offs
 
-- One database write per published snapshot or delta; after a delta, Nest waits 300 ms (`batchWindowMs`) before reading the next batch, so at most about three deltas per second. A write lost while the database is down leaves a gap in the replay.
+- One database write per published snapshot or delta; after a delta, Nest waits 300 ms (`batchWindowMs`) before reading the next batch, so at most about three deltas per second. A write lost while the database is down leaves a gap in the replay, which ends at the snapshot written once the database answers again; the revisions in between cannot be rebuilt, and if Nest restarts first, the gap stays unmarked.
 - Without a purge, the history only grows.
 - Replaying far into a long epoch reads many deltas; option C can be added later without changing the model.
 - Every update request must send the version it read. Two users editing different fields of the same incident still get a `409` for the second one, and a request retried after a lost answer gets a `409` that shows its own change.
