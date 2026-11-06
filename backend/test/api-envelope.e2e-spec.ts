@@ -74,6 +74,28 @@ describe('API response format (e2e)', () => {
     });
   });
 
+  it('answers 503 when it cannot read the migrations of the repository', async () => {
+    // The database is not mocked: the folder of the migrations is what is
+    // missing (it is read from the working directory).
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue('/nowhere');
+
+    try {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/health')
+        .expect(503);
+
+      expect(response.body).toEqual({
+        error: {
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'Service unavailable',
+          details: { migrations: 'unavailable' },
+        },
+      });
+    } finally {
+      cwd.mockRestore();
+    }
+  });
+
   it('formats an unknown route as a 404 error', async () => {
     const response = await request(app.getHttpServer())
       .get('/api/v1/nope')
