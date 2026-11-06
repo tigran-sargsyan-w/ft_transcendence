@@ -1,5 +1,10 @@
+import json
+from pathlib import Path
+
 from app.blast_radius import build_digraph, compute_blast_radius
 from app.schemas import GraphEdge, GraphNode, TopologySnapshot
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 
 def _sample_topology():
@@ -91,3 +96,45 @@ def test_blast_radius_ignores_non_dependency_edges():
     assert result["affectedNodeIds"] == ["svc_db", "svc_api"]
     assert "svc_metrics" not in result["affectedNodeIds"]
     assert result["affectedEdgeIds"] == ["edge_api_db"]
+
+
+def _mixed_kind_topology():
+    return TopologySnapshot(
+        **json.loads((FIXTURES / "mixed_kind_topology.json").read_text())
+    )
+
+
+def test_blast_radius_host_seed_reaches_services_via_runs_on():
+    result = compute_blast_radius(
+        build_digraph(_mixed_kind_topology()),
+        ["host:env_local_compose"],
+    )
+    assert result["affectedNodeIds"] == [
+        "host:env_local_compose",
+        "svc:demo:api",
+        "svc:demo:db",
+        "svc:demo:web",
+    ]
+    assert "net:demo_default" not in result["affectedNodeIds"]
+    assert "ext:internet" not in result["affectedNodeIds"]
+
+
+def test_blast_radius_volume_seed_reaches_dependents_via_mounts():
+    result = compute_blast_radius(
+        build_digraph(_mixed_kind_topology()),
+        ["vol:demo_db_data"],
+    )
+    assert result["affectedNodeIds"] == [
+        "vol:demo_db_data",
+        "svc:demo:db",
+        "svc:demo:api",
+        "svc:demo:web",
+    ]
+
+
+def test_blast_radius_ignores_connects_to_and_exposes():
+    result = compute_blast_radius(
+        build_digraph(_mixed_kind_topology()),
+        ["net:demo_default"],
+    )
+    assert result["affectedNodeIds"] == ["net:demo_default"]
