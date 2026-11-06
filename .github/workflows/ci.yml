@@ -80,7 +80,7 @@ jobs:
         run: npm run build
 
   graph-engine:
-    name: Graph Engine / pytest and image
+    name: Graph Engine / pytest
     runs-on: ubuntu-latest
     defaults:
       run:
