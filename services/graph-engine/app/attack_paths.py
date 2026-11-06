@@ -2,7 +2,8 @@ from typing import Dict, List, Optional
 
 import networkx as nx
 
-from app.blast_radius import dependency_subgraph
+from app.blast_radius import edge_kind_subgraph
+from app.schemas import ATTACK_PATHS_EDGE_KINDS
 
 
 def compute_attack_paths(
@@ -13,12 +14,13 @@ def compute_attack_paths(
 ) -> Dict:
     """
     From compromised seed node(s), list simple directed paths an attacker
-    could follow along dependency edges (source -> target).
+    could follow along attack edges (source -> target).
 
     Example: api --depends_on--> db means a path api -> db.
-    Only `depends_on` edges are traversed.
+    ext:internet --exposes--> web means a path internet -> web.
+    Traverses depends_on and exposes only.
     """
-    dependency_graph = dependency_subgraph(graph)
+    attack_graph = edge_kind_subgraph(graph, ATTACK_PATHS_EDGE_KINDS)
     depth_limit = 5 if max_depth is None else max_depth
     path_limit = 20 if max_paths is None else max_paths
     paths: List[Dict] = []
@@ -40,10 +42,10 @@ def compute_attack_paths(
         if (len(node_path) - 1) >= depth_limit:
             return
 
-        for successor in dependency_graph.successors(current):
+        for successor in attack_graph.successors(current):
             if successor in node_path:
                 continue
-            edge_id = dependency_graph.edges[current, successor]["id"]
+            edge_id = attack_graph.edges[current, successor]["id"]
             node_path.append(successor)
             edge_path.append(edge_id)
             dfs(successor, node_path, edge_path)
@@ -53,7 +55,7 @@ def compute_attack_paths(
                 return
 
     for seed_id in seed_node_ids:
-        if seed_id not in dependency_graph:
+        if seed_id not in attack_graph:
             continue
         dfs(seed_id, [seed_id], [])
         if len(paths) >= path_limit:
