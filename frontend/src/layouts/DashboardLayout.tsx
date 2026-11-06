@@ -1,10 +1,10 @@
 import { Outlet } from "react-router";
-import { Navbar } from "@/components/Navbar";
+import { AppHeader } from "@/components/header/AppHeader";
 
 export default function DashboardLayout() {
   return (
     <>
-      <Navbar />
+      <AppHeader />
       <main>
         <Outlet />
       </main>
