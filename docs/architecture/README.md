@@ -35,6 +35,7 @@ Documents here should stay short and stable. Concrete stack and product decision
 **Proposed / pending team review:**
 
 - Vault secret management — KV v2 + AppRole + Vault Agent file delivery, isolated POC first — [ADR 0003](../adr/0003-vault-secret-delivery.md) and [delivery contract v1](./vault-secret-delivery.md) (issue #92)
+- Incident events and topology history — append-only tables, optimistic locking on incidents — [ADR 0004](../adr/0004-incident-events-and-topology-history.md) (issue #119)
 
 **Still open:**
 
