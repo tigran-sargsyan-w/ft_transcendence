@@ -1,8 +1,12 @@
-from typing import Dict, List, Optional
+from typing import Dict, FrozenSet, List, Optional
 
 import networkx as nx
 
-from app.schemas import DEPENDENCY_EDGE_KINDS, TopologySnapshot
+from app.schemas import (
+    BLAST_RADIUS_EDGE_KINDS,
+    DEPENDENCY_EDGE_KINDS,
+    TopologySnapshot,
+)
 
 
 def build_digraph(topology: TopologySnapshot) -> nx.DiGraph:
@@ -19,14 +23,22 @@ def build_digraph(topology: TopologySnapshot) -> nx.DiGraph:
     return graph
 
 
-def dependency_subgraph(graph: nx.DiGraph) -> nx.DiGraph:
-    """Keep all nodes; keep only edges whose kind is in DEPENDENCY_EDGE_KINDS."""
+def edge_kind_subgraph(
+    graph: nx.DiGraph,
+    edge_kinds: FrozenSet[str],
+) -> nx.DiGraph:
+    """Keep all nodes; keep only edges whose kind is in `edge_kinds`."""
     filtered = nx.DiGraph()
     filtered.add_nodes_from(graph.nodes())
     for source, target, data in graph.edges(data=True):
-        if data.get("kind") in DEPENDENCY_EDGE_KINDS:
+        if data.get("kind") in edge_kinds:
             filtered.add_edge(source, target, **data)
     return filtered
+
+
+def dependency_subgraph(graph: nx.DiGraph) -> nx.DiGraph:
+    """depends_on-only subgraph (critical_nodes and legacy callers)."""
+    return edge_kind_subgraph(graph, DEPENDENCY_EDGE_KINDS)
 
 
 def compute_blast_radius(
@@ -37,11 +49,14 @@ def compute_blast_radius(
     """
     If a seed fails, find nodes that depend on it (directly or transitively).
 
-    Contract edges are source -> target (e.g. api --depends_on--> db).
-    Impact spreads to dependents, so we BFS on the reversed dependency
-    subgraph (depends_on only).
+    Contract edges are source -> target (e.g. api --depends_on--> db,
+    service --runs_on--> host, service --mounts--> volume).
+    Impact spreads along the reversed blast edge set
+    (depends_on, mounts, runs_on).
     """
-    reversed_graph = dependency_subgraph(graph).reverse(copy=False)
+    reversed_graph = edge_kind_subgraph(graph, BLAST_RADIUS_EDGE_KINDS).reverse(
+        copy=False
+    )
     depth_by_node_id: Dict[str, int] = {}
     affected_edge_ids: List[str] = []
     queue: List[str] = []
