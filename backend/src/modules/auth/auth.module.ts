@@ -9,12 +9,15 @@ import { SessionGuard } from './session.guard.js';
 @Module({
   imports: [
     PrismaModule,
-    // 10 login attempts per minute, applied to the login route only.
-    // Counted per IP in memory; behind Nginx, enable `trust proxy`
-    // or every client shares the proxy's IP.
+    // 10 login attempts per minute, applied to the login route only: the
+    // routes that want a limit add the guard themselves (the analyses ask for
+    // 30 per minute). Counted per IP in memory; behind Nginx, enable
+    // `trust proxy` or every client shares the proxy's IP.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 10 }]),
   ],
   controllers: [AuthController],
   providers: [AuthService, { provide: APP_GUARD, useClass: SessionGuard }],
+  // The realtime gateway checks the session cookie of a handshake with it.
+  exports: [AuthService],
 })
 export class AuthModule {}

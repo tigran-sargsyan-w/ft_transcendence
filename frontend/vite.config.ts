@@ -11,6 +11,9 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: backendUrl,
+        // Appends the client address to X-Forwarded-For, as Nginx does: the
+        // login limit counts it (backend/src/app.setup.ts).
+        xfwd: true,
       },
     },
   },

@@ -6,9 +6,38 @@ import {
   ResponseEnvelopeInterceptor,
 } from './shared/api-envelope.js';
 
+// details = { field: [messages] }.
+export function validationError(details: Record<string, string[]>) {
+  return new BadRequestException(
+    { message: 'Request validation failed', details },
+    { errorCode: 'VALIDATION_ERROR' },
+  );
+}
+
+// Also bound to the body of the commands of the realtime gateway.
+export function createValidationPipe() {
+  return new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+    // Limit: flat DTOs only, a nested field is listed with no messages.
+    exceptionFactory: (errors) =>
+      validationError(
+        Object.fromEntries(
+          errors.map((e) => [e.property, Object.values(e.constraints ?? {})]),
+        ),
+      ),
+  });
+}
+
 // The app must be created with { bodyParser: false }: only JSON bodies are
 // parsed, so a cross-site HTML form cannot post a usable body (ADR 0002).
 export function configureApp(app: NestExpressApplication) {
+  // One proxy in front (Nginx): req.ip is the client address it appends to
+  // X-Forwarded-For, so the login limit counts each client (ADR 0002).
+  // No other way in may let a client pick that address: port 3000 is
+  // published on loopback only, and the Vite proxy appends it too (`xfwd`).
+  app.set('trust proxy', 1);
   app.useBodyParser('json');
   app.use(cookieParser());
 
@@ -17,26 +46,5 @@ export function configureApp(app: NestExpressApplication) {
   app.useGlobalInterceptors(new ResponseEnvelopeInterceptor());
   app.useGlobalFilters(new ApiExceptionFilter());
 
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      // details = { field: [messages] }.
-      // Limit: flat DTOs only, a nested field is listed with no messages.
-      exceptionFactory: (errors) =>
-        new BadRequestException(
-          {
-            message: 'Request validation failed',
-            details: Object.fromEntries(
-              errors.map((e) => [
-                e.property,
-                Object.values(e.constraints ?? {}),
-              ]),
-            ),
-          },
-          { errorCode: 'VALIDATION_ERROR' },
-        ),
-    }),
-  );
+  app.useGlobalPipes(createValidationPipe());
 }

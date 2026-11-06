@@ -14,6 +14,9 @@ COPY . .
 
 RUN npx prisma generate
 
+# Compile TypeScript during image build, not at runtime.
+RUN npm run build
+
 EXPOSE 3000
 
 CMD ["sh", "-c", "npx prisma migrate deploy && exec npm run start"]

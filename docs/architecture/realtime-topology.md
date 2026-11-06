@@ -9,8 +9,8 @@ Nest sends a full snapshot, then small deltas. Analyses are not part of this pro
 | Part | State |
 |------|-------|
 | Snapshot, delta, `epoch` and `revision` | Implemented in the `topology` module |
-| Socket.IO gateway: handshake, rooms, commands | Not implemented yet |
-| `topology:status` | Specified here only: the module does not report collector outages yet, so the gateway has nothing to send |
+| Socket.IO gateway: handshake, rooms, commands | Implemented in the `realtime` module |
+| `topology:status` | Reported by the `topology` module, relayed by the gateway |
 
 ## Connection
 
@@ -21,8 +21,9 @@ Nest sends a full snapshot, then small deltas. Analyses are not part of this pro
 | Code | When |
 |------|------|
 | `UNAUTHORIZED` | no `sid` cookie, or the session is unknown or expired |
-| `FORBIDDEN` | the `Origin` header is not the application's |
+| `FORBIDDEN` | the `Origin` header is present and is not the application's |
 
+- The application's origin is the `APP_ORIGIN` setting (`https://transcendence.test:8443` for the local setup). A handshake with no `Origin` header goes on to the session check: a client that is not a browser sends none, and a browser does not send it on every same-origin GET, which is what the polling transport uses. While `APP_ORIGIN` is not set, every handshake that has an `Origin` is refused.
 - After a refusal Socket.IO does not reconnect: `socket.active` is `false` in the `connect_error` handler, and `socket.connect()` would have to be called by hand ([Socket.IO docs](https://socket.io/docs/v4/client-socket-instance/#connect_error)). On `UNAUTHORIZED` the client sends the user to the login page. A network failure also raises `connect_error`, but the socket retries by itself (`socket.active` is `true`).
 - A session that ends closes its sockets at once, since logout and revocation are immediate ([ADR 0002](../adr/0002-server-side-sessions.md)). On logout, and when the session's expiry date passes, the server disconnects every socket of that session. The client receives `disconnect` with the reason `io server disconnect`, after which Socket.IO does not reconnect by itself ([Socket.IO docs](https://socket.io/docs/v4/client-socket-instance/#disconnect)): the client calls `socket.connect()` once, and the refused handshake (`UNAUTHORIZED`) sends the user to the login page.
 
@@ -48,7 +49,7 @@ Socket.IO reconnects by itself after a lost connection. The new socket has a new
 { "error": { "code": "VALIDATION_ERROR", "message": "Request validation failed", "details": { "environmentId": ["environmentId must be a string"] } } }
 ```
 
-Arguments are validated on the server, and a property a command does not accept is refused, as over HTTP.
+Arguments are validated on the server, and a property a command does not accept is refused, as over HTTP. An argument that is not an object is refused too, with `details: { "body": ["body must be an object"] }`.
 
 ## Rooms
 
