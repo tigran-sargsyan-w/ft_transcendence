@@ -139,7 +139,7 @@ jobs:
 
       - name: Test AppRole SecretID rotation offline
         run: |
-          python3 -m py_compile infra/vault/scripts/rotate-approle.py infra/vault/scripts/test_rotate_approle.py
+          python3 -m py_compile infra/vault/scripts/rotate-approle.py infra/vault/scripts/test_rotate_approle.py infra/vault/cleanroom/preflight.py
           python3 -m unittest discover -s infra/vault/scripts -p 'test_rotate_approle.py' -v
 
       - name: Validate Vault application Compose
