@@ -137,6 +137,11 @@ jobs:
         run: |
           python3 -c 'import ast, pathlib; paths = sorted(pathlib.Path("infra/postgres").glob("*.py")); assert paths, "No PostgreSQL Python files"; [ast.parse(p.read_text(encoding="utf-8"), filename=str(p)) for p in paths]'
 
+      - name: Test AppRole SecretID rotation offline
+        run: |
+          python3 -m py_compile infra/vault/scripts/rotate-approle.py infra/vault/scripts/test_rotate_approle.py
+          python3 -m unittest discover -s infra/vault/scripts -p 'test_rotate_approle.py' -v
+
       - name: Validate Vault application Compose
         run: docker compose --profile "*" -f compose.yml -f compose.vault.yml config --quiet
 
