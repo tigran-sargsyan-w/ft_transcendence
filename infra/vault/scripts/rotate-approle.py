@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import fcntl
 import getpass
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -36,6 +38,14 @@ class RotationError(Exception):
     """A deliberately sanitized error; never contains Vault response bodies."""
 
 
+class VaultHTTPError(RotationError):
+    """Vault HTTP status without untrusted error body or secret values."""
+
+    def __init__(self, status: int, path: str):
+        super().__init__(f"Vault request failed: HTTP {status} ({path})")
+        self.status = status
+
+
 class VaultAPI:
     def __init__(self, admin_token: str, url: str = URL, ca: str = CA):
         self.admin_token = admin_token
@@ -59,7 +69,7 @@ class VaultAPI:
                 return json.loads(content) if content else {}
         except urllib.error.HTTPError as exc:
             # Never print a Vault error body: it can echo request data.
-            raise RotationError(f"Vault request failed: HTTP {exc.code} ({path})") from None
+            raise VaultHTTPError(exc.code, path) from None
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
             raise RotationError(f"Vault request failed ({path}): {type(exc).__name__}") from None
 
@@ -79,6 +89,26 @@ class VaultAPI:
             "POST", f"auth/approle/role/{role}/secret-id-accessor/destroy",
             {"secret_id_accessor": accessor},
         )
+
+    def destroy_if_present(self, role, accessor):
+        try:
+            self.destroy(role, accessor)
+            return
+        except VaultHTTPError as exc:
+            if exc.status not in (400, 404):
+                raise
+        # An interruption after successful revocation can leave the journal.
+        # Confirm the credential really no longer exists before retry succeeds.
+        try:
+            self.request(
+                "POST", f"auth/approle/role/{role}/secret-id-accessor/lookup",
+                {"secret_id_accessor": accessor},
+            )
+        except VaultHTTPError as exc:
+            if exc.status in (400, 404):
+                return
+            raise
+        raise RotationError("SecretID revocation was not confirmed")
 
     def verify(self, role, role_id, secret):
         expected_policy, paths = ROLE_PATHS[role]
@@ -100,8 +130,10 @@ class VaultAPI:
                 if not (data.get("data") or {}).get("data", {}).get("database_url"):
                     raise RotationError(f"Required KV secret is not accessible: {name}")
         finally:
-            # Revoke the short-lived validation token, including on validation failure.
-            self.request("POST", "auth/token/revoke-self", {}, token=token)
+            # AppRole tokens deliberately have no default policy, hence no
+            # revoke-self permission. The operator revokes the validation
+            # token without widening the runtime/migration/reader ACLs.
+            self.request("POST", "auth/token/revoke", {"token": token})
 
 
 def _read(path: Path):
@@ -131,16 +163,29 @@ def _write(path: Path, value: str):
         temporary.unlink(missing_ok=True)
 
 
+def _fingerprint(secret: str | None):
+    # SecretIDs have high entropy; this digest is only for cutover detection.
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest() if secret else None
+
+
 def _state(auth_dir: Path):
     raw = _read(auth_dir / STATE)
     if not raw:
         return None
     try:
         state = json.loads(raw)
-        if set(state) != {"role", "old_accessor", "new_accessor"}:
+        if set(state) != {"role", "old_accessor", "new_accessor", "old_fingerprint"}:
             raise ValueError("state fields")
         if not isinstance(state["new_accessor"], str) or not state["new_accessor"]:
             raise ValueError("missing accessor")
+        if state["old_accessor"] is not None and not isinstance(state["old_accessor"], str):
+            raise ValueError("old accessor type")
+        if not isinstance(state["role"], str):
+            raise ValueError("role type")
+        fp = state["old_fingerprint"]
+        if fp is not None and (not isinstance(fp, str) or len(fp) != 64
+                            or any(c not in "0123456789abcdef" for c in fp)):
+            raise ValueError("fingerprint type")
         return state
     except ValueError:
         raise RotationError("Invalid pending rotation state; inspect offline, do not overwrite") from None
@@ -164,19 +209,33 @@ def rotate(api: VaultAPI, role: str, auth_dir: Path, recover: bool = False):
     if previous_secret:
         try:
             old_accessor = api.lookup(role, previous_secret)
-        except RotationError:
+        except VaultHTTPError as exc:
+            # Only an explicit invalid/expired ID can use the recovery path.
+            # Auth failures, network outages and Vault 5xx must *not* permit
+            # skipping the old credential's revocation.
+            if exc.status not in (400, 404):
+                raise
             if not recover:
-                raise RotationError("Old SecretID cannot be inspected; use explicit recover mode") from None
-            print("WARNING: old SecretID could not be inspected; its revocation must be audited manually")
+                raise RotationError("Old SecretID invalid or expired; use explicit recover mode") from None
+            print("WARNING: old SecretID is invalid/expired; audit previous accessors manually")
     elif _read(auth_dir / "secret_id_accessor"):
         raise RotationError("Orphaned accessor with missing SecretID; manual inspection required")
 
     new_secret, new_accessor = api.issue(role)
     # Record the new accessor before any file cutover. If interrupted, a teammate
     # can revoke the unused candidate or finalize the installed one.
-    _write(auth_dir / STATE, json.dumps({
-        "role": role, "old_accessor": old_accessor, "new_accessor": new_accessor,
-    }))
+    try:
+        _write(auth_dir / STATE, json.dumps({
+            "role": role, "old_accessor": old_accessor, "new_accessor": new_accessor,
+            "old_fingerprint": _fingerprint(previous_secret),
+        }))
+    except OSError:
+        # Without a durable journal, don't leave an untracked live candidate.
+        try:
+            api.destroy(role, new_accessor)
+        except RotationError:
+            raise RotationError("Journal write failed AND candidate revocation failed; audit Vault") from None
+        raise RotationError("Journal write failed; unused candidate revoked") from None
     print("Candidate SecretID issued; verifying its scoped login and KV access")
     api.verify(role, live_role_id, new_secret)
     # Each os.replace is atomic; the journal makes a multi-file interruption recoverable.
@@ -203,7 +262,7 @@ def finalize(api: VaultAPI, role: str, auth_dir: Path):
     if old:
         if old == accessor:
             raise RotationError("Refusing to revoke the active SecretID")
-        api.destroy(role, old)
+        api.destroy_if_present(role, old)
     _write(auth_dir / "secret_id_accessor", accessor)
     _clear(auth_dir)
     print("Rotation finalized; prior identifiable SecretID revoked")
@@ -216,12 +275,15 @@ def abort(api: VaultAPI, role: str, auth_dir: Path):
     if not pending or pending["role"] != role:
         raise RotationError("No matching pending rotation to abort")
     current_secret = _read(auth_dir / "secret_id")
-    if current_secret:
-        # Fail closed on an invalid/exhausted SecretID; do not revoke a possibly active new ID.
-        current_accessor = api.lookup(role, current_secret)
-        if current_accessor == pending["new_accessor"]:
-            raise RotationError("New SecretID already installed; use finalize or operator recovery")
-    api.destroy(role, pending["new_accessor"])
+    expected = pending["old_fingerprint"]
+    actual = _fingerprint(current_secret)
+    if actual is None and expected is None:
+        pass  # Initial provisioning interrupted before cutover.
+    elif actual is None or expected is None or not hmac.compare_digest(actual, expected):
+        # The installed credential changed (or its identity cannot be proved).
+        # Never revoke a candidate which may be in use.
+        raise RotationError("Auth file changed since staging; candidate may be installed; use finalize or operator recovery")
+    api.destroy_if_present(role, pending["new_accessor"])
     _clear(auth_dir)
     print("Unused candidate revoked; previous credential untouched")
 
@@ -273,7 +335,7 @@ def main(argv):
         api.request("GET", "auth/token/lookup-self")
         operate(api, role, Path(auth_dir), action)
         return 0
-    except (RotationError, OSError, KeyError, TypeError) as exc:
+    except (RotationError, OSError, KeyError, TypeError, EOFError) as exc:
         # Never include a raw secret, HTTP body, or Vault token in errors.
         message = str(exc) if isinstance(exc, RotationError) else type(exc).__name__
         print(f"ERROR: {message}", file=sys.stderr)
