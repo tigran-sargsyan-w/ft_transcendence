@@ -5,7 +5,7 @@ This initial implementation is **manual**, not a timer or a privileged long-live
 ## Security boundaries
 
 - Vault must already be initialized and manually unsealed.
-- Run each helper interactively. It prompts for a Vault operator token with echo disabled. Never put the token, SecretIDs, or database URLs in Git, Compose, environment variables, CI or shell arguments.
+- Run each helper interactively. It prompts for a Vault operator token with echo disabled. The operator must be able to manage AppRole SecretIDs **and** revoke the temporary verification token via auth/token/revoke; the three AppRole identities retain their original read-only ACLs. Never put tokens or database URLs in Git, Compose, environment variables, CI or shell arguments.
 - Each temporary helper has access to **only its own** role's authentication volume, the private Vault network, the CA certificate and the read-only Python script.
 - Do not run the older *-provision services concurrently; those older services do not use the new rotation lock or journal.
 - Both initial candidate validation and finalize perform an AppRole login, consuming **one SecretID use each**. Existing roles have a 20-use limit.
@@ -34,7 +34,7 @@ docker compose -f compose.yml -f compose.vault.yml \
   --profile vault-maintenance run --rm --no-deps vault-postgres-provisioner-rotate rotate
 ~~~
 
-The helper issues a new SecretID, captures its accessor, validates an AppRole login with the expected *single* read-only policy, reads all required KV paths without printing their values, then atomically replaces each credential file. A protected **.rotation-pending.json** journal stores only accessors, never SecretIDs or tokens. An existing old credential remains valid in Vault until finalized.
+The helper issues a new SecretID, captures its accessor, validates an AppRole login with the expected *single* read-only policy, reads all required KV paths without printing their values, then atomically replaces each credential file. A protected **.rotation-pending.json** journal stores accessors and a SHA-256 fingerprint of the previous high-entropy SecretID, never plaintext SecretIDs or tokens. An existing old credential remains valid in Vault until finalized.
 
 These commands also work for initial provisioning when there is no previous SecretID.
 
@@ -76,10 +76,10 @@ Repeat the appropriate role-specific Compose command from step 1, replacing the 
 
 ## Recovery / interrupted operation
 
-- If the prior SecretID is expired or its lookup fails, normal **rotate** fails closed. After inspecting the problem, run **recover** instead of **rotate**. Recovery explicitly skips revocation when the old accessor cannot be established; the operator must audit unknown old credentials.
-- If issuing/verifying a candidate failed **before installation**, run **abort** to revoke the unused candidate. Abort refuses to revoke a candidate that is already installed.
-- If installation succeeded but finalization failed or was interrupted, fix the cause, validate the actual Agent, then retry **finalize**. The journal remains until a successful finalization.
-- If the old SecretID vanishes/changes after staging, an operator may have to reconcile that condition manually. Never delete the journal as a shortcut or silently fall back to an old secret.
+- If the prior SecretID is expired/exhausted (Vault returns HTTP 400/404), normal **rotate** fails closed. After inspection, use **recover**. Network failures, 401/403 authorization errors and Vault 5xx are **never** treated as expiration. Unknown previous accessors must be audited by an operator.
+- If issuing/verifying a candidate failed **before installation**, run **abort** to revoke the unused candidate. Abort uses the protected previous-secret fingerprint so it can abort with an expired old SecretID; it refuses if the installed file changed and the candidate may be in use.
+- If installation succeeded but finalization failed or was interrupted, fix the cause, validate the actual Agent, then retry **finalize**. Missing old accessors can be confirmed absent before treating an already-completed revocation as successful. Authorization, network, and ambiguous failures still stop the operation.
+- If the old SecretID vanishes/changes after staging, an operator may have to reconcile that condition manually. If writing the initial journal fails, the helper tries to revoke the untracked candidate immediately. Never delete the journal as a shortcut or silently fall back to an old secret.
 - The legacy provisioning helpers bypass the new lock. Do not run them while a rotation is pending.
 
 ## Offline tests and limits
@@ -88,4 +88,4 @@ Repeat the appropriate role-specific Compose command from step 1, replacing the 
 python3 -m unittest discover -s infra/vault/scripts -p 'test_rotate_approle.py' -v
 ~~~
 
-Offline tests cover role boundaries, initialization, staging, failed validation, interrupt/retry, explicit recovery, abort, and old SecretID revocation. No real Vault is initialized in CI. **A separate isolated Vault Clean-Room integration test must be passed before treating this as production-ready**. Automated scheduling, delegated issuer policies, full password rotation for PostgreSQL, and unattended Vault unseal are deliberately excluded from this first phase.
+Offline tests cover role boundaries, initialization, staging, denied/network recovery, operator-mediated validation-token revocation, durable journal failures, interrupt/retry, abort, and idempotent old SecretID revocation. No real Vault is initialized in CI. **A separate isolated Vault Clean-Room integration test must be passed before treating this as production-ready**. Automated scheduling, delegated issuer policies, full password rotation for PostgreSQL, and unattended Vault unseal are deliberately excluded from this first phase.
