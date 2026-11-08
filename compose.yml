@@ -49,6 +49,8 @@ services:
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public"
       GRAPH_ENGINE_URL: http://graph-engine:8000
+      COLLECTOR_URL: http://collector:3001
+      APP_ORIGIN: ${APP_ORIGIN:-https://transcendence.test:8443}
     ports: # Loopback only: the login limit trusts X-Forwarded-For (app.setup.ts)
       - "127.0.0.1:3000:3000"
     volumes:
