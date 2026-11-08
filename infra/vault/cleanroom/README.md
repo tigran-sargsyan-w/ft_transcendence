@@ -35,6 +35,12 @@ by the overrides and `preflight.py`.
 In particular, `FT_CR_TLS_DIR` must refer to the isolated TLS
 directory belonging to that test environment.
 
+For Issue #105, the **three AppRole rotation helpers** must also have their CA
+mounts overridden to the isolated TLS directory. The current
+`*.override.yml.example` files include those entries, and `preflight.py`
+verifies them. If you already have local `*.override.yml` files, **merge
+those entries without overwriting your existing local configuration**.
+
 Run `preflight.py` before any infrastructure test and again
 afterward to confirm isolation.
 
