@@ -27,8 +27,10 @@ class FakeVault:
         return "role-id-for-" + role
 
     def lookup(self, role, secret):
-        if self.fail_lookup or (role, secret) not in self.secrets:
-            raise rotation.RotationError("lookup failed")
+        if self.fail_lookup:
+            raise rotation.RotationError("Vault network request failed")
+        if (role, secret) not in self.secrets:
+            raise rotation.VaultHTTPError(400, "auth/approle/secret-id/lookup")
         return self.secrets[(role, secret)]
 
     def issue(self, role):
@@ -37,6 +39,11 @@ class FakeVault:
         accessor = f"accessor-{self.issued}"
         self.secrets[(role, secret)] = accessor
         return secret, accessor
+
+    def destroy_if_present(self, role, accessor):
+        if (role, accessor) in self.revoked:
+            return
+        self.destroy(role, accessor)
 
     def verify(self, role, role_id, secret):
         if self.fail_verify or (role, secret) not in self.secrets:
@@ -79,6 +86,37 @@ class RotationTests(unittest.TestCase):
 
     def action(self, action, role=None):
         return rotation.operate(self.api, role or self.role, self.path, action)
+
+    def test_revocation_confirmed_absent_is_idempotent(self):
+        api = rotation.VaultAPI.__new__(rotation.VaultAPI)
+        calls = []
+        def request(method, path, data=None, token=None):
+            calls.append(path)
+            if path.endswith("/destroy"):
+                raise rotation.VaultHTTPError(404, path)
+            if path.endswith("/lookup"):
+                raise rotation.VaultHTTPError(404, path)
+        api.request = request
+        api.destroy_if_present(self.role, "old-accessor")
+        self.assertEqual(len(calls), 2)
+
+    def test_revoke_does_not_ignore_authorization_error(self):
+        api = rotation.VaultAPI.__new__(rotation.VaultAPI)
+        def request(method, path, data=None, token=None):
+            raise rotation.VaultHTTPError(403, path)
+        api.request = request
+        with self.assertRaises(rotation.VaultHTTPError):
+            api.destroy_if_present(self.role, "old-accessor")
+
+    def test_revocation_not_assumed_if_accessor_still_exists(self):
+        api = rotation.VaultAPI.__new__(rotation.VaultAPI)
+        def request(method, path, data=None, token=None):
+            if path.endswith("/destroy"):
+                raise rotation.VaultHTTPError(400, path)
+            return {"data": {"secret_id_accessor": "old-accessor"}}
+        api.request = request
+        with self.assertRaisesRegex(rotation.RotationError, "not confirmed"):
+            api.destroy_if_present(self.role, "old-accessor")
 
     def test_first_time_provisioning_no_old_credential(self):
         self.action("rotate")
@@ -133,7 +171,7 @@ class RotationTests(unittest.TestCase):
     def test_abort_refuses_to_destroy_installed_candidate(self):
         self.old()
         self.action("rotate")
-        with self.assertRaisesRegex(rotation.RotationError, "already installed"):
+        with self.assertRaisesRegex(rotation.RotationError, "Auth file changed"):
             self.action("abort")
         self.assertEqual(self.api.revoked, [])
         self.action("finalize")
@@ -148,6 +186,26 @@ class RotationTests(unittest.TestCase):
         self.api.fail_destroy = False
         self.action("finalize")
         self.assertIsNone(self.data(rotation.STATE))
+
+    def test_abort_handles_expired_old_secret_after_candidate_validation_fails(self):
+        self.old()
+        del self.api.secrets[(self.role, "old-secret")]
+        self.api.fail_verify = True
+        with self.assertRaises(rotation.RotationError):
+            self.action("recover")
+        self.assertEqual(self.data("secret_id"), "old-secret")
+        self.api.fail_verify = False
+        self.action("abort")
+        self.assertIsNone(self.data(rotation.STATE))
+        self.assertEqual(self.api.revoked, [(self.role, "accessor-1")])
+
+    def test_abort_fails_closed_if_installed_candidate_already_invalid(self):
+        self.old()
+        self.action("rotate")
+        del self.api.secrets[(self.role, "secret-1")]
+        with self.assertRaisesRegex(rotation.RotationError, "Auth file changed"):
+            self.action("abort")
+        self.assertIsNotNone(self.data(rotation.STATE))
 
     def test_mismatched_role_id_fails_before_issuing(self):
         self.old()
@@ -170,6 +228,60 @@ class RotationTests(unittest.TestCase):
                 rotation.operate(self.api, role, folder, "finalize")
                 self.assertIn((role, rotation._read(folder / "secret_id")), self.api.secrets)
         self.assertEqual(self.api.revoked, [])
+
+    def test_recover_never_ignores_network_errors(self):
+        self.old()
+        self.api.fail_lookup = True
+        with self.assertRaisesRegex(rotation.RotationError, "network request failed"):
+            self.action("recover")
+        self.assertEqual(self.api.issued, 0)
+        self.assertEqual(self.data("secret_id"), "old-secret")
+
+    def test_recover_never_ignores_forbidden_or_server_error(self):
+        self.old()
+        original_lookup = self.api.lookup
+        for status in (401, 403, 500, 503):
+            self.api.lookup = lambda role, secret, status=status: (_ for _ in ()).throw(
+                rotation.VaultHTTPError(status, "auth/approle/secret-id/lookup")
+            )
+            with self.assertRaises(rotation.VaultHTTPError):
+                self.action("recover")
+            self.assertEqual(self.api.issued, 0)
+        self.api.lookup = original_lookup
+
+    def test_journal_write_failure_revokes_untracked_candidate(self):
+        self.old()
+        original_write = rotation._write
+        def broken_journal(path, value):
+            if path.name == rotation.STATE:
+                raise OSError("simulated disk error")
+            return original_write(path, value)
+        with patch.object(rotation, "_write", side_effect=broken_journal):
+            with self.assertRaisesRegex(rotation.RotationError, "unused candidate revoked"):
+                self.action("rotate")
+        self.assertEqual(self.data("secret_id"), "old-secret")
+        self.assertIsNone(self.data(rotation.STATE))
+        self.assertEqual(self.api.revoked, [(self.role, "accessor-1")])
+
+    def test_verify_uses_operator_token_to_revoke_validation_token(self):
+        api = rotation.VaultAPI.__new__(rotation.VaultAPI)
+        api.admin_token = "operator-token"
+        calls = []
+        def request(method, path, data=None, token=None):
+            calls.append((method, path, data, token))
+            if path == "auth/approle/login":
+                return {"auth": {"client_token": "validation-token", "token_policies": ["backend-readonly"]}}
+            if path.startswith("kv/data/"):
+                return {"data": {"data": {"database_url": "fake-connection-url"}}}
+            if path == "auth/token/revoke":
+                return {}
+            raise AssertionError("Unexpected request")
+        api.request = request
+        api.verify("backend-reader", "role-id", "secret-id")
+        self.assertEqual(calls[-1], (
+            "POST", "auth/token/revoke", {"token": "validation-token"}, None,
+        ))
+        self.assertFalse(any(path == "auth/token/revoke-self" for _, path, _, _ in calls))
 
     def test_candidate_never_written_to_json_state(self):
         self.old()
