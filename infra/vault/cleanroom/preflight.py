@@ -157,6 +157,9 @@ def main():
         "vault-backend-provision": (
             "/vault/tls/ca.crt", tls_dir / "ca.crt", True
         ),
+        "vault-backend-rotate": (
+            "/vault/tls/ca.crt", tls_dir / "ca.crt", True
+        ),
         "vault-bootstrap": (
             "/vault/tls/ca.crt", tls_dir / "ca.crt", True
         ),
@@ -199,6 +202,25 @@ def main():
                 )
 
     check(ca_mounts >= 4, "Expected Vault CA mounts are missing")
+
+    # Every new role-scoped rotation helper must use the isolated CA.
+    for name in (
+        "vault-migrator-rotate",
+        "vault-postgres-provisioner-rotate",
+    ):
+        check(name in app["services"], f"Rotation helper missing: {name}")
+        mounts = [
+            m for m in app["services"][name].get("volumes", [])
+            if m["target"] == "/vault/tls/ca.crt"
+        ]
+        check(
+            len(mounts) == 1
+            and mounts[0]["type"] == "bind"
+            and mounts[0].get("read_only") is True
+            and Path(mounts[0]["source"]).resolve() == tls_dir / "ca.crt",
+            f"Unsafe rotation CA mount: {name}",
+        )
+
     print("PASS: TLS files isolated from production")
 
     for project in (vault, app):
