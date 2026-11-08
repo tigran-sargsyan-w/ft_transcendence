@@ -3,6 +3,7 @@
 > **Status:** Local development infrastructure, not production-ready.
 > **Tracking:** [Issue #104](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/104) (infrastructure), [#105](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/105) (credential lifecycle), [#106](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/106) (recovery).
 > **Scope:** Vault Server, TLS, Raft persistence, ACL/AppRole bootstrap, and agent integration with the backend and Prisma migrations.
+> **Operator SecretID rotation:** [rotation/recovery runbook](../scripts/APPROLE-ROTATION.md). The first phase is manual and requires an explicit Agent check before old credentials are revoked.
 
 Vault is operated as a **single-node**, TLS-protected server backed by integrated Raft storage. Separate Vault Agents deliver PostgreSQL connection strings to the NestJS backend and the one-shot Prisma migration process. Application containers do not receive Vault root tokens.
 
