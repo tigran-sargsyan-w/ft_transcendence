@@ -103,6 +103,87 @@ Run Clean-Room preflight before infrastructure tests. It rejects
 missing TLS files, directories in place of certificates, and symlinked
 TLS files.
 
+## Static PostgreSQL password lifecycle
+
+PostgreSQL passwords and Vault AppRole credentials have separate lifecycles:
+
+| Credential | Lifecycle |
+| --- | --- |
+| Vault token | 1h TTL, 4h maximum TTL; Agent manages authentication and renewal |
+| AppRole SecretID | 168h TTL, 20-use limit; operator-controlled rotation |
+| PostgreSQL password | Static until explicitly changed; stored as a DSN in KV v2 |
+| Vault TLS certificate | Separate certificate renewal and activation procedure |
+
+### Current implementation boundary
+
+`infra/postgres/provision_credentials.py` initializes missing PostgreSQL
+role credentials and verifies existing credentials against Vault. It
+deliberately refuses to overwrite an existing active role's password.
+
+Automatic password rotation, atomic cross-system cutover, and zero-downtime
+rotation are not implemented. This procedure is for controlled maintenance
+or emergency replacement, not automatic execution.
+
+### Operator-controlled rotation procedure
+
+1. **Prepare a maintenance window.** Identify the affected PostgreSQL
+   role (`transcendence_app` or `transcendence_migrator`). Stop the
+   corresponding application workload or prevent new migrations.
+   Avoid concurrent provisioning and migration operations.
+
+2. **Prepare recovery.** Verify access to PostgreSQL administration,
+   Vault KV v2 version history, and a protected recovery procedure.
+   Preserve the old working credential securely outside Git, logs,
+   command arguments, and CI. Do not print passwords or DSNs.
+
+3. **Stage the replacement.** Generate a strong, distinct password.
+   Prepare the corresponding PostgreSQL DSN in an operator-controlled
+   secure context. Do not publish it to the active Vault KV path yet.
+   Confirm URL encoding and the expected database username.
+
+4. **Update PostgreSQL.** Under operator supervision, change only
+   the selected role's password through a secure administrative
+   process that does not log plaintext passwords or SQL containing
+   credentials. Keep the other role unchanged.
+
+5. **Publish the matching Vault value.** Write the new DSN to the
+   existing role-specific KV v2 path using an authenticated,
+   protected operator session and stdin-based secret delivery.
+   Preserve the previous KV version for rollback.
+
+6. **Reauthenticate consumers.** Re-render credentials using the
+   relevant Vault Agents. Restart the backend when rotating its
+   database credential, or run the one-shot migration Agent when
+   rotating the migrator credential.
+
+7. **Verify synchronization.** Confirm PostgreSQL TCP authentication,
+   Vault-to-PostgreSQL credential reconciliation, backend health
+   or the migration workflow, and absence of unexpected privileges.
+   Clean up rendered one-shot credentials afterward.
+
+8. **Finalize.** Confirm the replacement works before retiring
+   protected recovery material. Do not expose old or new passwords
+   in terminal output, issues, pull requests, or CI artifacts.
+
+### Failure handling and rollback
+
+- If PostgreSQL was updated but Vault was not, stop affected consumers.
+  Restore the previous PostgreSQL credential through a protected
+  administrator procedure, or complete publication of the new
+  matching Vault value after verifying it.
+- If Vault was updated but consumers cannot authenticate, inspect
+  both PostgreSQL and Vault state. Restore the previous KV v2 version
+  only when the database password has also been restored.
+- A Vault KV rollback alone does not restore the PostgreSQL password.
+- If a credential was compromised, **never restore the compromised
+  password**. Generate another replacement and reconcile both systems.
+- If state is ambiguous, stop and investigate. Do not repeatedly
+  apply credentials or silently overwrite an active database role.
+
+This is an operational design, not a tested PostgreSQL password
+rotation implementation. A dedicated implementation and integration
+test are required before claiming automated or zero-downtime rotation.
+
 ## Offline tests and limits
 
 ~~~sh
