@@ -38,7 +38,7 @@ export const ActiveIncidents = () => {
               <TableCell>{i.title}</TableCell>
               <TableCell>
                 <Badge variant={i.status} className="capitalize">
-                  {i.status}
+                  {i.status.toUpperCase()}
                 </Badge>
               </TableCell>
               <TableCell>{formatElapsedSince(i.startedAt)}</TableCell>
