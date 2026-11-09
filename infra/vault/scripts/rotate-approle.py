@@ -38,6 +38,10 @@ class RotationError(Exception):
     """A deliberately sanitized error; never contains Vault response bodies."""
 
 
+class MissingSecretIDLookup(RotationError):
+    """SecretID lookup returned no data; absence needs confirmation."""
+
+
 class VaultHTTPError(RotationError):
     """Vault HTTP status without untrusted error body or secret values."""
 
@@ -77,8 +81,52 @@ class VaultAPI:
         return self.request("GET", f"auth/approle/role/{role}/role-id")["data"]["role_id"]
 
     def lookup(self, role, secret):
-        data = self.request("POST", f"auth/approle/role/{role}/secret-id/lookup", {"secret_id": secret})
-        return data["data"]["secret_id_accessor"]
+        path = f"auth/approle/role/{role}/secret-id/lookup"
+        response = self.request(
+            "POST", path, {"secret_id": secret}
+        )
+
+        data = response.get("data") if isinstance(response, dict) else None
+
+        if data is None:
+            raise MissingSecretIDLookup(
+                "SecretID lookup returned no data"
+            )
+
+        if not isinstance(data, dict):
+            raise RotationError("Unexpected SecretID lookup response")
+
+        accessor = data.get("secret_id_accessor")
+
+        if not isinstance(accessor, str) or not accessor:
+            raise RotationError("SecretID lookup omitted accessor")
+
+        return accessor
+
+    def list_accessors(self, role):
+        path = f"auth/approle/role/{role}/secret-id?list=true"
+
+        try:
+            response = self.request("GET", path)
+        except VaultHTTPError as exc:
+            if exc.status != 404:
+                raise
+
+            # A missing role must not be confused with an empty list.
+            self.role_id(role)
+            return []
+
+        data = response.get("data") if isinstance(response, dict) else None
+        keys = data.get("keys") if isinstance(data, dict) else None
+
+        if not isinstance(keys, list) or not all(
+            isinstance(key, str) and key for key in keys
+        ):
+            raise RotationError(
+                "Unexpected SecretID accessor list response"
+            )
+
+        return keys
 
     def issue(self, role):
         data = self.request("POST", f"auth/approle/role/{role}/secret-id", {})["data"]
@@ -209,15 +257,35 @@ def rotate(api: VaultAPI, role: str, auth_dir: Path, recover: bool = False):
     if previous_secret:
         try:
             old_accessor = api.lookup(role, previous_secret)
-        except VaultHTTPError as exc:
-            # Only an explicit invalid/expired ID can use the recovery path.
-            # Auth failures, network outages and Vault 5xx must *not* permit
-            # skipping the old credential's revocation.
-            if exc.status not in (400, 404):
+        except (VaultHTTPError, MissingSecretIDLookup) as exc:
+            # Never treat authorization, network or server failures
+            # as proof that the old SecretID is missing.
+            if isinstance(exc, VaultHTTPError) and exc.status not in (400, 404):
                 raise
+
+            stored_accessor = _read(auth_dir / "secret_id_accessor")
+            active_accessors = api.list_accessors(role)
+
+            if stored_accessor and stored_accessor in active_accessors:
+                raise RotationError(
+                    "Previous SecretID accessor is still active; refusing recovery"
+                ) from None
+
+            # Unknown active credentials require an operator audit.
+            if active_accessors:
+                raise RotationError(
+                    "Other active SecretIDs prevent safe recovery"
+                ) from None
+
             if not recover:
-                raise RotationError("Old SecretID invalid or expired; use explicit recover mode") from None
-            print("WARNING: old SecretID is invalid/expired; audit previous accessors manually")
+                raise RotationError(
+                    "Old SecretID invalid or expired; use explicit recover mode"
+                ) from None
+
+            print(
+                "WARNING: old SecretID is invalid/expired; "
+                "audit previous accessors manually"
+            )
     elif _read(auth_dir / "secret_id_accessor"):
         raise RotationError("Orphaned accessor with missing SecretID; manual inspection required")
 

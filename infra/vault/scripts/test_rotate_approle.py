@@ -33,6 +33,13 @@ class FakeVault:
             raise rotation.VaultHTTPError(400, "auth/approle/secret-id/lookup")
         return self.secrets[(role, secret)]
 
+    def list_accessors(self, role):
+        return [
+            accessor
+            for (secret_role, _), accessor in self.secrets.items()
+            if secret_role == role
+        ]
+
     def issue(self, role):
         self.issued += 1
         secret = f"secret-{self.issued}"
@@ -117,6 +124,89 @@ class RotationTests(unittest.TestCase):
         api.request = request
         with self.assertRaisesRegex(rotation.RotationError, "not confirmed"):
             api.destroy_if_present(self.role, "old-accessor")
+
+    def test_empty_lookup_raises_missing_secret_error(self):
+        api = rotation.VaultAPI.__new__(rotation.VaultAPI)
+        api.request = lambda *args, **kwargs: {"data": None}
+
+        with self.assertRaises(rotation.MissingSecretIDLookup):
+            api.lookup(self.role, "revoked-secret")
+
+    def test_empty_lookup_with_active_accessor_blocks_recover(self):
+        self.old()
+        rotation._write(self.path / "secret_id_accessor", "old-accessor")
+
+        with patch.object(
+            self.api,
+            "lookup",
+            side_effect=rotation.MissingSecretIDLookup("no data"),
+        ):
+            with self.assertRaisesRegex(
+                rotation.RotationError, "still active"
+            ):
+                self.action("recover")
+
+        self.assertEqual(self.api.issued, 0)
+        self.assertEqual(self.data("secret_id"), "old-secret")
+
+    def test_empty_lookup_requires_explicit_recover(self):
+        self.old()
+        rotation._write(self.path / "secret_id_accessor", "old-accessor")
+        del self.api.secrets[(self.role, "old-secret")]
+
+        with patch.object(
+            self.api,
+            "lookup",
+            side_effect=rotation.MissingSecretIDLookup("no data"),
+        ):
+            with self.assertRaisesRegex(
+                rotation.RotationError, "explicit recover"
+            ):
+                self.action("rotate")
+
+            self.assertEqual(self.api.issued, 0)
+            self.action("recover")
+
+        self.assertEqual(self.api.issued, 1)
+        self.action("finalize")
+        self.assertIsNone(self.data(rotation.STATE))
+        self.assertEqual(self.data("secret_id"), "secret-1")
+
+    def test_recover_rejects_untracked_active_accessors(self):
+        self.old()
+        del self.api.secrets[(self.role, "old-secret")]
+        self.api.secrets[(self.role, "unknown-secret")] = "unknown-accessor"
+
+        with patch.object(
+            self.api,
+            "lookup",
+            side_effect=rotation.MissingSecretIDLookup("no data"),
+        ):
+            with self.assertRaisesRegex(
+                rotation.RotationError, "Other active SecretIDs"
+            ):
+                self.action("recover")
+
+        self.assertEqual(self.api.issued, 0)
+
+    def test_accessor_listing_404_requires_existing_role(self):
+        api = rotation.VaultAPI.__new__(rotation.VaultAPI)
+
+        def missing_list(method, path, data=None, token=None):
+            raise rotation.VaultHTTPError(404, path)
+
+        api.request = missing_list
+        api.role_id = lambda role: "valid-role-id"
+
+        self.assertEqual(api.list_accessors(self.role), [])
+
+        def missing_role(role):
+            raise rotation.VaultHTTPError(404, "role-id")
+
+        api.role_id = missing_role
+
+        with self.assertRaises(rotation.VaultHTTPError):
+            api.list_accessors(self.role)
 
     def test_first_time_provisioning_no_old_credential(self):
         self.action("rotate")
