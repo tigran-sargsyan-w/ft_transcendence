@@ -329,6 +329,47 @@ services:
 
     restart: "no"
 
+
+  vault-migrator-rotate:
+    image: python:3.12-alpine
+    profiles: [vault-maintenance]
+    user: "100:1000"
+    entrypoint: ["python3", "/vault/scripts/rotate-approle.py", "migrator-reader", "/vault/auth"]
+    command: ["rotate"]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./infra/vault/scripts/rotate-approle.py:/vault/scripts/rotate-approle.py:ro
+      - ./infra/vault/server/tls/ca.crt:/vault/tls/ca.crt:ro
+      - migrator_vault_auth:/vault/auth
+    networks:
+      - vault_private
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+  vault-postgres-provisioner-rotate:
+    image: python:3.12-alpine
+    profiles: [vault-maintenance]
+    user: "100:1000"
+    entrypoint: ["python3", "/vault/scripts/rotate-approle.py", "postgres-provisioner-reader", "/vault/auth"]
+    command: ["rotate"]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./infra/vault/scripts/rotate-approle.py:/vault/scripts/rotate-approle.py:ro
+      - ./infra/vault/server/tls/ca.crt:/vault/tls/ca.crt:ro
+      - postgres_provisioner_vault_auth:/vault/auth
+    networks:
+      - vault_private
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
   vault-migrator-storage-init:
     image: hashicorp/vault:2.2.1
     user: "0:0"
