@@ -1,0 +1,64 @@
+import type { IncidentSummary } from "./type";
+
+export const mockIncidents: IncidentSummary[] = [
+  {
+    id: "inc-0042",
+    title: "PostgreSQL primary unreachable",
+    severity: "sev1",
+    status: "investigating",
+    environmentId: "env-prod",
+    startedAt: "2026-11-09T08:12:00Z",
+    resolvedAt: null,
+    commander: {
+      id: "usr-001",
+      displayName: "Nathan",
+      avatarUrl: null,
+    },
+    seedNodeIds: ["node-postgres"],
+  },
+  {
+    id: "inc-0041",
+    title: "High latency on api-gateway",
+    severity: "sev2",
+    status: "mitigated",
+    environmentId: "env-prod",
+    startedAt: "2026-11-09T06:47:00Z",
+    resolvedAt: null,
+    commander: {
+      id: "usr-002",
+      displayName: "Camille",
+      avatarUrl: null,
+    },
+    seedNodeIds: ["node-api-gateway", "node-redis"],
+  },
+  {
+    id: "inc-0040",
+    title: "Collector container restarting in loop",
+    severity: "sev3",
+    status: "open",
+    environmentId: "env-staging",
+    startedAt: "2026-11-09T09:30:00Z",
+    resolvedAt: null,
+    commander: {
+      id: "usr-004",
+      displayName: "PA",
+      avatarUrl: null,
+    },
+    seedNodeIds: ["node-collector"],
+  },
+  {
+    id: "inc-0039",
+    title: "TLS certificate expired on nginx",
+    severity: "sev4",
+    status: "resolved",
+    environmentId: "env-staging",
+    startedAt: "2026-11-08T14:05:00Z",
+    resolvedAt: "2026-11-08T15:20:00Z",
+    commander: {
+      id: "usr-003",
+      displayName: "Tigran",
+      avatarUrl: null,
+    },
+    seedNodeIds: ["node-nginx"],
+  },
+];

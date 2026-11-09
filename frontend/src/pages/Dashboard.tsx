@@ -6,7 +6,7 @@ import { ServicesImpacted } from "@/features/topology/dashboardCards/ServicesImp
 
 export default function Dashboard() {
   return (
-    <main className="flex flex-col gap-4 w-screen p-4">
+    <div className="flex flex-col gap-4 w-screen p-4">
       <div className="flex gap-4">
         <OpenIncidents /> <ServicesDown /> <ServicesImpacted />{" "}
         <ResolvedIncidents />
@@ -21,6 +21,6 @@ export default function Dashboard() {
           <OpenIncidents />
         </div>
       </div>
-    </main>
+    </div>
   );
 }

@@ -18,7 +18,7 @@ export interface IncidentSummary {
   seedNodeIds: string[]; // services at the origin of the incident
 }
 
-interface UserRef {
+export interface UserRef {
   id: string;
   displayName: string;
   avatarUrl: string | null;

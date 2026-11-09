@@ -22,7 +22,7 @@ export const MainCard = ({
   children,
 }: MainCardProps) => {
   return (
-    <Card className="flex-1">
+    <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         {linkTarget && (
