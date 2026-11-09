@@ -149,5 +149,78 @@ class ReadinessTests(unittest.TestCase):
             self.assertIn('expires within 7 days', stdout.getvalue())
 
 
+    def test_vault_api_timeout_fails_closed(self):
+        responses = [
+            ('service=vault', result('v123\n')),
+            ('docker inspect', result('running|none\n')),
+            ('docker exec', None),
+        ]
+        status, output, calls = self.invoke(responses, '--mode', 'vault')
+        self.assertEqual(status, 1)
+        self.assertIn('Vault API: unable to obtain Vault status', output)
+        self.assertFalse(any('unseal' in ' '.join(c) or 'rotate' in ' '.join(c) for c in calls))
+
+    def test_vault_invalid_json_fails_closed(self):
+        responses = [
+            ('service=vault', result('v123\n')),
+            ('docker inspect', result('running|none\n')),
+            ('docker exec', result('not JSON\n')),
+        ]
+        status, output, _ = self.invoke(responses, '--mode', 'vault')
+        self.assertEqual(status, 1)
+        self.assertIn('Vault API: invalid Vault status response', output)
+
+    def test_ambiguous_vault_container_fails_closed(self):
+        status, output, calls = self.invoke(
+            [('service=vault', result('v123\nv456\n'))],
+            '--mode', 'vault',
+        )
+        self.assertEqual(status, 1)
+        self.assertIn('expected exactly one container, found 2', output)
+        self.assertFalse(any(c[:2] == ['docker', 'inspect'] for c in calls))
+
+    def test_postgres_stopped_blocks_stack_readiness(self):
+        responses = [
+            ('service=vault-backend-agent', result('a123\n')),
+            ('service=postgres', result('p123\n')),
+            ('service=backend', result('b123\n')),
+            ('service=vault', result('v123\n')),
+            ('p123', result('exited|none\n')),
+            ('docker inspect', result('running|healthy\n')),
+            ('docker exec', result('{"initialized":true,"sealed":false}\n')),
+        ]
+        status, output, _ = self.invoke(responses, '--mode', 'stack')
+        self.assertEqual(status, 1)
+        self.assertIn('PostgreSQL: container is exited', output)
+        self.assertIn('RESULT: NOT READY', output)
+
+    def test_backend_starting_blocks_stack_readiness(self):
+        responses = [
+            ('service=vault-backend-agent', result('a123\n')),
+            ('service=postgres', result('p123\n')),
+            ('service=backend', result('b123\n')),
+            ('service=vault', result('v123\n')),
+            ('b123', result('running|starting\n')),
+            ('docker inspect', result('running|healthy\n')),
+            ('docker exec', result('{"initialized":true,"sealed":false}\n')),
+        ]
+        status, output, _ = self.invoke(responses, '--mode', 'stack')
+        self.assertEqual(status, 1)
+        self.assertIn('Backend: container running, health=starting', output)
+
+    def test_required_healthcheck_absent_fails(self):
+        responses = [
+            ('service=vault-backend-agent', result('a123\n')),
+            ('service=postgres', result('p123\n')),
+            ('service=backend', result('b123\n')),
+            ('service=vault', result('v123\n')),
+            ('a123', result('running|none\n')),
+            ('docker inspect', result('running|healthy\n')),
+            ('docker exec', result('{"initialized":true,"sealed":false}\n')),
+        ]
+        status, output, _ = self.invoke(responses, '--mode', 'stack')
+        self.assertEqual(status, 1)
+        self.assertIn('Runtime Agent: container running, health=none', output)
+
 if __name__ == '__main__':
     unittest.main()
