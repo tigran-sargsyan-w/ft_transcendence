@@ -56,9 +56,18 @@ The minimal conceptual model currently includes:
 - stable user identifier
 - email
 - password hash
+- display name: 1 to 64 characters after trimming, not unique, stored as typed (the client escapes it when it displays it). Optional at registration: without one, the user is named `User ` followed by the first 8 characters of their id
+- avatar URL: `null` until an avatar exists
 - creation/update timestamps
 
 Additional profile fields should be introduced only when product requirements are known.
+
+### Profile endpoints
+
+- `GET /api/v1/users/:id`: the profile of any user, for any logged-in user: `{ id, displayName, avatarUrl }` and nothing else. The email is never part of it. An id that is not a UUID gives `400 BAD_REQUEST`, an unknown one `404 USER_NOT_FOUND`.
+- `PATCH /api/v1/users/me`: `{ displayName }`, the only field a user can change. The route has no id: a user can only change their own profile. It returns the same object as `GET /api/v1/auth/me`.
+
+`register`, `login` and `me` also return `displayName` and `avatarUrl`.
 
 ## Explicitly deferred
 
@@ -68,4 +77,4 @@ These are optional/future decisions and are not part of this foundation contract
 - 2FA
 - refresh-token design
 - roles/permissions beyond what the product requires
-- avatars/friends/profile expansion
+- avatar upload, friends and presence
