@@ -15,7 +15,6 @@ import { UsersService } from './users.service.js';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  // Declared before ':id' so that "me" is never read as an id.
   @Patch('me')
   updateMe(@CurrentUser() user: PublicUser, @Body() dto: UpdateProfileDto) {
     return this.usersService.updateProfile(user.id, dto);

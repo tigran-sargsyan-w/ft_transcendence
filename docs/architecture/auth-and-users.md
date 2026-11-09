@@ -56,7 +56,7 @@ The minimal conceptual model currently includes:
 - stable user identifier
 - email
 - password hash
-- display name: 1 to 64 characters after trimming, not unique, stored as typed (the client escapes it when it displays it). Optional at registration: without one, the user is named `User ` followed by the first 8 characters of their id
+- display name: 1 to 64 characters after trimming (`class-validator` counts a surrogate pair, such as an emoji, as 1; a combined emoji such as a family counts more), without NUL characters, not unique, stored trimmed but otherwise as typed (the client escapes it when it displays it). Optional at registration: without one, the user is named `User ` followed by the first 8 characters of their id
 - avatar URL: `null` until an avatar exists
 - creation/update timestamps
 

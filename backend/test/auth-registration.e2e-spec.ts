@@ -119,6 +119,7 @@ describe('User registration (e2e)', () => {
     ['only spaces', '   '],
     ['too long', 'a'.repeat(65)],
     ['not a string', 42],
+    ['containing a NUL character', 'a\u0000b'],
   ])('rejects a display name that is %s', async (_label, displayName) => {
     const response = await request(app.getHttpServer())
       .post('/api/v1/auth/register')

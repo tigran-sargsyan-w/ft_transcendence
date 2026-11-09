@@ -80,6 +80,15 @@ describe('Users (e2e)', () => {
     });
   });
 
+  it('answers 400 to GET /users/me, which is not a profile', async () => {
+    const ada = await createUser(emails[0], 'Ada');
+
+    await request(app.getHttpServer())
+      .get('/api/v1/users/me')
+      .set('Cookie', ada.cookie)
+      .expect(400);
+  });
+
   it('refuses a profile without a session', async () => {
     const ada = await createUser(emails[0], 'Ada');
 
@@ -161,6 +170,7 @@ describe('Users (e2e)', () => {
     ['only spaces', { displayName: '   ' }],
     ['too long', { displayName: 'a'.repeat(65) }],
     ['not a string', { displayName: 42 }],
+    ['containing a NUL character', { displayName: 'a\u0000b' }],
   ])('rejects a display name that is %s', async (_label, body) => {
     const ada = await createUser(emails[0], 'Ada');
 

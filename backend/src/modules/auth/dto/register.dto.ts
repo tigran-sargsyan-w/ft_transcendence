@@ -3,6 +3,7 @@ import {
   IsEmail,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -25,5 +26,9 @@ export class RegisterDto {
   @IsString()
   @MinLength(1)
   @MaxLength(64)
+  // PostgreSQL refuses a NUL character in text: it would be a 500.
+  @Matches(/^[^\0]*$/, {
+    message: 'displayName must not contain a NUL character',
+  })
   displayName?: string;
 }
