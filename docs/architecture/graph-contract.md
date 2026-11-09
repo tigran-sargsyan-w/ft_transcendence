@@ -181,12 +181,28 @@ The browser should not call these endpoints in production; Nest is the gateway.
 | `attack_paths` | yes | `attackPaths` | Implemented |
 | `critical_nodes` | no | `criticalNodes` | Implemented |
 
-`critical_nodes` v0 scoring mixes:
+`critical_nodes` **v1** scoring (security risk map; response shape unchanged):
 
-- normalized betweenness centrality on the **full** graph (all edge kinds)
-- dependency in-degree for dependents: only edges with kind `depends_on` count (`DEPENDENCY_EDGE_KINDS` in the Graph Engine)
+```text
+score = 0.6 × betweenness + 0.4 × transitive_dependents_normalized
+```
 
-Reasons may include `high_betweenness`, `many_dependents`, `structural_role`, or `single_node`.
+| Signal | Definition | Weight |
+|--------|------------|--------|
+| Betweenness | Normalized betweenness on nodes that participate in **`depends_on`** (degree > 0), so isolated host/network/volume nodes do not dilute the score. Other edge kinds do not contribute. | `0.6` |
+| Transitive dependents | How many **other** nodes fail if this node fails (blast size on reversed `depends_on`, excluding self), normalized by the max in the graph. | `0.4` |
+
+Reason codes (opaque strings for Nest; new codes may be added later):
+
+| Code | When |
+|------|------|
+| `high_betweenness` | Betweenness ≥ `0.3` |
+| `many_dependents` | Transitive dependents ≥ `50%` of the graph max (and at least 1) |
+| `exposed_to_internet` | An `exposes` edge targets the node (e.g. `ext:internet` → service) |
+| `structural_role` | Score > 0 but none of the above thresholds fired |
+| `single_node` | Topology has exactly one node (score `1.0`) |
+
+Constants live in the Graph Engine as `WEIGHT_*` / `THRESHOLD_*` in `critical_nodes.py`.
 
 ### Analyze success response
 

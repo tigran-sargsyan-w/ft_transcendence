@@ -1,0 +1,42 @@
+services:
+  vault:
+    volumes:
+      - type: bind
+        source: ${FT_CR_TLS_DIR:?Clean-room TLS directory required}
+        target: /vault/tls
+        read_only: true
+
+  vault-storage-permissions:
+    volumes:
+      - type: bind
+        source: ${FT_CR_TLS_DIR:?Clean-room TLS directory required}
+        target: /vault/tls
+        read_only: false
+
+  vault-backend-provision:
+    volumes:
+      - type: bind
+        source: ${FT_CR_TLS_DIR:?Clean-room TLS directory required}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+
+  vault-backend-rotate:
+    volumes:
+      - type: bind
+        source: ${FT_CR_TLS_DIR:?Clean-room TLS directory required}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+
+  vault-bootstrap:
+    volumes:
+      - type: bind
+        source: ${FT_CR_TLS_DIR:?Clean-room TLS directory required}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+
+  vault-tls-files:
+    volumes:
+      - type: bind
+        source: ${FT_CR_TLS_DIR:?Clean-room TLS directory required}
+        target: /vault/tls
+        read_only: false

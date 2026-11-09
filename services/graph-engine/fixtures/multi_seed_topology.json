@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "environmentId": "env_local_compose",
+  "capturedAt": "2026-09-14T10:00:00Z",
+  "topologyRevision": "fixture-multi-seed:1",
+  "nodes": [
+    {"id": "svc:demo:web", "kind": "service", "label": "web", "status": "healthy"},
+    {"id": "svc:demo:api", "kind": "service", "label": "api", "status": "healthy"},
+    {"id": "svc:demo:db", "kind": "service", "label": "db", "status": "healthy"},
+    {"id": "svc:demo:worker", "kind": "service", "label": "worker", "status": "healthy"},
+    {"id": "svc:demo:queue", "kind": "service", "label": "queue", "status": "healthy"},
+    {"id": "svc:demo:redis", "kind": "service", "label": "redis", "status": "healthy"}
+  ],
+  "edges": [
+    {"id": "depends_on:svc:demo:web>svc:demo:api", "source": "svc:demo:web", "target": "svc:demo:api", "kind": "depends_on"},
+    {"id": "depends_on:svc:demo:api>svc:demo:db", "source": "svc:demo:api", "target": "svc:demo:db", "kind": "depends_on"},
+    {"id": "depends_on:svc:demo:worker>svc:demo:queue", "source": "svc:demo:worker", "target": "svc:demo:queue", "kind": "depends_on"},
+    {"id": "depends_on:svc:demo:queue>svc:demo:redis", "source": "svc:demo:queue", "target": "svc:demo:redis", "kind": "depends_on"}
+  ]
+}

@@ -1,6 +1,6 @@
 # Real-Time Conventions
 
-This document defines a product-agnostic live communication model. It does not select a WebSocket library or commit the final product to a particular room/match/scenario model.
+This document defines a product-agnostic live communication model. It does not commit the final product to a particular room/match/scenario model. The protocol of the live infrastructure graph (Socket.IO) is in [Realtime topology protocol](./realtime-topology.md).
 
 ## Connection
 
@@ -61,7 +61,6 @@ Do not make every client an equal authority for shared state. The concrete synch
 
 ## Deferred decisions
 
-- WebSocket library/protocol implementation
 - persistence of live state
 - distributed pub/sub
 - reconnect grace periods

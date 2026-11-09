@@ -1,0 +1,24 @@
+{
+  "data": {
+    "schemaVersion": 1,
+    "environmentId": "env_local_compose",
+    "analyzedAt": "2026-09-14T10:00:01Z",
+    "results": {
+      "attackPaths": {
+        "seedNodeIds": ["svc_api"],
+        "paths": [
+          {
+            "nodeIds": ["svc_api", "svc_cache"],
+            "edgeIds": ["edge_api_cache"],
+            "score": 0.5
+          },
+          {
+            "nodeIds": ["svc_api", "svc_db"],
+            "edgeIds": ["edge_api_db"],
+            "score": 0.5
+          }
+        ]
+      }
+    }
+  }
+}

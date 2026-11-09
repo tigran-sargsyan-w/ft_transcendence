@@ -1,0 +1,45 @@
+# PostgreSQL Provisioner Vault Agent.
+# One-shot delivery of backend and migrator database credentials.
+
+exit_after_auth = true
+
+vault {
+  address = "https://vault:8200"
+  ca_cert = "/vault/tls/ca.crt"
+}
+
+auto_auth {
+  method "approle" {
+    mount_path = "auth/approle"
+
+    config = {
+      role_id_file_path   = "/vault/auth/role_id"
+      secret_id_file_path = "/vault/auth/secret_id"
+      remove_secret_id_file_after_reading = false
+    }
+  }
+}
+
+template_config {
+  exit_on_retry_failure = true
+}
+
+template {
+  contents = "{{ with secret \"kv/data/ft-transcendence/dev/backend\" }}{{ .Data.data.database_url }}{{ end }}"
+
+  destination = "/vault/rendered/backend_database_url"
+  perms       = "0440"
+  backup      = false
+
+  error_on_missing_key = true
+}
+
+template {
+  contents = "{{ with secret \"kv/data/ft-transcendence/dev/migrator\" }}{{ .Data.data.database_url }}{{ end }}"
+
+  destination = "/vault/rendered/migrator_database_url"
+  perms       = "0440"
+  backup      = false
+
+  error_on_missing_key = true
+}

@@ -1,0 +1,90 @@
+services:
+  vault-migrator-agent:
+    volumes:
+      - type: bind
+        source: "${FT_CR_TLS_DIR:?Set FT_CR_TLS_DIR}/ca.crt"
+        target: /vault/tls/ca.crt
+        read_only: true
+  vault-migrator-rotate:
+    volumes:
+      - type: bind
+        source: ${FT_CR_TLS_DIR:?Set FT_CR_TLS_DIR}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+
+  vault-postgres-provisioner-rotate:
+    volumes:
+      - type: bind
+        source: ${FT_CR_TLS_DIR:?Set FT_CR_TLS_DIR}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+
+  backend:
+    ports: !reset []
+
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${FT_CR_PG_PASSWORD:?Test PostgreSQL password required}
+
+  collector:
+    profiles: [cleanroom-excluded]
+    ports: !reset []
+
+  docker-proxy:
+    profiles: [cleanroom-excluded]
+    ports: !reset []
+    volumes: !reset []
+
+  frontend:
+    profiles: [cleanroom-excluded]
+    ports: !reset []
+
+  graph-engine:
+    profiles: [cleanroom-excluded]
+    ports: !reset []
+
+  nginx:
+    profiles: [cleanroom-excluded]
+    ports: !reset []
+
+  vault-backend-agent:
+    volumes:
+      - type: bind
+        source: ${FT_CR_TLS_DIR:?}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+
+  vault-migrator-provision:
+    volumes:
+      - type: bind
+        source: ${FT_CR_TLS_DIR:?}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+
+  vault-postgres-provisioner-agent:
+    volumes:
+      - type: bind
+        source: ${FT_CR_TLS_DIR:?}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+
+  vault-postgres-provisioner-provision:
+    volumes:
+      - type: bind
+        source: ${FT_CR_TLS_DIR:?}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+
+volumes:
+  backend_vault_auth:
+    external: true
+    name: ${FT_CR_VAULT_PROJECT:?}_backend_agent_auth
+
+  backend_vault_rendered:
+    external: true
+    name: ${FT_CR_VAULT_PROJECT:?}_backend_rendered
+
+networks:
+  vault_private:
+    external: true
+    name: ${FT_CR_VAULT_PROJECT:?}_vault_private
