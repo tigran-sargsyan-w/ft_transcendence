@@ -2,6 +2,7 @@ import { ActiveIncidents } from "@/features/incidents/dashboardCards/ActiveIncid
 import { OpenIncidents } from "@/features/incidents/dashboardCards/OpenIncidents";
 import { ResolvedIncidents } from "@/features/incidents/dashboardCards/ResolvedIncidents";
 import { ServicesDown } from "@/features/topology/dashboardCards/ServicesDown";
+import { ServicesHealth } from "@/features/topology/dashboardCards/ServicesHealth";
 import { ServicesImpacted } from "@/features/topology/dashboardCards/ServicesImpacted";
 
 export default function Dashboard() {
@@ -14,7 +15,7 @@ export default function Dashboard() {
       <div className="flex gap-4">
         <div className="flex flex-col gap-4 w-3/5">
           <ActiveIncidents />
-          <OpenIncidents />
+          <ServicesHealth />
         </div>
         <div className="flex flex-col gap-4 w-2/5">
           <OpenIncidents />

@@ -2,11 +2,11 @@ import { BrowserRouter, Route, Routes } from "react-router";
 import { HomePage } from "./pages/HomePage";
 import DashboardLayout from "./layouts/DashboardLayout";
 import Dashboard from "./pages/Dashboard";
-import Infra from "./pages/Infra";
 import RiskMap from "./pages/RiskMap";
 import Incidents from "./pages/Incidents";
 import Profile from "./pages/Profile";
 import Organization from "./pages/Organization";
+import Topology from "./pages/Topology";
 
 function App() {
   return (
@@ -15,7 +15,7 @@ function App() {
         <Route path="/" element={<HomePage />} />
         <Route element={<DashboardLayout />}>
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/infra" element={<Infra />} />
+          <Route path="/topology" element={<Topology />} />
           <Route path="/riskmap" element={<RiskMap />} />
           <Route path="/incidents" element={<Incidents />} />
           <Route path="/profile" element={<Profile />} />

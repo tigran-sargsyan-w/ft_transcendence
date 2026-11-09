@@ -33,6 +33,17 @@ const badgeVariants = cva(
           "bg-status-mitigated/15 text-status-mitigated border-status-mitigated/30",
         resolved:
           "bg-status-resolved/15 text-status-resolved border-status-resolved/30",
+
+        // Service health (topology node status)
+        healthy:
+          "bg-health-healthy/15 text-health-healthy border-health-healthy/30",
+        degraded:
+          "bg-health-degraded/15 text-health-degraded border-health-degraded/30",
+        down: "bg-health-down/15 text-health-down border-health-down/30",
+        unknown:
+          "bg-health-unknown/15 text-health-unknown border-health-unknown/30",
+        compromised:
+          "bg-health-compromised/15 text-health-compromised border-health-compromised/30",
       },
     },
     defaultVariants: {

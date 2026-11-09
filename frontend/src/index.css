@@ -55,6 +55,11 @@
     --color-status-investigating: var(--status-investigating);
     --color-status-mitigated: var(--status-mitigated);
     --color-status-resolved: var(--status-resolved);
+    --color-health-healthy: var(--health-healthy);
+    --color-health-degraded: var(--health-degraded);
+    --color-health-down: var(--health-down);
+    --color-health-unknown: var(--health-unknown);
+    --color-health-compromised: var(--health-compromised);
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
@@ -99,6 +104,11 @@
     --status-investigating: oklch(0.666 0.179 58.318);
     --status-mitigated: oklch(0.588 0.158 241.966);
     --status-resolved: oklch(0.596 0.145 163.225);
+    --health-healthy: oklch(0.596 0.145 163.225);
+    --health-degraded: oklch(0.666 0.179 58.318);
+    --health-down: oklch(0.577 0.245 27.325);
+    --health-unknown: oklch(0.552 0.016 285.938);
+    --health-compromised: oklch(0.518 0.253 323.949);
 }
 
 .dark {
@@ -141,6 +151,11 @@
     --status-investigating: oklch(0.828 0.189 84.429);
     --status-mitigated: oklch(0.746 0.16 232.661);
     --status-resolved: oklch(0.765 0.177 163.223);
+    --health-healthy: oklch(0.765 0.177 163.223);
+    --health-degraded: oklch(0.828 0.189 84.429);
+    --health-down: oklch(0.704 0.191 22.216);
+    --health-unknown: oklch(0.705 0.015 286.067);
+    --health-compromised: oklch(0.74 0.238 322.16);
 }
 
 @layer base {
