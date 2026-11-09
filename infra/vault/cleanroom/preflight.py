@@ -73,6 +73,20 @@ def main():
         "Clean-room TLS directory overlaps production TLS",
     )
 
+    # Reject missing or directory-backed bind mount sources.
+    # Docker Compose may otherwise create an absent file path
+    # as a directory.
+    for name in ("ca.crt", "vault.crt", "vault.key"):
+        tls_file = tls_dir / name
+        check(
+            not tls_file.is_symlink()
+            and tls_file.is_file()
+            and tls_file.stat().st_size > 0,
+            f"Missing or invalid Clean-Room TLS file: {name}",
+        )
+
+    print("PASS: Clean-Room TLS files exist and are regular files")
+
     vault = compose_config([
         "docker", "compose",
         "-p", vault_project,
