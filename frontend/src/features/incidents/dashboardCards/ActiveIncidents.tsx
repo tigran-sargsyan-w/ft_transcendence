@@ -10,6 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { mockIncidents } from "../mockIncidents";
+import { formatElapsedSince } from "../utils";
 
 export const ActiveIncidents = () => {
   return (
@@ -40,7 +41,7 @@ export const ActiveIncidents = () => {
                   {i.status}
                 </Badge>
               </TableCell>
-              <TableCell>{i.startedAt}</TableCell>
+              <TableCell>{formatElapsedSince(i.startedAt)}</TableCell>
               <TableCell>{i.commander?.displayName}</TableCell>
             </TableRow>
           ))}
