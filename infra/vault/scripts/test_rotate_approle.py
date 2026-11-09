@@ -95,17 +95,33 @@ class RotationTests(unittest.TestCase):
         return rotation.operate(self.api, role or self.role, self.path, action)
 
     def test_revocation_confirmed_absent_is_idempotent(self):
+        for status in (400, 404, 500):
+            with self.subTest(status=status):
+                api = rotation.VaultAPI.__new__(rotation.VaultAPI)
+                calls = []
+
+                def request(method, path, data=None, token=None):
+                    calls.append((method, path))
+                    if path.endswith("/destroy"):
+                        raise rotation.VaultHTTPError(status, path)
+                    if path.endswith("?list=true"):
+                        return {"data": {"keys": ["other-accessor"]}}
+                    raise AssertionError("Unexpected Vault request")
+
+                api.request = request
+                api.destroy_if_present(self.role, "old-accessor")
+                self.assertEqual(len(calls), 2)
+
+    def test_revocation_never_ignores_accessor_list_failure(self):
         api = rotation.VaultAPI.__new__(rotation.VaultAPI)
-        calls = []
+
         def request(method, path, data=None, token=None):
-            calls.append(path)
-            if path.endswith("/destroy"):
-                raise rotation.VaultHTTPError(404, path)
-            if path.endswith("/lookup"):
-                raise rotation.VaultHTTPError(404, path)
+            raise rotation.VaultHTTPError(500, path)
+
         api.request = request
-        api.destroy_if_present(self.role, "old-accessor")
-        self.assertEqual(len(calls), 2)
+
+        with self.assertRaises(rotation.VaultHTTPError):
+            api.destroy_if_present(self.role, "old-accessor")
 
     def test_revoke_does_not_ignore_authorization_error(self):
         api = rotation.VaultAPI.__new__(rotation.VaultAPI)
@@ -116,14 +132,22 @@ class RotationTests(unittest.TestCase):
             api.destroy_if_present(self.role, "old-accessor")
 
     def test_revocation_not_assumed_if_accessor_still_exists(self):
-        api = rotation.VaultAPI.__new__(rotation.VaultAPI)
-        def request(method, path, data=None, token=None):
-            if path.endswith("/destroy"):
-                raise rotation.VaultHTTPError(400, path)
-            return {"data": {"secret_id_accessor": "old-accessor"}}
-        api.request = request
-        with self.assertRaisesRegex(rotation.RotationError, "not confirmed"):
-            api.destroy_if_present(self.role, "old-accessor")
+        for status in (400, 500):
+            with self.subTest(status=status):
+                api = rotation.VaultAPI.__new__(rotation.VaultAPI)
+
+                def request(method, path, data=None, token=None):
+                    if path.endswith("/destroy"):
+                        raise rotation.VaultHTTPError(status, path)
+                    if path.endswith("?list=true"):
+                        return {"data": {"keys": ["old-accessor"]}}
+                    raise AssertionError("Unexpected Vault request")
+
+                api.request = request
+                with self.assertRaisesRegex(
+                    rotation.RotationError, "not confirmed"
+                ):
+                    api.destroy_if_present(self.role, "old-accessor")
 
     def test_empty_lookup_raises_missing_secret_error(self):
         api = rotation.VaultAPI.__new__(rotation.VaultAPI)

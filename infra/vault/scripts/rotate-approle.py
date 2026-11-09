@@ -143,20 +143,24 @@ class VaultAPI:
             self.destroy(role, accessor)
             return
         except VaultHTTPError as exc:
-            if exc.status not in (400, 404):
+            # A failed destroy is not proof of revocation.
+            # Vault may return HTTP 500 for an already absent accessor.
+            # Authorization errors and other failures must fail closed.
+            if exc.status not in (400, 404, 500):
                 raise
-        # An interruption after successful revocation can leave the journal.
-        # Confirm the credential really no longer exists before retry succeeds.
-        try:
-            self.request(
-                "POST", f"auth/approle/role/{role}/secret-id-accessor/lookup",
-                {"secret_id_accessor": accessor},
+
+        # Independently inspect the live accessor list.
+        # list_accessors verifies that the role still exists on HTTP 404.
+        # Network errors, authorization failures and Vault errors propagate.
+        active_accessors = self.list_accessors(role)
+
+        if accessor in active_accessors:
+            raise RotationError(
+                "SecretID revocation was not confirmed"
             )
-        except VaultHTTPError as exc:
-            if exc.status in (400, 404):
-                return
-            raise
-        raise RotationError("SecretID revocation was not confirmed")
+
+        # The old accessor is absent from a successfully verified list.
+        # The operation can safely continue after interruption.
 
     def verify(self, role, role_id, secret):
         expected_policy, paths = ROLE_PATHS[role]
