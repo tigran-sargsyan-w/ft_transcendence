@@ -147,6 +147,11 @@ jobs:
           python3 -m py_compile infra/vault/scripts/check-readiness.py infra/vault/scripts/test_check_readiness.py
           python3 -m unittest discover -s infra/vault/scripts -p 'test_check_readiness.py' -v
 
+      - name: Test development Vault unseal helper offline
+        run: |
+          python3 -m py_compile infra/vault/scripts/dev-unseal.py infra/vault/scripts/dev_unseal_workflow.py
+          python3 -m unittest discover -s infra/vault/scripts -p 'test_dev_unseal*.py' -v
+
       - name: Validate Vault application Compose
         run: docker compose --profile "*" -f compose.yml -f compose.vault.yml config --quiet
 
