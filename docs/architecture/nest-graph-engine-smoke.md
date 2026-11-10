@@ -69,3 +69,17 @@ curl -sS -b /tmp/iip-smoke.cookies \
 
 Expect `200` with `data.results.blastRadius` (`seedNodeIds`, `affectedNodeIds`, …). The seed itself should appear in `affectedNodeIds` at depth 0.  
 If the seed id is wrong: `VALIDATION_ERROR` on `seedNodeIds`. Re-check ids from `critical_nodes` or the topology snapshot.
+
+## Analyses: `attack_paths`
+
+Needs `seedNodeIds`. Today the engine walks **forward** on `depends_on` only, so seed a service that depends on something (example: backend → postgres). `ext:internet` alone will not walk `exposes` yet.
+
+```bash
+curl -sS -b /tmp/iip-smoke.cookies \
+  -X POST http://127.0.0.1:3000/api/v1/environments/env_local_compose/analyses \
+  -H 'Content-Type: application/json' \
+  -d '{"analyses":["attack_paths"],"seedNodeIds":["svc:ft_transcendence:backend"]}'
+```
+
+Expect `200` with `data.results.attackPaths` (paths with `nodeIds` / edge ids as in the contract).  
+Empty `paths` can still be a valid answer if the seed has no outbound `depends_on`; that is not the same as an engine failure.
