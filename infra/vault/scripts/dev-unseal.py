@@ -2,6 +2,7 @@
 """Development-only host-assisted Vault unseal tooling (issue #107)."""
 
 import argparse
+import getpass
 import shlex
 import shutil
 import subprocess
@@ -171,6 +172,171 @@ def doctor(tls_dir):
     return 1 if failures else 0
 
 
+
+def setup_keyring():
+    """Create or unlock a persistent GNOME login Keyring."""
+    if sys.platform != "linux":
+        print("FAIL: Linux environment required")
+        return 1
+
+    for dependency in ("busctl", "gnome-keyring-daemon", "secret-tool"):
+        if shutil.which(dependency) is None:
+            print(f"FAIL: Missing dependency: {dependency}")
+            return 1
+
+    owner = probe([
+        "busctl", "--user", "status", "org.freedesktop.secrets",
+    ])
+
+    if not successful(owner) or "gnome-keyring-daemon" not in owner.stdout:
+        print("FAIL: GNOME Keyring Secret Service provider not confirmed")
+        return 1
+
+    def keyring_state():
+        alias = probe([
+            "busctl", "--user", "call",
+            "org.freedesktop.secrets",
+            "/org/freedesktop/secrets",
+            "org.freedesktop.Secret.Service",
+            "ReadAlias", "s", "default",
+        ])
+
+        if not successful(alias):
+            return None, None
+
+        try:
+            parts = shlex.split(alias.stdout.strip())
+        except ValueError:
+            return None, None
+
+        if len(parts) != 2 or parts[0] != "o":
+            return None, None
+
+        collection = parts[1]
+
+        if collection == "/" or collection.endswith("/session"):
+            return collection, None
+
+        if collection != "/org/freedesktop/secrets/collection/login":
+            return collection, None
+
+        status = probe([
+            "busctl", "--user", "get-property",
+            "org.freedesktop.secrets",
+            collection,
+            "org.freedesktop.Secret.Collection",
+            "Locked",
+        ])
+
+        if not successful(status):
+            return collection, None
+
+        value = status.stdout.strip()
+
+        if value == "b false":
+            return collection, False
+        if value == "b true":
+            return collection, True
+
+        return collection, None
+
+    collection, locked = keyring_state()
+    login = "/org/freedesktop/secrets/collection/login"
+
+    if collection is None:
+        print("FAIL: Cannot inspect Secret Service")
+        return 1
+
+    if collection == login and locked is False:
+        print("PASS: Persistent login Keyring is already unlocked")
+        return 0
+
+    if collection not in ("/", "/org/freedesktop/secrets/collection/session", login):
+        print("FAIL: Unexpected default collection; refusing to replace it")
+        return 1
+
+    creating = collection != login
+
+    if creating:
+        print("INFO: Persistent login Keyring needs to be created")
+    elif locked is True:
+        print("INFO: Persistent login Keyring is locked")
+    else:
+        print("FAIL: Cannot determine login Keyring lock status")
+        return 1
+
+    print(
+        "WARNING: Unlocking will replace the GNOME Keyring daemon "
+        "and may interrupt other applications using it."
+    )
+
+    if input("Continue? [y/N]: ").strip().lower() not in ("y", "yes"):
+        print("INFO: Setup cancelled")
+        return 1
+
+    password = getpass.getpass("Keyring password: ")
+
+    if not password:
+        print("FAIL: Empty Keyring password is not allowed")
+        return 1
+
+    if creating:
+        confirmation = getpass.getpass("Confirm Keyring password: ")
+        if password != confirmation:
+            print("FAIL: Passwords do not match")
+            return 1
+        del confirmation
+
+    try:
+        result = subprocess.run(
+            [
+                "gnome-keyring-daemon",
+                "--daemonize",
+                "--replace",
+                "--unlock",
+                "--components=secrets",
+            ],
+            input=password,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        print("FAIL: Keyring operation failed")
+        return 1
+    finally:
+        del password
+
+    if result.returncode != 0:
+        print("FAIL: GNOME Keyring could not be initialized")
+        return 1
+
+    collection, locked = keyring_state()
+
+    if collection != login or locked is not False:
+        print("FAIL: Persistent login Keyring is not unlocked")
+        return 1
+
+    keyring_dir = Path.home() / ".local/share/keyrings"
+    keyring_file = keyring_dir / "login.keyring"
+
+    if (
+        not keyring_dir.is_dir()
+        or keyring_dir.is_symlink()
+        or not keyring_file.is_file()
+        or keyring_file.is_symlink()
+        or keyring_dir.stat().st_mode & 0o077
+        or keyring_file.stat().st_mode & 0o077
+    ):
+        print("FAIL: Persistent Keyring files have unsafe permissions")
+        return 1
+
+    print("PASS: Persistent login Keyring is configured and unlocked")
+    print("INFO: No Vault secrets were stored or modified")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -188,10 +354,18 @@ def main(argv=None):
         help="Read-only host readiness checks",
     )
 
+    commands.add_parser(
+        "setup",
+        help="Prepare persistent GNOME Keyring (no Vault shares yet)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
         return doctor(args.tls_dir)
+
+    if args.command == "setup":
+        return setup_keyring()
 
     return 2
 
