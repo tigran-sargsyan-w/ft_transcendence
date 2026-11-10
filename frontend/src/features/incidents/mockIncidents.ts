@@ -2,6 +2,21 @@ import type { IncidentSummary } from "./type";
 
 export const mockIncidents: IncidentSummary[] = [
   {
+    id: "inc-0043",
+    title: "Payment service returning 500 errors",
+    severity: "sev1",
+    status: "open",
+    environmentId: "env-prod",
+    startedAt: "2026-11-09T10:05:00Z",
+    resolvedAt: null,
+    commander: {
+      id: "usr-001",
+      displayName: "Nathan",
+      avatarUrl: null,
+    },
+    seedNodeIds: ["node-payment", "node-postgres"],
+  },
+  {
     id: "inc-0042",
     title: "PostgreSQL primary unreachable",
     severity: "sev1",

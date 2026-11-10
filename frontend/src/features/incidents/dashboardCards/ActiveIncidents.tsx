@@ -3,16 +3,19 @@ import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
-  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { mockIncidents } from "../mockIncidents";
 import { formatElapsedSince } from "../utils";
+import type { IncidentSummary } from "../type";
 
-export const ActiveIncidents = () => {
+interface ActiveIncidentsProps {
+  incidents: IncidentSummary[];
+}
+
+export const ActiveIncidents = ({ incidents }: ActiveIncidentsProps) => {
   return (
     <MainCard
       title="Active incidents"
@@ -30,7 +33,7 @@ export const ActiveIncidents = () => {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {mockIncidents.map((i) => (
+          {incidents.map((i) => (
             <TableRow key={i.id}>
               <TableCell>
                 <Badge variant={i.severity}>{i.severity.toUpperCase()}</Badge>
