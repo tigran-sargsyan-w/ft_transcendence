@@ -40,4 +40,18 @@ curl -sS -c /tmp/iip-smoke.cookies -X POST http://127.0.0.1:3000/api/v1/auth/log
 curl -sS -b /tmp/iip-smoke.cookies http://127.0.0.1:3000/api/v1/auth/me
 ```
 
-`/auth/me` should return the user. If login succeeds but `/auth/me` is `401`, the cookie was not sent — almost always `COOKIE_SECURE`.
+`/auth/me` should return the user. If login succeeds but `/auth/me` is `401`, the cookie was not sent — almost always `COOKIE_SECURE` (browsers are stricter than `curl -b`).
+
+## Analyses: `critical_nodes`
+
+No seeds. Needs a live topology for `env_local_compose`.
+
+```bash
+curl -sS -b /tmp/iip-smoke.cookies \
+  -X POST http://127.0.0.1:3000/api/v1/environments/env_local_compose/analyses \
+  -H 'Content-Type: application/json' \
+  -d '{"analyses":["critical_nodes"]}'
+```
+
+Expect `200` with `data.results.criticalNodes`, plus `topologyRevision` and `freshness` (`current` / `stale` / `unverifiable`).  
+If you get `TOPOLOGY_*` / empty topology errors, the collector path is not ready (Nest/Nathan side, not Graph Engine).
