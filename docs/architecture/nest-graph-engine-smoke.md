@@ -22,3 +22,22 @@ curl -sS http://127.0.0.1:3000/api/v1/health
 ```
 
 Both should return a success envelope (not connection refused). If Nest health fails, check `postgres` and backend logs before going further.
+
+## Session (required for analyses)
+
+Analyses need a session cookie (`sid`). Against plain `http://127.0.0.1:3000`, set `COOKIE_SECURE=false` on the backend (Compose does not pass it today; default is secure-only).
+
+```bash
+# once per machine / when the user does not exist yet
+curl -sS -X POST http://127.0.0.1:3000/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"smoke@example.com","password":"smokepass1"}'
+
+curl -sS -c /tmp/iip-smoke.cookies -X POST http://127.0.0.1:3000/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"smoke@example.com","password":"smokepass1"}'
+
+curl -sS -b /tmp/iip-smoke.cookies http://127.0.0.1:3000/api/v1/auth/me
+```
+
+`/auth/me` should return the user. If login succeeds but `/auth/me` is `401`, the cookie was not sent — almost always `COOKIE_SECURE`.
