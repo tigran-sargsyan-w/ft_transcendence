@@ -55,3 +55,17 @@ curl -sS -b /tmp/iip-smoke.cookies \
 
 Expect `200` with `data.results.criticalNodes`, plus `topologyRevision` and `freshness` (`current` / `stale` / `unverifiable`).  
 If you get `TOPOLOGY_*` / empty topology errors, the collector path is not ready (Nest/Nathan side, not Graph Engine).
+
+## Analyses: `blast_radius`
+
+Needs `seedNodeIds` that exist in the live topology. Pick one from the previous `critical_nodes` list (example below uses postgres from a local Compose run).
+
+```bash
+curl -sS -b /tmp/iip-smoke.cookies \
+  -X POST http://127.0.0.1:3000/api/v1/environments/env_local_compose/analyses \
+  -H 'Content-Type: application/json' \
+  -d '{"analyses":["blast_radius"],"seedNodeIds":["svc:ft_transcendence:postgres"]}'
+```
+
+Expect `200` with `data.results.blastRadius` (`seedNodeIds`, `affectedNodeIds`, …). The seed itself should appear in `affectedNodeIds` at depth 0.  
+If the seed id is wrong: `VALIDATION_ERROR` on `seedNodeIds`. Re-check ids from `critical_nodes` or the topology snapshot.
