@@ -101,11 +101,11 @@ python3 "$HELPER" forget
 
 Type `FORGET` to confirm deletion. Verify removal through a safe metadata/lookup check that does **not** print contents; if Keyring access fails, investigate before claiming removal succeeded. Deleting the enrollment does not seal Vault or erase Raft data. Preserve manual recovery shares until Vault is deliberately decommissioned.
 
-## WSL2 full-restart acceptance test (not yet executed)
+## WSL2 full-restart acceptance test (passed 2026-11-10)
 
 **Before testing:** confirm independent manual recovery shares, an authorized downtime window, current working stack, and exact Docker/WSL ownership. `wsl --shutdown` (issued from Windows) stops **all** WSL distributions and may affect Docker Desktop and unrelated workloads. **Do not run it as part of this helper or without inspecting other workloads first.**
 
-Planned procedure, with an operator supervising each transition:
+Repeatable procedure, validated on 2026-11-10 with `wsl --terminate Ubuntu`:
 
 1. Record current WSL distribution name, Docker context, container names/IDs, Raft volume, health and encrypted backup existence. Do not dump credentials, environment variables or keyring items.
 2. Cleanly stop the eight application containers and original Vault container; preserve containers and volumes. Confirm expected state.
@@ -123,4 +123,5 @@ Planned procedure, with an operator supervising each transition:
 - A controlled restart of the original Vault container left it initialized/sealed; the helper unsealed it through verified HTTPS using Keyring shares; Vault became active and unsealed.
 - All eight original application containers were restarted without recreation. The nine-container stack recovered; checked Docker health, HTTPS frontend, Backend API, PostgreSQL, eight protected volumes and the pre-existing encrypted #106 backup all passed.
 - Repeated `unseal` was verified to avoid Keyring access. Simulated locked Keyring, partial progress, wrong threshold and uninitialized-Vault paths all stopped safely.
-- **Not yet tested:** a full WSL2 shutdown/reopen and its effect on the GNOME Keyring session; no claim of unattended auto-unseal.
+- **WSL2 cold-start passed:** Ubuntu was terminated and restarted; Docker Engine and containerd recovered through systemd. All ten original containers and eight protected volumes survived. Secret Service required D-Bus activation, followed by interactive unlock of the existing GNOME login Keyring. The original Vault restarted sealed (2-of-3), was unsealed through the helper, and returned active. All ten containers were recovered. Frontend HTTPS, Backend API, PostgreSQL health, Collector snapshot and Engine.IO WebSocket handshake passed. This remains operator-assisted, not unattended Auto Unseal.
+- **Deletion validation:** `forget` is covered by mocked unit tests. Real Keyring entry deletion was intentionally not performed, to preserve the working enrollment.
