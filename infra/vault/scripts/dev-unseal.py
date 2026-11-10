@@ -359,6 +359,19 @@ def main(argv=None):
         help="Prepare persistent GNOME Keyring (no Vault shares yet)",
     )
 
+    commands.add_parser(
+        "enroll",
+        help="Opt in: store two dev-only Shamir shares in GNOME login Keyring",
+    )
+    commands.add_parser(
+        "unseal",
+        help="Unseal existing dev Vault through an ephemeral TLS client",
+    )
+    commands.add_parser(
+        "forget",
+        help="Remove host-enrolled development Vault shares from Keyring",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
@@ -366,6 +379,10 @@ def main(argv=None):
 
     if args.command == "setup":
         return setup_keyring()
+
+    if args.command in ("enroll", "unseal", "forget"):
+        from dev_unseal_workflow import run_command
+        return run_command(args.command, args.tls_dir)
 
     return 2
 
