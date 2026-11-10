@@ -83,3 +83,12 @@ curl -sS -b /tmp/iip-smoke.cookies \
 
 Expect `200` with `data.results.attackPaths` (paths with `nodeIds` / edge ids as in the contract).  
 Empty `paths` can still be a valid answer if the seed has no outbound `depends_on`; that is not the same as an engine failure.
+
+## Status / known limits
+
+Verified on a local Compose stack : health → session → `critical_nodes` / `blast_radius` / `attack_paths` with `freshness: current`.
+
+- Seed node ids change with the Compose project name. Copy them from `critical_nodes` (or the topology), do not hard-code foreign examples.
+- `COOKIE_SECURE`: browsers on plain HTTP may drop `sid`, `curl -b` often still works.
+- `attack_paths` / `blast_radius` traversal is still `depends_on`-centric, seeding `ext:internet` does not walk `exposes` yet.
+- This doc is a manual smoke, not a CI `docker compose up` job.
