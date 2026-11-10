@@ -1,5 +1,3 @@
-import { Card, CardContent } from "./ui/card";
-
 export const WelcomeDashboardBanner = () => {
   return (
     <header className="flex flex-col gap-2">

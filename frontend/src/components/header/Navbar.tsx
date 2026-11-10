@@ -10,8 +10,7 @@ import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { label: "Dashboard", to: "/dashboard" },
-  { label: "Topology", to: "/infra" },
-  { label: "Security Risk Map", to: "/riskmap" },
+  { label: "Topology", to: "/topology" },
   { label: "Incidents", to: "/incidents" },
 ] as const;
 

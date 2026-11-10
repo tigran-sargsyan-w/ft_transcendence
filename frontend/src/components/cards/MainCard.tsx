@@ -12,6 +12,7 @@ interface MainCardProps {
   title: string;
   linkLabel?: string;
   linkTarget?: string;
+  className?: string;
   children: ReactNode;
 }
 
@@ -19,10 +20,11 @@ export const MainCard = ({
   title,
   linkLabel,
   linkTarget,
+  className = "",
   children,
 }: MainCardProps) => {
   return (
-    <Card>
+    <Card className={className}>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         {linkTarget && (

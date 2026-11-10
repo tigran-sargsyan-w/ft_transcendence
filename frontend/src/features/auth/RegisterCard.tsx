@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router";
-import { RegisterError, registerUser } from "./auth";
+import { registerUser } from "./auth";
+import { ApiError } from "@/services/api";
 import { Input } from "@/components/ui/input";
 import {
   Card,
@@ -14,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
+import type { SubmitEvent } from "react";
 
 type FormStatus = "idle" | "submitting" | "success";
 type RegisterCardProps = { onSwitch: () => void };
@@ -29,7 +31,7 @@ export function RegisterCard({ onSwitch }: RegisterCardProps) {
   const [error, setError] = useState<string | null>(null);
   const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
 
@@ -64,7 +66,7 @@ export function RegisterCard({ onSwitch }: RegisterCardProps) {
     } catch (err) {
       setStatus("idle");
 
-      if (err instanceof RegisterError) {
+      if (err instanceof ApiError) {
         setError(err.message);
         return;
       }
@@ -99,7 +101,7 @@ export function RegisterCard({ onSwitch }: RegisterCardProps) {
   const isSubmitting = status === "submitting";
 
   return (
-    <form noValidate className="w-full max-w-100">
+    <form onSubmit={handleSubmit} noValidate className="w-full max-w-100">
       <Card>
         <CardHeader>
           <CardTitle>Sign up</CardTitle>

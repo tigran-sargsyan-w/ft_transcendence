@@ -10,7 +10,7 @@ import { ServicesImpacted } from "@/features/topology/dashboardCards/ServicesImp
 import { mockIncidents } from "@/features/incidents/mockIncidents";
 import { WelcomeDashboardBanner } from "@/components/WelcomeDashboardBanner";
 
-export function Dashboard() {
+export default function Dashboard() {
   return (
     <div className="flex flex-col gap-4 w-screen p-4">
       <WelcomeDashboardBanner />
