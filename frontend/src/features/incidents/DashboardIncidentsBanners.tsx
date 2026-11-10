@@ -1,11 +1,13 @@
 import { IncidentBanner } from "./components/IncidentBanner";
 import type { IncidentSummary } from "./type";
 
-interface DashboardBannerProps {
+interface DashboardIncidentsBannersProps {
   incidents: IncidentSummary[];
 }
 
-export const DashboardBanner = ({ incidents }: DashboardBannerProps) => {
+export const DashboardIncidentsBanners = ({
+  incidents,
+}: DashboardIncidentsBannersProps) => {
   return (
     <div className="flex flex-col gap-2">
       {incidents

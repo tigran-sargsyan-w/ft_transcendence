@@ -1,5 +1,5 @@
 import { TeamCard } from "@/components/cards/TeamCard";
-import { DashboardBanner } from "@/features/incidents/DashboardBanner";
+import { DashboardIncidentsBanners } from "@/features/incidents/DashboardIncidentsBanners";
 import { ActiveIncidents } from "@/features/incidents/dashboardCards/ActiveIncidents";
 import { OpenIncidents } from "@/features/incidents/dashboardCards/OpenIncidents";
 import { ResolvedIncidents } from "@/features/incidents/dashboardCards/ResolvedIncidents";
@@ -8,11 +8,13 @@ import { ServicesDown } from "@/features/topology/dashboardCards/ServicesDown";
 import { ServicesHealth } from "@/features/topology/dashboardCards/ServicesHealth";
 import { ServicesImpacted } from "@/features/topology/dashboardCards/ServicesImpacted";
 import { mockIncidents } from "@/features/incidents/mockIncidents";
+import { WelcomeDashboardBanner } from "@/components/WelcomeDashboardBanner";
 
-export default function Dashboard() {
+export function Dashboard() {
   return (
     <div className="flex flex-col gap-4 w-screen p-4">
-      <DashboardBanner incidents={mockIncidents} />
+      <WelcomeDashboardBanner />
+      <DashboardIncidentsBanners incidents={mockIncidents} />
       <div className="flex gap-4">
         <OpenIncidents /> <ServicesDown /> <ServicesImpacted />{" "}
         <ResolvedIncidents />
