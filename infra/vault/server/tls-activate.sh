@@ -4,18 +4,20 @@ umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-TLS_DIR="$SCRIPT_DIR/tls"
+TLS_DIR="${FT_DEV_TLS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/transcendence/dev/tls}"
+export FT_DEV_TLS_DIR="$TLS_DIR"
 CA_CERT="$TLS_DIR/ca.crt"
 
 COMPOSE=(
   docker compose
+  -p transcendence-vault-dev
   -f "$SCRIPT_DIR/compose.yml"
 )
 
 APP_COMPOSE=(
   docker compose
+  -p transcendence-app-dev
   -f "$REPO_ROOT/compose.yml"
-  -f "$REPO_ROOT/compose.vault.yml"
 )
 
 MODE="${1:-}"

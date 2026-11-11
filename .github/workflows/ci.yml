@@ -103,8 +103,8 @@ jobs:
     name: Docker Compose / validate
     runs-on: ubuntu-latest
     env:
+      FT_DEV_TLS_DIR: /tmp/transcendence-ci-tls
       POSTGRES_USER: transcendence_ci
-      POSTGRES_PASSWORD: placeholder_for_ci_only
       POSTGRES_DB: transcendence_ci
     steps:
       - uses: actions/checkout@v4
@@ -117,6 +117,7 @@ jobs:
     name: Vault infrastructure / static validation
     runs-on: ubuntu-latest
     env:
+      FT_DEV_TLS_DIR: /tmp/transcendence-ci-tls
       POSTGRES_USER: transcendence_ci
       POSTGRES_PASSWORD: placeholder_for_ci_only
       POSTGRES_DB: transcendence_ci
@@ -153,7 +154,7 @@ jobs:
           python3 -m unittest discover -s infra/vault/scripts -p 'test_dev_unseal*.py' -v
 
       - name: Validate Vault application Compose
-        run: docker compose --profile "*" -f compose.yml -f compose.vault.yml config --quiet
+        run: docker compose --profile "*" -f compose.yml config --quiet
 
       - name: Validate Vault server Compose
         run: docker compose --profile "*" -f infra/vault/server/compose.yml config --quiet
