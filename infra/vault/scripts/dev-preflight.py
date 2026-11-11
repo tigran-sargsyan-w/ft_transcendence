@@ -88,6 +88,7 @@ class Preflight:
         self.tls = self.state / "tls"
         self.network = VAULT_PROJECT + "_vault_private"
         self.containers = {}
+        self.legacy = False
 
     def ok(self, description):
         print("PASS: " + description)
@@ -99,10 +100,6 @@ class Preflight:
         require(self.state.is_absolute() and self.state.resolve() != self.root
                 and self.root not in self.state.resolve().parents,
                 "Runtime state must be outside the repository")
-        for name in ("app.override.yml", "vault.override.yml"):
-            path = self.state / name
-            require(path.is_file() and not path.is_symlink(),
-                    "Expected existing operator override is missing or unsafe: " + name)
         for name in ("ca.crt", "vault.crt", "vault.key"):
             path = self.tls / name
             require(path.is_file() and not path.is_symlink() and path.stat().st_size > 0,
@@ -123,12 +120,14 @@ class Preflight:
         return data[0]
 
     def docker_identity(self):
-        original = {
-            "vault": [self.root / "infra/vault/server/compose.yml",
-                      self.state / "vault.override.yml"],
-            "app": [self.root / "compose.yml", self.root / "compose.vault.yml",
-                    self.state / "app.override.yml"],
-        }
+        # Only exact known container origins are allowed during the cutover.
+        # Historical labels do not authorize recreating those containers.
+        vault_file = self.root / "infra/vault/server/compose.yml"
+        app_file = self.root / "compose.yml"
+        old_app = [app_file, self.root / "compose.vault.yml",
+                   self.state / "app.override.yml"]
+        full_stack = {"nginx", "frontend", "collector",
+                      "docker-proxy", "graph-engine"}
         for kind, project, services in (
             ("vault", VAULT_PROJECT, ("vault",)),
             ("app", APP_PROJECT, APP_SERVICES),
@@ -140,10 +139,23 @@ class Preflight:
                 require(labels.get("com.docker.compose.project") == project
                         and labels.get("com.docker.compose.service") == service,
                         "Unexpected Docker Compose owner: " + name)
-                config_files = labels.get("com.docker.compose.project.config_files", "")
-                expected = [str(p) for p in original[kind]]
-                require(config_files.split(",") == expected,
-                        "Existing Compose file provenance differs: " + name)
+                actual = labels.get("com.docker.compose.project.config_files", "").split(",")
+                target = [str(vault_file if kind == "vault" else app_file)]
+                if kind == "vault":
+                    legacy = [vault_file, self.state / "vault.override.yml"]
+                else:
+                    legacy = list(old_app)
+                    if service in full_stack:
+                        legacy.append(self.state / "full-stack.override.yml")
+                if actual == [str(path) for path in legacy]:
+                    for path in legacy:
+                        if self.state in path.parents:
+                            require(path.is_file() and not path.is_symlink(),
+                                    "Historical override missing or unsafe")
+                    self.legacy = True
+                else:
+                    require(actual == target,
+                            "Existing Compose file provenance differs: " + name)
                 working_dir = (self.root / "infra/vault/server"
                                if kind == "vault" else self.root)
                 require(labels.get("com.docker.compose.project.working_dir")
@@ -199,15 +211,11 @@ class Preflight:
         self.ok("Existing Vault and Agent TLS mounts")
 
     def compose_model(self, files, project):
-        # The empty value is ONLY for interpolation of legacy base Compose YAML.
-        # The merged Vault-mode model must remove the bootstrap password entirely.
         allowed = ("PATH", "HOME", "USER", "LANG", "DOCKER_HOST",
                    "DOCKER_CONTEXT", "DOCKER_CONFIG", "XDG_RUNTIME_DIR")
         env = {k: v for k, v in os.environ.items() if k in allowed}
         env.update({"FT_DEV_TLS_DIR": str(self.tls),
-                    "FT_DEV_VAULT_PROJECT": VAULT_PROJECT,
-                    "POSTGRES_USER": "transcendence", "POSTGRES_DB": "transcendence",
-                    "POSTGRES_PASSWORD": ""})
+                    "POSTGRES_USER": "transcendence", "POSTGRES_DB": "transcendence"})
         command = ["docker", "compose", "--env-file", "/dev/null", "-p", project]
         for item in files:
             command += ["-f", str(item)]
@@ -217,13 +225,10 @@ class Preflight:
         return data
 
     def target_models(self):
-        app = self.compose_model((self.root / "compose.yml",
-                                  self.root / "compose.vault.yml",
-                                  self.root / "infra/vault/runtime/app.override.yml"),
-                                 APP_PROJECT)
-        vault = self.compose_model((self.root / "infra/vault/server/compose.yml",
-                                    self.root / "infra/vault/runtime/vault.override.yml"),
-                                   VAULT_PROJECT)
+        app = self.compose_model((self.root / "compose.yml",), APP_PROJECT)
+        vault = self.compose_model(
+            (self.root / "infra/vault/server/compose.yml",), VAULT_PROJECT
+        )
         services = app.get("services", {})
         for name in APP_SERVICES:
             require(name in services and not services[name].get("profiles"),
@@ -316,6 +321,8 @@ class Preflight:
         self.volumes_and_network()
         self.tls_mounts()
         self.target_models()
+        if self.legacy:
+            print("INFO: Legacy containers detected; unified cutover still required")
         print("RESULT: PREFLIGHT PASSED (read-only; runtime cutover not approved)")
 
 

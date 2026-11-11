@@ -24,6 +24,7 @@ class PreflightTests(unittest.TestCase):
         self.state = self.base / "state"
         self.state.mkdir()
         (self.state / "tls").mkdir()
+        (self.state / "full-stack.override.yml").write_text("services: {}\\n")
         for name in ("app.override.yml", "vault.override.yml"):
             (self.state / name).write_text("services: {}\n")
         for name in ("ca.crt", "vault.crt", "vault.key"):
@@ -49,13 +50,18 @@ class PreflightTests(unittest.TestCase):
                  self.state / "app.override.yml"]
             )
             for service in services:
+                service_files = list(files)
+                if kind == "app" and service in (
+                    "nginx", "frontend", "collector", "docker-proxy", "graph-engine"
+                ):
+                    service_files.append(self.state / "full-stack.override.yml")
                 name = project + "-" + service + "-1"
                 self.containers[name] = {
                     "Config": {"Labels": {
                         "com.docker.compose.project": project,
                         "com.docker.compose.service": service,
                         "com.docker.compose.project.config_files":
-                            ",".join(str(p) for p in files),
+                            ",".join(str(p) for p in service_files),
                         "com.docker.compose.project.working_dir":
                             str(self.root / "infra/vault/server") if kind == "vault"
                             else str(self.root),
@@ -166,8 +172,8 @@ class PreflightTests(unittest.TestCase):
                 "com.docker.compose.project": preflight.VAULT_PROJECT,
             }}]
         if command[:2] == ["docker", "compose"]:
-            self.assertEqual(env["POSTGRES_PASSWORD"], "")
-            self.assertEqual(env["FT_DEV_VAULT_PROJECT"], preflight.VAULT_PROJECT)
+            self.assertNotIn("POSTGRES_PASSWORD", env)
+            self.assertEqual(env["FT_DEV_TLS_DIR"], str(self.state / "tls"))
             self.assertIn("--env-file", command)
             return deepcopy(self.app_model if preflight.APP_PROJECT in command
                             else self.vault_model)
@@ -215,6 +221,32 @@ class PreflightTests(unittest.TestCase):
         pg = self.containers[preflight.APP_PROJECT + "-postgres-1"]
         pg["Mounts"][0]["Name"] = "new_postgres_data"
         with self.assertRaisesRegex(preflight.PreflightError, "PostgreSQL"):
+            self.run_preflight()
+
+    def test_new_single_file_provenance_passes(self):
+        for name, container in self.containers.items():
+            project = (preflight.VAULT_PROJECT
+                       if name.startswith(preflight.VAULT_PROJECT + "-")
+                       else preflight.APP_PROJECT)
+            compose = (self.root / "infra/vault/server/compose.yml"
+                       if project == preflight.VAULT_PROJECT
+                       else self.root / "compose.yml")
+            container["Config"]["Labels"]["com.docker.compose.project.config_files"] = str(compose)
+        self.run_preflight()
+        self.assertFalse(self.pre.legacy)
+
+    def test_unexpected_full_stack_override_rejected(self):
+        frontend = self.containers[preflight.APP_PROJECT + "-frontend-1"]
+        key = "com.docker.compose.project.config_files"
+        frontend["Config"]["Labels"][key] += ",/tmp/untrusted.yml"
+        with self.assertRaisesRegex(preflight.PreflightError, "provenance"):
+            self.run_preflight()
+
+    def test_symlinked_legacy_full_stack_rejected(self):
+        file = self.state / "full-stack.override.yml"
+        file.unlink()
+        file.symlink_to(self.state / "app.override.yml")
+        with self.assertRaisesRegex(preflight.PreflightError, "override"):
             self.run_preflight()
 
     def test_wrong_tls_mount_fails(self):
