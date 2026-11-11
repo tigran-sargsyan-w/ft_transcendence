@@ -1,0 +1,78 @@
+# Vault-backed development runtime. Never use Clean-Room profiles here.
+# The preflight supplies FT_DEV_TLS_DIR and FT_DEV_VAULT_PROJECT locally.
+services:
+  # Only Nginx is the public entry point; internal services stay private.
+  backend:
+    ports: !reset []
+  frontend:
+    ports: !reset []
+  collector:
+    ports: !reset []
+  graph-engine:
+    ports: !reset []
+  docker-proxy:
+    ports: !reset []
+
+  # An existing PostgreSQL cluster does not need its bootstrap password again.
+  # First-time cluster creation is a separate, operator-approved workflow.
+  postgres:
+    environment:
+      POSTGRES_USER: transcendence
+      POSTGRES_DB: transcendence
+      POSTGRES_PASSWORD: !reset null
+
+  vault-backend-agent:
+    volumes:
+      - type: bind
+        source: ${FT_DEV_TLS_DIR:?}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+  vault-migrator-agent:
+    volumes:
+      - type: bind
+        source: ${FT_DEV_TLS_DIR:?}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+  vault-migrator-provision:
+    volumes:
+      - type: bind
+        source: ${FT_DEV_TLS_DIR:?}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+  vault-migrator-rotate:
+    volumes:
+      - type: bind
+        source: ${FT_DEV_TLS_DIR:?}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+  vault-postgres-provisioner-agent:
+    volumes:
+      - type: bind
+        source: ${FT_DEV_TLS_DIR:?}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+  vault-postgres-provisioner-provision:
+    volumes:
+      - type: bind
+        source: ${FT_DEV_TLS_DIR:?}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+  vault-postgres-provisioner-rotate:
+    volumes:
+      - type: bind
+        source: ${FT_DEV_TLS_DIR:?}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+
+volumes:
+  backend_vault_auth:
+    external: true
+    name: ${FT_DEV_VAULT_PROJECT:?}_backend_agent_auth
+  backend_vault_rendered:
+    external: true
+    name: ${FT_DEV_VAULT_PROJECT:?}_backend_rendered
+
+networks:
+  vault_private:
+    external: true
+    name: ${FT_DEV_VAULT_PROJECT:?}_vault_private
