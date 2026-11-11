@@ -37,16 +37,26 @@ if [[ "$FT_APP_COMPOSE_PROJECT" == "transcendence-app-dev" ]]; then
     fi
   done
 
+  containers="$(docker ps -aq --filter \
+    "label=com.docker.compose.project=transcendence-app-dev")" || return 1
+
+  if [[ -z "$containers" ]]; then
+    echo "ERROR: existing application containers missing; startup refused" >&2
+    return 1
+  fi
+
   while IFS= read -r container; do
     [[ -n "$container" ]] || continue
-    provenance="$(docker inspect --format       '{{index .Config.Labels "com.docker.compose.project.config_files"}}'       "$container")" || return 1
+    provenance="$(docker inspect --format \
+      '{{index .Config.Labels "com.docker.compose.project.config_files"}}' \
+      "$container")" || return 1
 
     if [[ "$provenance" != "$ROOT_DIR/compose.yml" ]]; then
       echo "ERROR: legacy application container detected; unified cutover not completed" >&2
       echo "Use the existing containers without Compose recreation until #115 cutover." >&2
       return 1
     fi
-  done < <(docker ps -aq --filter     "label=com.docker.compose.project=transcendence-app-dev")
+  done <<< "$containers"
 elif [[ "$FT_APP_COMPOSE_PROJECT" != ft-cr-* ]]; then
   echo "ERROR: unexpected application project" >&2
   return 1
