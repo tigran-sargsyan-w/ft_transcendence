@@ -1,49 +1,76 @@
-# Issue #115 — development runtime profile (phase 1)
+# Issue #115 — unified Vault-only development Compose (stages A/B)
 
-`./scripts/dev-start.sh --check` is **read-only**. It inspects the existing
-WSL2 development installation and validates the proposed Docker Compose
-model without running `up`, recreating containers or changing volumes.
-Routine startup is deliberately **not implemented** in this phase.
+**Status:** YAML consolidation completed; **live cutover not performed**.
+Do not use `docker compose up` against the current legacy containers until the
+preflight/transition phase has been explicitly reviewed and approved. Existing
+Vault Raft, PostgreSQL and AppRole volumes must not be recreated.
 
-The known local installation uses:
+## Target layout
 
-- Vault project: `transcendence-vault-dev` (existing Raft volume).
-- Application project: `transcendence-app-dev` (existing PostgreSQL volume).
-- TLS and local operator overrides: `$XDG_STATE_HOME/transcendence/dev/`, or
-  `$HOME/.local/state/transcendence/dev/` when `XDG_STATE_HOME` is unset.
-- Existing local `vault.override.yml` and `app.override.yml` are used **only to
-  verify container provenance**, not as the proposed runtime overlays.
-- The tracked files in this directory define the future normal application
-  model. The Clean-Room harness stays isolated and unchanged.
+The normal development configuration has exactly two Compose files:
 
-The checker validates Docker labels and original Compose paths, persistent
-volumes, private network, mounted TLS identity, local certificate validity,
-all required service profiles, Vault Agent CA mounts, and that a final Vault
-Compose model does not contain a database URL or PostgreSQL bootstrap password.
-It emits only non-secret diagnostics and refuses ambiguous or missing state.
+- `compose.yml`: full Vault-only application, its agents, PostgreSQL, backend,
+  frontend, collector, graph engine, Nginx, and one-shot maintenance helpers.
+- `infra/vault/server/compose.yml`: separately managed Vault Server, Raft,
+  backend AppRole storage, TLS and operator maintenance helpers.
 
-## Why we are not starting services yet
+The project names remain `transcendence-app-dev` and
+`transcendence-vault-dev`. The existing cross-project network is
+`transcendence-vault-dev_vault_private`, and the persistent volumes keep
+their original Docker names. The normal development profile does not expose
+PostgreSQL, Backend, Frontend, Collector, Graph Engine or Docker Socket Proxy
+ports; loopback Nginx is the public development entry point.
 
-Today the running application still carries a local Clean-Room-based override
-in its Compose labels. Applying the new runtime overlays directly with
-`docker compose up` could recreate containers, change published ports, or
-accidentally create a new volume. The checker is **not** authorization to
-apply those changes. A separate reviewed cutover is required before enabling
-`./scripts/dev-start.sh` without `--check`.
+Legacy `compose.vault.yml`, `compose.dev.yml` and tracked runtime overlays
+have been consolidated and are no longer selected by any normal script.
+The Clean-Room templates remain separate **test fixtures**, never a normal
+runtime profile. The old per-user overrides in `$HOME/.local/state` are **not**
+deleted: existing Docker labels may still refer to them until cutover.
 
-The non-Vault Compose workflow remains untouched. In the new Vault runtime
-model the initial PostgreSQL bootstrap password is omitted because an
-existing data volume must already exist. Provisioning a missing cluster
-and rotation of existing PostgreSQL credentials are separate workflows.
-The checker uses a deliberately empty interpolation placeholder for the old
-base Compose password field and verifies that the **merged** Vault-mode
-model does not retain it. It never reads or stores a password.
+## Configuration and secret contract
 
-## Safety
+`FT_DEV_TLS_DIR` is a **non-secret path** to the existing trusted TLS
+directory (default:
+`${XDG_STATE_HOME:-$HOME/.local/state}/transcendence/dev/tls`).
+The normal startup entry point will set this variable only for child
+processes; developers will not have to export it manually.
 
-- Do not run `docker compose down -v`, `docker volume rm`, or reset Vault.
-- Do not point ordinary development at a Clean-Room project or TLS identity.
-- If a volume, label, mount or certificate differs, investigate before any
-  write operation; never auto-create a replacement resource.
-- First-time trusted bootstrap, AppRole recovery, unseal and migrations retain
-  their existing independent tooling until subsequent phases of #115.
+The application receives its runtime database DSN through
+`DATABASE_URL_FILE` from the restricted Vault Agent mount. No application
+database URL or PostgreSQL bootstrap password belongs in Compose environment.
+An **existing, initialized** PostgreSQL volume is a prerequisite to routine
+startup. The default `POSTGRES_USER`/`POSTGRES_DB` values in the new model are
+provisional until the live deployment identity has been checked. If those
+values differ, stop and reconcile **non-secret identity settings** before
+cutover. Never create another PostgreSQL volume to solve a mismatch.
+
+Optional Compose `develop.watch` rules live in the application file; normal
+`up` does not start watch mode. One-shot provisioning, migration and
+maintenance services remain explicitly profile-gated.
+
+## Read-only validation and cutover boundary
+
+```bash
+python3 -m unittest discover -s infra/vault/scripts -p 'test_compose_unification.py' -v
+python3 -m unittest discover -s infra/vault/scripts -p 'test_dev_preflight.py' -v
+./scripts/dev-start.sh --check
+```
+
+`--check` inspects existing containers and both target Compose models. It
+accepts only the known historical labels or the exact single-file labels; it
+does **not** recreate anything. If historical labels are found, it reports
+that cutover remains required. Normal `./scripts/dev-start.sh` stays disabled.
+
+The standalone application migration helpers also refuse to act on old
+development Compose provenance, preventing unintentional container recreation
+while the model changes. Clean-Room projects remain independently supported.
+
+**Separate upcoming work (stages C–E):** verify live PostgreSQL identity,
+validate service-by-service diffs and data preservation, explicitly cut over
+containers, implement one-command Vault readiness/unseal/recovery and
+migration orchestration, run isolated Clean-Room integration tests, then
+revise operator onboarding. No automatic bootstrap or credential rotation is
+introduced by this consolidation.
+
+Never use `docker compose down -v`, delete a Raft/PostgreSQL volume, overwrite
+the TLS CA or initialize an already prepared Vault as part of cutover.

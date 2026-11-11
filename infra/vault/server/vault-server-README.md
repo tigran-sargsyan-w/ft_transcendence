@@ -1,5 +1,11 @@
 # Vault Server — Development Infrastructure
 
+> **#115 transition notice:** This long-form runbook documents the earlier
+> Vault POC bootstrap and contains historical commands. For the current
+> two-file target architecture and safe cutover boundary, consult
+> [the unified Compose contract](../runtime/README.md). Do not run old
+> bootstrap or Compose `up` instructions against the prepared volumes.
+
 > **Status:** Local development infrastructure, not production-ready.
 > **Tracking:** [Issue #104](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/104) (infrastructure), [#105](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/105) (credential lifecycle), [#106](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/106) (recovery).
 > **Scope:** Vault Server, TLS, Raft persistence, ACL/AppRole bootstrap, and agent integration with the backend and Prisma migrations.
@@ -45,10 +51,10 @@ infra/vault/
     ├── run-migrations.sh
     └── start-backend.sh
 
-compose.vault.yml                # Application-side Vault integration
+compose.yml                # Application-side Vault integration
 ```
 
-The Vault Compose file deliberately retains the project name **`transcendence-vault-poc`** for compatibility with the current external Docker network and named volumes referenced by `compose.vault.yml`. **Do not rename it without coordinating those references and migrating persistent data.**
+The Vault Compose file deliberately retains the project name **`transcendence-vault-dev`** for compatibility with the current external Docker network and named volumes referenced by `compose.yml`. **Do not rename it without coordinating those references and migrating persistent data.**
 
 ### Separation of responsibilities
 
@@ -57,7 +63,7 @@ The Vault Compose file deliberately retains the project name **`transcendence-va
 | Run Vault | `infra/vault/server/compose.yml` | Persistent server, permissions setup |
 | Configure Vault | `vault-bootstrap` (`setup` profile) | KV v2, policies, AppRoles; no KV values or SecretIDs created |
 | Issue backend AppRole credentials | `vault-backend-provision` (`setup` profile) | Generates and writes a new SecretID |
-| Issue migration AppRole credentials | `vault-migrator-provision` in `compose.vault.yml` | Generates and writes a new SecretID |
+| Issue migration AppRole credentials | `vault-migrator-provision` in `compose.yml` | Generates and writes a new SecretID |
 | Reconcile PostgreSQL credentials | `infra/vault/scripts/provision-postgres.sh` | Ensures roles exist and verifies Vault credentials against PostgreSQL without rotating existing passwords |
 | Run migrations | `infra/vault/scripts/run-migrations.sh` | One-shot migration Agent, Prisma deploy, cleanup |
 | Start backend | `infra/vault/scripts/start-backend.sh` | Stops backend, runs migrations, starts backend |
@@ -67,7 +73,7 @@ The Vault Compose file deliberately retains the project name **`transcendence-va
 ## 2. Prerequisites and security boundaries
 
 - Docker Engine, Docker Compose v2, Bash, OpenSSL, `flock` (util-linux), and permission to operate Docker.
-- A Git-ignored `.env` containing the application stack's PostgreSQL initialization settings, as required by `compose.yml`.
+- An existing initialized PostgreSQL data volume for routine startup; bootstrap is an independently controlled operation.
 - A safe place **outside Git and Docker** for the Shamir shares and initial administrative token. Never paste these into chat, tickets, shell history, container logs, or CI.
 - Vault image version currently pinned to `hashicorp/vault:2.2.1`.
 
@@ -198,20 +204,20 @@ docker compose -f infra/vault/server/compose.yml \
 Provision the migration identity, using the **application** Compose files:
 
 ```bash
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -f compose.yml -f compose.yml \
   run --rm --no-deps vault-migrator-storage-init
 
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -f compose.yml -f compose.yml \
   run --rm --no-deps vault-migrator-provision
 ```
 
 Also initialize and provision the PostgreSQL credential-reader AppRole using the application Compose files:
 
 ```bash
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -f compose.yml -f compose.yml \
   --profile vault-setup run --rm --no-deps vault-postgres-provisioner-storage-init
 
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -f compose.yml -f compose.yml \
   --profile vault-setup run --rm --no-deps vault-postgres-provisioner-provision
 ```
 
@@ -220,10 +226,10 @@ The AppRole provisioning commands request a privileged Vault token. They **creat
 Start and check the runtime Agent:
 
 ```bash
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -f compose.yml -f compose.yml \
   up -d --no-deps vault-backend-agent
 
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -f compose.yml -f compose.yml \
   ps vault-backend-agent
 ```
 
@@ -247,11 +253,11 @@ Normally use **`start-backend.sh`** as the backend startup entry point: it alrea
 docker compose -f infra/vault/server/compose.yml exec vault vault status
 
 # Runtime Agent health
-docker compose -f compose.yml -f compose.vault.yml ps vault-backend-agent
+docker compose -f compose.yml -f compose.yml ps vault-backend-agent
 
 # Compose validation
 docker compose -f infra/vault/server/compose.yml config --quiet
-docker compose -f compose.yml -f compose.vault.yml config --quiet
+docker compose -f compose.yml -f compose.yml config --quiet
 ```
 
 After any Vault **container restart**, the Shamir-sealed server must be unsealed again with two different shares. Do not reinitialize it. If an Agent is unhealthy, inspect its healthcheck and logs **without printing tokens or rendered secrets**. A `400 invalid role or secret ID` AppRole error can indicate an expired, exhausted, or revoked SecretID; use the controlled provisioning procedure, then recreate the affected Agent if necessary.
@@ -314,7 +320,7 @@ If activation or connectivity fails, **do not immediately restart or reinitializ
 docker compose -f infra/vault/server/compose.yml \
   run --rm --no-deps -T vault-tls-files rollback backup-ACTUAL_NAME
 
-docker kill --signal=HUP transcendence-vault-poc-vault-1
+docker kill --signal=HUP transcendence-vault-dev-vault-1
 ```
 
 Replace `backup-ACTUAL_NAME` with the actual backup directory name. Verify the live TLS fingerprint, `vault status`, and Runtime Agent health afterward. A failed or interrupted replacement might require manual operator intervention; do not treat rollback as guaranteed under every failure mode.
