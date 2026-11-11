@@ -87,18 +87,18 @@ class UnifiedComposeTests(unittest.TestCase):
         self.assertTrue(backend["read_only"])
         self.assertIn("ALL", backend["cap_drop"])
         self.assertTrue(
-            any(m.get("source") == "transcendence-vault-dev_backend_rendered"
+            any(m.get("source") == "backend_vault_rendered"
                 for m in backend.get("volumes", []))
         )
         postgres = services["postgres"]
         self.assertNotIn("POSTGRES_PASSWORD", postgres["environment"])
         self.assertEqual(
             mount(postgres, "/var/lib/postgresql")["source"],
-            "transcendence-app-dev_postgres_data",
+            "postgres_data",
         )
         self.assertEqual(
             mount(services["vault-backend-agent"], "/vault/auth")["source"],
-            "transcendence-vault-dev_backend_agent_auth",
+            "backend_vault_auth",
         )
         for name in CA_AGENTS:
             m = mount(services[name], "/vault/tls/ca.crt")
@@ -132,7 +132,7 @@ class UnifiedComposeTests(unittest.TestCase):
         self.assertTrue(m["read_only"])
         self.assertEqual(
             mount(vault, "/vault/data")["source"],
-            "transcendence-vault-dev_vault_data",
+            "vault_data",
         )
         for name in ("vault-backend-provision", "vault-backend-rotate",
                      "vault-bootstrap"):
