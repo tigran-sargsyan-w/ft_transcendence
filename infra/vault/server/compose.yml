@@ -1,4 +1,4 @@
-name: transcendence-vault-poc
+name: transcendence-vault-dev
 
 services:
   vault-storage-permissions:
@@ -41,7 +41,7 @@ services:
       - vault_data:/vault/data
       - backend_agent_auth:/vault/backend-auth
       - backend_rendered:/vault/backend-rendered
-      - ./tls:/vault/tls
+      - ${FT_DEV_TLS_DIR:?Set FT_DEV_TLS_DIR}:/vault/tls
 
     network_mode: none
     restart: "no"
@@ -56,7 +56,7 @@ services:
 
     volumes:
       - ./vault.hcl:/vault/config/vault.hcl:ro
-      - ./tls:/vault/tls:ro
+      - ${FT_DEV_TLS_DIR:?Set FT_DEV_TLS_DIR}:/vault/tls:ro
       - vault_data:/vault/data
 
     networks:
@@ -129,7 +129,7 @@ services:
       VAULT_CACERT: /vault/tls/ca.crt
 
     volumes:
-      - ./tls/ca.crt:/vault/tls/ca.crt:ro
+      - ${FT_DEV_TLS_DIR:?Set FT_DEV_TLS_DIR}/ca.crt:/vault/tls/ca.crt:ro
       - backend_agent_auth:/vault/auth
 
     networks:
@@ -148,7 +148,7 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
       - ../scripts/rotate-approle.py:/vault/scripts/rotate-approle.py:ro
-      - ./tls/ca.crt:/vault/tls/ca.crt:ro
+      - ${FT_DEV_TLS_DIR:?Set FT_DEV_TLS_DIR}/ca.crt:/vault/tls/ca.crt:ro
       - backend_agent_auth:/vault/auth
     networks:
       - vault_private
@@ -186,7 +186,7 @@ services:
     volumes:
       - ./bootstrap.sh:/vault/scripts/bootstrap.sh:ro
       - ../policies:/vault/policies:ro
-      - ./tls/ca.crt:/vault/tls/ca.crt:ro
+      - ${FT_DEV_TLS_DIR:?Set FT_DEV_TLS_DIR}/ca.crt:/vault/tls/ca.crt:ro
 
     networks:
       - vault_private
@@ -213,7 +213,7 @@ services:
     command: ["help"]
 
     volumes:
-      - ./tls:/vault/tls
+      - ${FT_DEV_TLS_DIR:?Set FT_DEV_TLS_DIR}:/vault/tls
       - ./tls-files.sh:/vault/scripts/tls-files.sh:ro
 
     network_mode: none
