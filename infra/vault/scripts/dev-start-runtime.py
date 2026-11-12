@@ -608,12 +608,21 @@ def plan_runtime():
             )
 
     if statuses["vault"][0] == "running":
-        vault = vault_status(seconds=5)
-
-        if vault.get("initialized") is not True:
-            problems.append("Vault not initialized")
-        elif vault.get("sealed") is not False:
-            problems.append("Vault sealed")
+        try:
+            vault = vault_status(seconds=5)
+        except StartupError:
+            problems.append("Vault status unavailable")
+        else:
+            if vault.get("initialized") is not True:
+                problems.append("Vault not initialized")
+            if vault.get("sealed") is not False:
+                problems.append("Vault sealed")
+            if (vault.get("n"), vault.get("t")) != (3, 2):
+                problems.append("Unexpected Vault Shamir threshold")
+            if vault.get("seal_type") not in (None, "shamir"):
+                problems.append("Unexpected Vault seal type")
+            if vault.get("storage_type") != "raft":
+                problems.append("Vault storage is not Raft")
 
     if statuses["postgres"] == ("running", "healthy"):
         pending = audit_migrations()
@@ -634,6 +643,23 @@ def plan_runtime():
         problems.append(
             "PostgreSQL must be healthy before migration audit"
         )
+
+    # Read-only, one-shot application probes.
+    # Normal startup retains its longer bounded retries.
+    if statuses["frontend"][0] == "running":
+        try:
+            wait_frontend_ready(attempts=1, delay=0)
+        except StartupError:
+            problems.append("frontend: Vite HTTP not ready")
+
+    if statuses["nginx"][0] == "running":
+        for suffix in ("/", "/api/v1/health"):
+            try:
+                wait_https_route(suffix, attempts=1, delay=0)
+            except StartupError:
+                problems.append(
+                    f"nginx: HTTPS route not ready: {suffix}"
+                )
 
     if problems:
         for problem in problems:

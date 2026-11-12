@@ -15,7 +15,10 @@ spec.loader.exec_module(startup)
 
 class StartupSafetyTests(unittest.TestCase):
 
-    def plan(self, agent_health="healthy", pending=None):
+    def plan(
+        self, agent_health="healthy", pending=None,
+        vault_changes=None, frontend_error=None, https_error=None,
+    ):
         if pending is None:
             pending = []
 
@@ -33,6 +36,17 @@ class StartupSafetyTests(unittest.TestCase):
                 }
             }
 
+        vault_state = {
+            "initialized": True,
+            "sealed": False,
+            "n": 3,
+            "t": 2,
+            "seal_type": "shamir",
+            "storage_type": "raft",
+        }
+        if vault_changes:
+            vault_state.update(vault_changes)
+
         with (
             patch.object(startup, "preflight"),
             patch.object(
@@ -41,14 +55,19 @@ class StartupSafetyTests(unittest.TestCase):
             ),
             patch.object(
                 startup, "vault_status",
-                return_value={
-                    "initialized": True,
-                    "sealed": False,
-                },
+                return_value=vault_state,
             ),
             patch.object(
                 startup, "audit_migrations",
                 return_value=pending,
+            ),
+            patch.object(
+                startup, "wait_frontend_ready",
+                side_effect=frontend_error,
+            ),
+            patch.object(
+                startup, "wait_https_route",
+                side_effect=https_error,
             ),
         ):
             return startup.plan_runtime()
@@ -103,6 +122,44 @@ class StartupSafetyTests(unittest.TestCase):
 
                     preflight.assert_not_called()
 
+
+    def test_wrong_vault_threshold_blocks_plan(self):
+        self.assertEqual(
+            self.plan(vault_changes={"t": 3}), 1
+        )
+
+    def test_wrong_vault_storage_blocks_plan(self):
+        self.assertEqual(
+            self.plan(vault_changes={"storage_type": "file"}), 1
+        )
+
+    def test_wrong_vault_seal_type_blocks_plan(self):
+        self.assertEqual(
+            self.plan(vault_changes={"seal_type": "awskms"}), 1
+        )
+
+    def test_unavailable_frontend_blocks_plan(self):
+        self.assertEqual(
+            self.plan(
+                frontend_error=startup.StartupError("HTTP unavailable")
+            ), 1
+        )
+
+    def test_unavailable_https_route_blocks_plan(self):
+        self.assertEqual(
+            self.plan(
+                https_error=startup.StartupError("HTTP 502")
+            ), 1
+        )
+
+    def test_unavailable_backend_api_blocks_plan(self):
+        def api_failure(suffix, **kwargs):
+            if suffix == "/api/v1/health":
+                raise startup.StartupError("HTTP 503")
+
+        self.assertEqual(
+            self.plan(https_error=api_failure), 1
+        )
 
 if __name__ == "__main__":
     unittest.main()
