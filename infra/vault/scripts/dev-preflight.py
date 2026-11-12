@@ -219,7 +219,9 @@ class Preflight:
         command = ["docker", "compose", "--env-file", "/dev/null", "-p", project]
         for item in files:
             command += ["-f", str(item)]
-        command += ["config", "--format", "json"]
+        # Inspect maintenance/setup profiles too: they declare named volumes
+        # required by the full target model, but are not started by --check.
+        command += ["--profile", "*", "config", "--format", "json"]
         data = json_command(command, env=env)
         require(data.get("name") == project, "Unexpected generated Compose project")
         return data

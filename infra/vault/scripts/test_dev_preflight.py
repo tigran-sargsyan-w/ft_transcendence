@@ -175,6 +175,9 @@ class PreflightTests(unittest.TestCase):
             self.assertNotIn("POSTGRES_PASSWORD", env)
             self.assertEqual(env["FT_DEV_TLS_DIR"], str(self.state / "tls"))
             self.assertIn("--env-file", command)
+            self.assertIn("--profile", command)
+            self.assertEqual(command[command.index("--profile") + 1], "*")
+            self.assertEqual(command[-3:], ["config", "--format", "json"])
             return deepcopy(self.app_model if preflight.APP_PROJECT in command
                             else self.vault_model)
         raise AssertionError("Unexpected command")
@@ -183,6 +186,19 @@ class PreflightTests(unittest.TestCase):
         with patch.object(preflight, "json_command", side_effect=self.fake_json), \
              patch.object(preflight, "execute", return_value=""):
             self.pre.run()
+
+    def test_compose_model_includes_profile_gated_resources(self):
+        with patch.object(preflight, "json_command", side_effect=self.fake_json):
+            app = self.pre.compose_model(
+                (self.root / "compose.yml",), preflight.APP_PROJECT
+            )
+            vault = self.pre.compose_model(
+                (self.root / "infra/vault/server/compose.yml",),
+                preflight.VAULT_PROJECT,
+            )
+        self.assertIn("migrator_vault_auth", app["volumes"])
+        self.assertIn("postgres_provisioner_rendered", app["volumes"])
+        self.assertIn("backend_agent_auth", vault["volumes"])
 
     def test_existing_installation_passes(self):
         self.run_preflight()
