@@ -109,9 +109,11 @@ async function viewIncident(db: Db, id: string) {
     throw incidentNotFound();
   }
 
-  const histories = await statusHistories(db, [id]);
+  // `incident.id` and not `id`: the path may write the UUID in capitals, the
+  // rows give it in small letters.
+  const histories = await statusHistories(db, [incident.id]);
 
-  return incidentOf(incident, histories.get(id) ?? []);
+  return incidentOf(incident, histories.get(incident.id) ?? []);
 }
 
 // v1 has no organization, no participant and no role: every signed-in user

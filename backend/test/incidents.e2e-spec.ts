@@ -198,6 +198,14 @@ describe('Incidents (e2e)', () => {
       ]);
     });
 
+    it('accepts an emoji, which is a valid pair of surrogates', async () => {
+      const response = await create(ada.cookie, {
+        title: '🚨 db down',
+      }).expect(201);
+
+      expect(response.body.data.title).toBe('🚨 db down');
+    });
+
     it('ignores a duplicate in seedNodeIds', async () => {
       const response = await create(ada.cookie, {
         seedNodeIds: [DB_NODE, DB_NODE],
@@ -299,6 +307,25 @@ describe('Incidents (e2e)', () => {
         .expect(400);
 
       expect(notAnId.body.error.code).toBe('BAD_REQUEST');
+    });
+
+    it('reads an incident whose id is written in capitals', async () => {
+      const { id } = (await create(ada.cookie).expect(201)).body.data;
+
+      await patch(ada.cookie, id, { version: 1, status: 'resolved' }).expect(
+        200,
+      );
+
+      const read = await http()
+        .get(`/api/v1/incidents/${id.toUpperCase()}`)
+        .set('Cookie', ada.cookie)
+        .expect(200);
+
+      expect(read.body.data.id).toBe(id);
+      expect(read.body.data.statusHistory).toHaveLength(2);
+      expect(read.body.data.resolvedAt).toBe(
+        read.body.data.statusHistory[1].at,
+      );
     });
 
     it('lists the incidents, the newest first, and filters them', async () => {
@@ -559,6 +586,16 @@ describe('Incidents (e2e)', () => {
       expect(response.body.error.code).toBe('VALIDATION_ERROR');
       expect(response.body.error.details).toHaveProperty(field);
       expect(await eventCount(id)).toBe(1);
+    });
+
+    it('answers 409 for the largest version the column holds', async () => {
+      const { id } = (await create(ada.cookie).expect(201)).body.data;
+      const response = await patch(ada.cookie, id, {
+        version: 2147483647,
+        status: 'resolved',
+      }).expect(409);
+
+      expect(response.body.error.code).toBe('INCIDENT_VERSION_CONFLICT');
     });
 
     it('answers 404 for an incident that does not exist', async () => {
