@@ -5,6 +5,7 @@ import argparse
 import fcntl
 import getpass
 import json
+import os
 import subprocess
 import sys
 import time
@@ -363,8 +364,55 @@ def check_migrations_or_fail():
     print("PASS: Prisma migration history current", flush=True)
 
 
-def run_start():
+def run_migrations_with_lock(lock_fd):
+    """Run controlled migrations using the already-held startup lock."""
+    if os.environ.get("FT_APP_COMPOSE_OVERRIDE"):
+        raise StartupError(
+            "Compose overrides are not supported for routine migration"
+        )
+
+    env = os.environ.copy()
+    env["FT_STARTUP_LOCK_FD"] = str(lock_fd)
+    env["FT_EXISTING_RUNTIME_ONLY"] = "1"
+    env["FT_APP_COMPOSE_PROJECT"] = APP
+    env["POSTGRES_USER"] = "transcendence"
+    env["POSTGRES_DB"] = "transcendence"
+    env["FT_DEV_TLS_DIR"] = str(
+        Path(env.get(
+            "XDG_STATE_HOME",
+            str(Path.home() / ".local/state"),
+        )) / "transcendence/dev/tls"
+    )
+
+    print("=== Controlled migration workflow ===", flush=True)
+
+    try:
+        result = subprocess.run(
+            [
+                str(
+                    ROOT / "infra/vault/scripts/run-migrations.sh"
+                ),
+            ],
+            env=env,
+            pass_fds=(lock_fd,),
+            check=False,
+        )
+    except OSError as exc:
+        raise StartupError(
+            "Migration workflow could not be started"
+        ) from exc
+
+    if result.returncode:
+        raise StartupError(
+            "Migration workflow failed; Backend remains stopped"
+        )
+
+    print("PASS: Controlled migrations completed", flush=True)
+
+
+def run_start(allow_migrations=False):
     # Reuse the existing migration/provisioning lock.
+    did_migrate = False
     lock = ROOT / "infra/vault/scripts/run-migrations.sh"
 
     with lock.open("rb") as fp:
@@ -382,7 +430,46 @@ def run_start():
 
         for project, service in ORDER:
             if project == APP and service == "backend":
-                check_migrations_or_fail()
+                if allow_migrations:
+                    pending = audit_migrations()
+
+                    if pending:
+                        for migration in pending:
+                            print(f"PENDING: {migration}", flush=True)
+
+                        backend_state = inspect(
+                            APP, "backend"
+                        )["State"]["Status"]
+
+                        if backend_state == "running":
+                            print(
+                                "STOP: Backend before migrations",
+                                flush=True,
+                            )
+                            execute(
+                                [
+                                    "docker", "stop", "--time", "20",
+                                    name(APP, "backend"),
+                                ],
+                                timeout=45,
+                            )
+                        elif backend_state not in ("exited", "created"):
+                            raise StartupError(
+                                "Backend is in unexpected state"
+                            )
+
+                        run_migrations_with_lock(fp.fileno())
+                        did_migrate = True
+
+                        # Revalidate every local migration and checksum.
+                        check_migrations_or_fail()
+                    else:
+                        print(
+                            "PASS: No migrations required",
+                            flush=True,
+                        )
+                else:
+                    check_migrations_or_fail()
 
             ensure_running(project, service)
 
@@ -392,11 +479,18 @@ def run_start():
         verify_app()
         preflight()
 
-    print(
-        "RESULT: EXISTING STACK READY "
-        "(no recreation, no migrations)",
-        flush=True,
-    )
+    if did_migrate:
+        print(
+            "RESULT: EXISTING STACK READY "
+            "(controlled migrations applied)",
+            flush=True,
+        )
+    else:
+        print(
+            "RESULT: EXISTING STACK READY "
+            "(no recreation, no migrations)",
+            flush=True,
+        )
 
 
 def main(argv=None):
@@ -404,7 +498,7 @@ def main(argv=None):
     parser.add_argument(
         "mode",
         nargs="?",
-        choices=("start", "plan"),
+        choices=("start", "plan", "migrate"),
         default="start",
     )
 
@@ -434,7 +528,9 @@ def main(argv=None):
                 print("PASS: Prisma migrations current")
                 print("RESULT: STARTUP PLAN VALID (read-only)")
         else:
-            run_start()
+            run_start(
+                allow_migrations=(args.mode == "migrate")
+            )
 
         return 0
 

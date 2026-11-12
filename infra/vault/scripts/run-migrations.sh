@@ -13,6 +13,18 @@ fi
 # Use the script file itself as the lock target.
 LOCK_FILE="$ROOT_DIR/infra/vault/scripts/run-migrations.sh"
 
+# Reuse the lock held by dev-start-runtime.py, if supplied.
+if [[ -n "${FT_STARTUP_LOCK_FD:-}" ]]; then
+  if [[ ! "$FT_STARTUP_LOCK_FD" =~ ^[0-9]+$ ]] ||
+     [[ ! -e "/proc/self/fd/$FT_STARTUP_LOCK_FD" ]] ||
+     [[ ! "$LOCK_FILE" -ef "/proc/self/fd/$FT_STARTUP_LOCK_FD" ]]; then
+    echo "ERROR: invalid inherited startup lock" >&2
+    exit 1
+  fi
+
+  exec 9<&"$FT_STARTUP_LOCK_FD"
+fi
+
 # Reuse the inherited lock descriptor when called by start-backend.sh.
 # Otherwise, open our own descriptor for standalone migration runs.
 if [[ ! -e /proc/self/fd/9 || ! "$LOCK_FILE" -ef /proc/self/fd/9 ]]; then
@@ -56,8 +68,25 @@ trap 'exit 143' TERM
 
 echo "=== Step 1: PostgreSQL readiness ==="
 
-"${COMPOSE[@]}" \
-  up -d --no-deps --wait postgres
+if [[ "${FT_EXISTING_RUNTIME_ONLY:-0}" == "1" ]]; then
+  if [[ "$FT_APP_COMPOSE_PROJECT" != "transcendence-app-dev" ]]; then
+    echo "ERROR: unexpected PostgreSQL project" >&2
+    exit 1
+  fi
+
+  status="$(docker inspect --format '{{.State.Health.Status}}' \
+    transcendence-app-dev-postgres-1)"
+
+  if [[ "$status" != "healthy" ]]; then
+    echo "ERROR: existing PostgreSQL is not healthy" >&2
+    exit 1
+  fi
+
+  echo "PASS: Existing PostgreSQL healthy (no Compose recreation)"
+else
+  "${COMPOSE[@]}" \
+    up -d --no-deps --wait postgres
+fi
 
 echo "=== Step 1.5: Vault-backed PostgreSQL provisioning ==="
 
