@@ -99,6 +99,10 @@ migration status.
 Exits nonzero when startup is required, a mandatory component
 is unhealthy, Vault is sealed or migrations are pending.
 
+It performs one-shot read-only HTTP readiness checks against Vite
+and the HTTPS `/` and `/api/v1/health` routes. It also validates
+Vault Shamir 2-of-3 configuration and Raft storage.
+
 It does not start containers or apply migrations.
 
 ### Normal startup
@@ -188,14 +192,43 @@ Verified against the existing development installation:
 Unit tests cover startup, preflight, migration auditing,
 migration authorization and HTTP readiness.
 
-## Remaining validation
+## Clean-Room integration validation (2026-11-12)
 
-A real pending Prisma migration still requires an isolated
-Clean-Room integration test, including failure and rollback
-behavior.
+The following scenarios passed against dedicated, isolated Vault
+Raft and PostgreSQL resources, without modifying the existing
+development containers or persistent volumes:
 
-The interactive Shamir unseal path also requires an independent
-end-to-end validation before being considered fully tested.
+- Vault initialization, Shamir 2-of-3 and manual unseal.
+- Vault KV v2, ACL policies and three AppRoles.
+- Vault Agent delivery of backend and migrator credentials.
+- Restricted PostgreSQL role provisioning and credential validation.
+- Applying two existing Prisma migrations.
+- Detecting and applying a new pending migration from a test-only
+  migration directory outside the repository.
+- Repeated Prisma deployment without duplicate migrations.
+- Restricted PostgreSQL grants after migration.
+- Failed migration detection, refusal of repeated deployment and
+  migration audit rejection.
+- Operator-controlled recovery using `prisma migrate resolve
+  --rolled-back`, corrected migration deployment and final audit.
+- Interactive Shamir unseal through the actual `verify_vault()`
+  function, with only the test Vault project substituted in memory.
+
+The Clean-Room integration tests were performed manually.
+They are not automated by GitHub Actions.
+
+## Remaining limitations
+
+- A full cold-start of all services after a machine restart has
+  not been independently validated.
+- The complete `dev-start.sh --migrate` orchestration with a real
+  pending migration has not been exercised end-to-end. The
+  migration workflow, failure recovery and startup coordination
+  have been tested separately.
+- The original development installation and Clean-Room are not
+  production-readiness tests.
+- New migrations introduced on `main` after this validation
+  require their own review and controlled application.
 
 This implementation does not introduce a new auto-unseal trust
 provider, automatic AppRole rotation or production high

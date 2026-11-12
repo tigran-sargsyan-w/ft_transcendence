@@ -159,6 +159,12 @@ jobs:
       - name: Test development startup preflight offline
         run: python3 -m unittest discover -s infra/vault/scripts -p 'test_dev_preflight.py' -v
 
+      - name: Test unified startup orchestration and safety offline
+        run: python3 -m unittest discover -s infra/vault/scripts -p 'test_dev_start*.py' -v
+
+      - name: Test Prisma migration audit offline
+        run: python3 -m unittest discover -s infra/vault/scripts -p 'test_dev_migration_audit.py' -v
+
       - name: Validate Vault application Compose
         run: docker compose --profile "*" -f compose.yml config --quiet
 
