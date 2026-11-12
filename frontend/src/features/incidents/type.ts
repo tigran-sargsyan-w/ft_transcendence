@@ -1,3 +1,5 @@
+import type { UserRef } from "@/types/user";
+
 export type IncidentSeverity = "sev1" | "sev2" | "sev3" | "sev4";
 
 export type IncidentStatus =
@@ -16,10 +18,4 @@ export interface IncidentSummary {
   resolvedAt: string | null;
   commander: UserRef | null;
   seedNodeIds: string[]; // services at the origin of the incident
-}
-
-export interface UserRef {
-  id: string;
-  displayName: string;
-  avatarUrl: string | null;
 }

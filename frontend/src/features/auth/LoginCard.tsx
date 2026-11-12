@@ -15,6 +15,7 @@ import { loginUser } from "./auth";
 import { useNavigate } from "react-router";
 import { ApiError } from "@/services/api";
 import type { SubmitEvent } from "react";
+import { useAuth } from "./AuthContext";
 
 type LoginCardProps = { onSwitch: () => void };
 
@@ -26,6 +27,8 @@ function isValidEmail(email: string): boolean {
 
 export function LoginCard({ onSwitch }: LoginCardProps) {
   let navigate = useNavigate();
+
+  const { setUser } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -60,9 +63,9 @@ export function LoginCard({ onSwitch }: LoginCardProps) {
         email: trimmedEmail,
         password,
       });
-      console.log("user=", user);
       setStatus("success");
       setPassword("");
+      setUser(user);
       navigate("/dashboard");
     } catch (err) {
       setStatus("idle");

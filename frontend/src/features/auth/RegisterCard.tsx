@@ -15,6 +15,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import type { SubmitEvent } from "react";
 import { useNavigate } from "react-router";
+import { useAuth } from "./AuthContext";
 
 type FormStatus = "idle" | "submitting" | "success";
 type RegisterCardProps = { onSwitch: () => void };
@@ -25,6 +26,8 @@ function isValidEmail(email: string): boolean {
 
 export function RegisterCard({ onSwitch }: RegisterCardProps) {
   let navigate = useNavigate();
+
+  const { setUser } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -61,11 +64,12 @@ export function RegisterCard({ onSwitch }: RegisterCardProps) {
       });
 
       setStatus("success");
-      await loginUser({
+      const user = await loginUser({
         email: trimmedEmail,
         password,
       });
       setPassword("");
+      setUser(user);
       navigate("/dashboard");
     } catch (err) {
       setStatus("idle");

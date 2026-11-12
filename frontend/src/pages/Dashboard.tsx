@@ -1,4 +1,4 @@
-import { TeamCard } from "@/components/cards/TeamCard";
+import { TeamOnlineCard } from "@/features/team/TeamOnlineCard";
 import { DashboardIncidentsBanners } from "@/features/incidents/DashboardIncidentsBanners";
 import { ActiveIncidents } from "@/features/incidents/dashboardCards/ActiveIncidents";
 import { OpenIncidents } from "@/features/incidents/dashboardCards/OpenIncidents";
@@ -10,6 +10,7 @@ import { ServicesImpacted } from "@/features/topology/dashboardCards/ServicesImp
 import { mockIncidents } from "@/features/incidents/mockIncidents";
 import { WelcomeDashboardBanner } from "@/components/WelcomeDashboardBanner";
 import { mockCriticalNodes } from "@/features/topology/mockCriticalNodes";
+import { mockTeam } from "@/features/team/mockTeam";
 
 export default function Dashboard() {
   return (
@@ -27,7 +28,7 @@ export default function Dashboard() {
         </div>
         <div className="flex flex-col gap-4 w-2/5">
           <CriticalNodes criticalNodes={mockCriticalNodes} />
-          <TeamCard />
+          <TeamOnlineCard team={mockTeam} />
         </div>
       </div>
     </div>

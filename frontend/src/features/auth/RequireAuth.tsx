@@ -1,19 +1,11 @@
-import { useEffect, useState } from "react";
-import { Navigate, Outlet, useLocation } from "react-router";
-import { getMe } from "./auth";
+import { useAuth } from "./AuthContext";
+import { Navigate, Outlet } from "react-router";
 
 export const RequireAuth = () => {
-  const location = useLocation();
-  const [state, setState] = useState<"loading" | "ok" | "anonymous">("loading");
+  const { auth } = useAuth();
 
-  useEffect(() => {
-    getMe()
-      .then(() => setState("ok"))
-      .catch(() => setState("anonymous"));
-  }, []);
-
-  if (state === "loading") return null;
-  if (state === "anonymous")
+  if (auth.status === "loading") return null;
+  if (auth.status === "anonymous")
     return <Navigate to="/" replace state={{ from: location }} />;
   return <Outlet />;
 };

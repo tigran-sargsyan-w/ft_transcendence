@@ -1,15 +1,9 @@
 import { api } from "@/services/api";
+import type { User } from "@/types/user";
 
 export interface Credentials {
   email: string;
   password: string;
-}
-
-export interface User {
-  id: string;
-  email: string;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export const registerUser = (input: Credentials) =>

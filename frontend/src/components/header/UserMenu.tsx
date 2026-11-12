@@ -10,6 +10,7 @@ import {
 import { Link } from "react-router";
 import { logoutUser } from "@/features/auth/auth";
 import { useNavigate } from "react-router";
+import { getInitial } from "@/lib/user";
 
 export function UserMenu() {
   let navigate = useNavigate();
