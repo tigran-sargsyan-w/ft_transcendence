@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from dev_migration_audit import audit_migrations, MigrationAuditError
 APP = "transcendence-app-dev"
 VAULT = "transcendence-vault-dev"
 
@@ -346,6 +348,21 @@ req.on("error", () => process.exitCode = 1);
     )
 
 
+def check_migrations_or_fail():
+    pending = audit_migrations()
+
+    if pending:
+        for migration in pending:
+            print(f"PENDING: {migration}", flush=True)
+
+        raise StartupError(
+            "Pending Prisma migrations; startup refused. "
+            "Run the controlled migration workflow first."
+        )
+
+    print("PASS: Prisma migration history current", flush=True)
+
+
 def run_start():
     # Reuse the existing migration/provisioning lock.
     lock = ROOT / "infra/vault/scripts/run-migrations.sh"
@@ -364,6 +381,9 @@ def run_start():
         preflight()
 
         for project, service in ORDER:
+            if project == APP and service == "backend":
+                check_migrations_or_fail()
+
             ensure_running(project, service)
 
             if project == VAULT:
@@ -404,7 +424,15 @@ def main(argv=None):
                     f"{service}: {state['Status']}; health={health}"
                 )
 
-            print("RESULT: STARTUP PLAN VALID (read-only)")
+            pending = audit_migrations()
+
+            if pending:
+                for migration in pending:
+                    print(f"PENDING: {migration}")
+                print("RESULT: MIGRATIONS REQUIRED (read-only)")
+            else:
+                print("PASS: Prisma migrations current")
+                print("RESULT: STARTUP PLAN VALID (read-only)")
         else:
             run_start()
 
@@ -412,6 +440,7 @@ def main(argv=None):
 
     except (
         StartupError,
+        MigrationAuditError,
         OSError,
         subprocess.SubprocessError,
     ) as exc:
