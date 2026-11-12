@@ -152,6 +152,50 @@ def wait_ready(project, service, seconds=120):
     raise StartupError(f"Health timeout: {service}")
 
 
+
+def wait_frontend_ready(attempts=30, delay=2):
+    """Wait until the existing Vite process actually accepts HTTP."""
+    probe = r"""
+const http = require('node:http');
+const req = http.get(
+  'http://127.0.0.1:5173/',
+  { timeout: 3000 },
+  res => {
+    const ok = res.statusCode === 200;
+    res.resume();
+    res.on('end', () => {
+      process.exitCode = ok ? 0 : 1;
+    });
+  }
+);
+req.on('timeout', () => req.destroy());
+req.on('error', () => {
+  process.exitCode = 1;
+});
+"""
+
+    for attempt in range(attempts):
+        try:
+            execute(
+                [
+                    "docker", "exec",
+                    name(APP, "frontend"),
+                    "node", "-e", probe,
+                ],
+                timeout=8,
+            )
+            print("PASS: Frontend Vite HTTP ready", flush=True)
+            return
+
+        except StartupError:
+            if attempt + 1 < attempts:
+                time.sleep(delay)
+
+    raise StartupError(
+        "Frontend HTTP readiness timeout (port 5173)"
+    )
+
+
 def ensure_running(project, service):
     container = name(project, service)
     state = inspect(project, service)["State"]["Status"]
@@ -172,6 +216,9 @@ def ensure_running(project, service):
         )
 
     wait_ready(project, service)
+
+    if project == APP and service == "frontend":
+        wait_frontend_ready()
 
 
 def vault_status(seconds=45):
@@ -285,6 +332,52 @@ def verify_vault():
     )
 
 
+
+def wait_https_route(suffix, attempts=20, delay=2):
+    """Wait for reverse-proxy HTTP readiness without response bodies."""
+    last_status = "unavailable"
+
+    for attempt in range(attempts):
+        try:
+            output = execute(
+                [
+                    "curl",
+                    "--silent",
+                    "--insecure",
+                    "--noproxy", "*",
+                    "--connect-timeout", "3",
+                    "--max-time", "8",
+                    "--resolve",
+                    "transcendence.test:8443:127.0.0.1",
+                    "--output", "/dev/null",
+                    "--write-out", "%{http_code}",
+                    "https://transcendence.test:8443" + suffix,
+                ],
+                timeout=12,
+            )
+
+            status = output.decode("ascii", errors="replace").strip()
+            last_status = status if status.isdigit() else "invalid"
+
+            if status == "200":
+                print(
+                    f"PASS: HTTPS route ready: {suffix}",
+                    flush=True,
+                )
+                return
+
+        except StartupError:
+            last_status = "unavailable"
+
+        if attempt + 1 < attempts:
+            time.sleep(delay)
+
+    raise StartupError(
+        f"HTTPS readiness timeout: {suffix} "
+        f"(last HTTP status: {last_status})"
+    )
+
+
 def verify_app():
     execute([
         "docker", "exec",
@@ -328,20 +421,7 @@ req.on("error", () => process.exitCode = 1);
     ], timeout=15)
 
     for suffix in ("/", "/api/v1/health"):
-        execute([
-            "curl",
-            "--silent",
-            "--show-error",
-            "--fail",
-            "--insecure",
-            "--noproxy", "*",
-            "--connect-timeout", "5",
-            "--max-time", "15",
-            "--resolve",
-            "transcendence.test:8443:127.0.0.1",
-            "--output", "/dev/null",
-            "https://transcendence.test:8443" + suffix,
-        ], timeout=20)
+        wait_https_route(suffix)
 
     print(
         "PASS: Vault secret delivery, Docker Proxy and HTTPS API",
@@ -493,6 +573,85 @@ def run_start(allow_migrations=False):
         )
 
 
+def plan_runtime():
+    """Read-only readiness plan; never start containers."""
+    preflight()
+
+    problems = []
+    statuses = {}
+
+    for project, service in ORDER:
+        state = inspect(project, service)["State"]
+        status = state.get("Status", "unknown")
+        health = (state.get("Health") or {}).get(
+            "Status", "none"
+        )
+
+        statuses[service] = (status, health)
+
+        print(
+            f"{service}: {status}; health={health}",
+            flush=True,
+        )
+
+        if status != "running":
+            problems.append(
+                f"{service}: requires startup ({status})"
+            )
+        elif service in HEALTH_REQUIRED and health != "healthy":
+            problems.append(
+                f"{service}: health={health}"
+            )
+        elif health == "unhealthy":
+            problems.append(
+                f"{service}: unhealthy"
+            )
+
+    if statuses["vault"][0] == "running":
+        vault = vault_status(seconds=5)
+
+        if vault.get("initialized") is not True:
+            problems.append("Vault not initialized")
+        elif vault.get("sealed") is not False:
+            problems.append("Vault sealed")
+
+    if statuses["postgres"] == ("running", "healthy"):
+        pending = audit_migrations()
+
+        if pending:
+            for migration in pending:
+                print(f"PENDING: {migration}", flush=True)
+
+            problems.append(
+                "Prisma migrations required"
+            )
+        else:
+            print(
+                "PASS: Prisma migrations current",
+                flush=True,
+            )
+    else:
+        problems.append(
+            "PostgreSQL must be healthy before migration audit"
+        )
+
+    if problems:
+        for problem in problems:
+            print(f"NOT READY: {problem}", flush=True)
+
+        print(
+            "RESULT: STARTUP PLAN NOT READY (read-only)",
+            flush=True,
+        )
+        return 1
+
+    print(
+        "RESULT: STARTUP PLAN VALID (read-only)",
+        flush=True,
+    )
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -506,27 +665,7 @@ def main(argv=None):
 
     try:
         if args.mode == "plan":
-            preflight()
-
-            for project, service in ORDER:
-                state = inspect(project, service)["State"]
-                health = (
-                    state.get("Health") or {}
-                ).get("Status", "none")
-
-                print(
-                    f"{service}: {state['Status']}; health={health}"
-                )
-
-            pending = audit_migrations()
-
-            if pending:
-                for migration in pending:
-                    print(f"PENDING: {migration}")
-                print("RESULT: MIGRATIONS REQUIRED (read-only)")
-            else:
-                print("PASS: Prisma migrations current")
-                print("RESULT: STARTUP PLAN VALID (read-only)")
+            return plan_runtime()
         else:
             run_start(
                 allow_migrations=(args.mode == "migrate")
