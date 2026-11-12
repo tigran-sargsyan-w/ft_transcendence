@@ -265,6 +265,22 @@ class PreflightTests(unittest.TestCase):
         with self.assertRaisesRegex(preflight.PreflightError, "override"):
             self.run_preflight()
 
+    def test_writable_vault_tls_mount_without_read_only_passes(self):
+        # Docker Compose may omit read_only for writable bind mounts.
+        for name in ("vault-storage-permissions", "vault-tls-files"):
+            self.vault_model["services"][name]["volumes"][0].pop("read_only")
+        self.run_preflight()
+
+    def test_missing_read_only_on_vault_server_rejected(self):
+        self.vault_model["services"]["vault"]["volumes"][0].pop("read_only")
+        with self.assertRaisesRegex(preflight.PreflightError, "Vault TLS mount"):
+            self.run_preflight()
+
+    def test_missing_read_only_on_agent_ca_rejected(self):
+        self.app_model["services"]["vault-backend-agent"]["volumes"][0].pop("read_only")
+        with self.assertRaisesRegex(preflight.PreflightError, "CA mount"):
+            self.run_preflight()
+
     def test_wrong_tls_mount_fails(self):
         vault = self.containers[preflight.VAULT_PROJECT + "-vault-1"]
         vault["Mounts"][1]["Source"] = "/repo/wrong/tls"

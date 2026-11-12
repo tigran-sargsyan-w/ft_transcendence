@@ -75,7 +75,7 @@ def compose_mount(service, destination, source, *, readonly=True):
     matches = [m for m in volumes if m.get("target") == destination]
     return (len(matches) == 1 and matches[0].get("type") == "bind"
             and matches[0].get("source") == str(source)
-            and matches[0].get("read_only") is readonly)
+            and matches[0].get("read_only", False) is readonly)
 
 
 class Preflight:
