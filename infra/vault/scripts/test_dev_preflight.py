@@ -31,6 +31,8 @@ class PreflightTests(unittest.TestCase):
             (self.state / "tls" / name).write_text("fake certificate fixture")
         self.pre = preflight.Preflight(self.root, self.state)
         self.missing_volume = None
+        self.control_internal = True
+        self.control_driver = "bridge"
         self.volume_names = (
             preflight.VAULT_PROJECT + "_vault_data",
             preflight.VAULT_PROJECT + "_backend_agent_auth",
@@ -82,6 +84,22 @@ class PreflightTests(unittest.TestCase):
         self.add_volume(postgres, "/var/lib/postgresql", self.volume_names[3])
         self.add_bind(vault, "/vault/tls", self.state / "tls", rw=False)
         self.add_bind(agent, "/vault/tls/ca.crt", self.state / "tls/ca.crt", rw=False)
+        default = preflight.APP_PROJECT + "_default"
+        control = preflight.APP_PROJECT + "_collector_control"
+        for service in preflight.APP_SERVICES:
+            if service == "vault-backend-agent":
+                continue
+            attached = (
+                {control} if service == "docker-proxy"
+                else {default, control} if service == "collector"
+                else {default}
+            )
+            container = self.containers[
+                preflight.APP_PROJECT + "-" + service + "-1"
+            ]
+            container["NetworkSettings"]["Networks"] = {
+                name: {} for name in attached
+            }
         self.app_model = self.make_app_model()
         self.vault_model = self.make_vault_model()
 
@@ -103,7 +121,16 @@ class PreflightTests(unittest.TestCase):
 
     def make_app_model(self):
         services = {name: {} for name in preflight.APP_SERVICES}
-        services.update({name: self.ca_service() for name in preflight.APP_CA_SERVICES})
+        services.update({
+            name: self.ca_service() for name in preflight.APP_CA_SERVICES
+        })
+        services["docker-proxy"]["networks"] = {
+            "collector_control": None
+        }
+        services["collector"]["networks"] = {
+            "default": None,
+            "collector_control": None,
+        }
         services["backend"]["environment"] = {
             "DATABASE_URL_FILE": "/run/secrets/backend/database_url",
         }
@@ -126,10 +153,20 @@ class PreflightTests(unittest.TestCase):
                 "postgres_provisioner_rendered": {
                     "name": preflight.APP_PROJECT + "_postgres_provisioner_rendered"},
             },
-            "networks": {"vault_private": {
-                "external": True,
-                "name": preflight.VAULT_PROJECT + "_vault_private",
-            }},
+            "networks": {
+                "vault_private": {
+                    "external": True,
+                    "name": preflight.VAULT_PROJECT + "_vault_private",
+                },
+                "default": {
+                    "name": preflight.APP_PROJECT + "_default",
+                },
+                "collector_control": {
+                    "name": preflight.APP_PROJECT + "_collector_control",
+                    "driver": "bridge",
+                    "internal": True,
+                },
+            },
         }
 
     def make_vault_model(self):
@@ -168,6 +205,15 @@ class PreflightTests(unittest.TestCase):
                 "com.docker.compose.project": owner,
             }}]
         if command[:3] == ["docker", "network", "inspect"]:
+            if command[3] == preflight.APP_PROJECT + "_collector_control":
+                return [{
+                    "Name": command[3],
+                    "Internal": self.control_internal,
+                    "Driver": self.control_driver,
+                    "Labels": {
+                        "com.docker.compose.project": preflight.APP_PROJECT,
+                    },
+                }]
             return [{"Name": command[3], "Internal": True, "Labels": {
                 "com.docker.compose.project": preflight.VAULT_PROJECT,
             }}]
@@ -333,6 +379,44 @@ class PreflightTests(unittest.TestCase):
     def test_changed_vault_auth_volume_rejected(self):
         self.vault_model["volumes"]["backend_agent_auth"]["name"] = "other"
         with self.assertRaisesRegex(preflight.PreflightError, "Vault volume"):
+            self.run_preflight()
+
+    def test_collector_network_must_be_internal(self):
+        self.control_internal = False
+        with self.assertRaisesRegex(
+            preflight.PreflightError, "Collector control network"
+        ):
+            self.run_preflight()
+
+    def test_docker_proxy_cannot_join_default_network(self):
+        self.app_model["services"]["docker-proxy"]["networks"][
+            "default"
+        ] = None
+        with self.assertRaisesRegex(
+            preflight.PreflightError, "Docker Proxy isolation"
+        ):
+            self.run_preflight()
+
+    def test_collector_requires_both_networks(self):
+        self.app_model["services"]["collector"]["networks"].pop(
+            "collector_control"
+        )
+        with self.assertRaisesRegex(
+            preflight.PreflightError, "Collector network attachment"
+        ):
+            self.run_preflight()
+
+    def test_existing_docker_proxy_default_network_rejected(self):
+        proxy = self.containers[
+            preflight.APP_PROJECT + "-docker-proxy-1"
+        ]
+        proxy["NetworkSettings"]["Networks"][
+            preflight.APP_PROJECT + "_default"
+        ] = {}
+        with self.assertRaisesRegex(
+            preflight.PreflightError,
+            "Existing Collector network attachment"
+        ):
             self.run_preflight()
 
     def test_published_postgres_port_rejected(self):

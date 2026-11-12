@@ -15,6 +15,8 @@ services:
       POST: 0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - collector_control
 
   collector:
     build:
@@ -25,6 +27,9 @@ services:
       ENVIRONMENT_ID: env_local_compose
     depends_on:
       - docker-proxy
+    networks:
+      - default
+      - collector_control
 
   graph-engine:
     build:
@@ -673,6 +678,12 @@ volumes:
     name: transcendence-vault-dev_backend_agent_auth
 
 networks:
+  default:
+
+  collector_control:
+    driver: bridge
+    internal: true
+
   vault_private:
     external: true
     name: transcendence-vault-dev_vault_private

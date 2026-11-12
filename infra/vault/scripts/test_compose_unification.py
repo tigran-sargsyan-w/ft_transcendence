@@ -104,6 +104,25 @@ class UnifiedComposeTests(unittest.TestCase):
             m = mount(services[name], "/vault/tls/ca.crt")
             self.assertEqual(m["source"], str(TLS / "ca.crt"), name)
             self.assertTrue(m["read_only"], name)
+        control = model["networks"]["collector_control"]
+        self.assertEqual(
+            control["name"],
+            "transcendence-app-dev_collector_control"
+        )
+        self.assertTrue(control["internal"])
+        self.assertEqual(control["driver"], "bridge")
+        self.assertEqual(
+            set(services["docker-proxy"]["networks"]),
+            {"collector_control"}
+        )
+        self.assertEqual(
+            set(services["collector"]["networks"]),
+            {"default", "collector_control"}
+        )
+        self.assertNotIn(
+            "collector_control",
+            services["backend"].get("networks", {})
+        )
         network = model["networks"]["vault_private"]
         self.assertTrue(network["external"])
         self.assertEqual(network["name"],

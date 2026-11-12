@@ -202,6 +202,45 @@ class Preflight:
                     "Unexpected Vault network attachment: " + service)
         self.ok("Existing private Vault network")
 
+        control_name = APP_PROJECT + "_collector_control"
+        default_name = APP_PROJECT + "_default"
+        control = json_command(
+            ["docker", "network", "inspect", control_name]
+        )
+        require(
+            isinstance(control, list) and len(control) == 1
+            and control[0].get("Name") == control_name
+            and control[0].get("Internal") is True
+            and control[0].get("Driver") == "bridge"
+            and (control[0].get("Labels") or {}).get(
+                "com.docker.compose.project"
+            ) == APP_PROJECT,
+            "Unexpected existing Collector control network"
+        )
+
+        expected = {
+            "docker-proxy": {control_name},
+            "collector": {default_name, control_name},
+        }
+        for service in APP_SERVICES:
+            networks = set(
+                ((self.containers[service].get("NetworkSettings")
+                  or {}).get("Networks") or {})
+            )
+            if service in expected:
+                require(
+                    networks == expected[service],
+                    "Existing Collector network attachment differs: "
+                    + service
+                )
+            else:
+                require(
+                    control_name not in networks,
+                    "Unexpected Collector control network access: "
+                    + service
+                )
+        self.ok("Existing Collector network isolation")
+
     def tls_mounts(self):
         require(mount(self.containers["vault"], "/vault/tls", self.tls, "bind",
                       readonly=True), "Vault server TLS mount differs")
@@ -273,6 +312,39 @@ class Preflight:
         require(app_network.get("name") == self.network
                 and app_network.get("external") is True,
                 "Application target Vault network differs")
+        networks = app.get("networks", {})
+        control = networks.get("collector_control", {})
+        require(
+            control.get("name") == APP_PROJECT + "_collector_control"
+            and control.get("driver") == "bridge"
+            and control.get("internal") is True
+            and not control.get("external", False),
+            "Target Collector control network differs"
+        )
+        require(
+            networks.get("default", {}).get("name")
+            == APP_PROJECT + "_default",
+            "Target application default network differs"
+        )
+        require(
+            set(services["docker-proxy"].get("networks") or {})
+            == {"collector_control"},
+            "Target Docker Proxy isolation differs"
+        )
+        require(
+            set(services["collector"].get("networks") or {})
+            == {"default", "collector_control"},
+            "Target Collector network attachment differs"
+        )
+        for name, service in services.items():
+            if name not in ("collector", "docker-proxy"):
+                require(
+                    "collector_control"
+                    not in (service.get("networks") or {}),
+                    "Unexpected target Collector network access: " + name
+                )
+        self.ok("Target Collector network isolation")
+
         for name in APP_CA_SERVICES:
             require(name in services and compose_mount(services[name],
                     "/vault/tls/ca.crt", self.tls / "ca.crt"),
