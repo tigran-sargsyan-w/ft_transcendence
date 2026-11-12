@@ -1,7 +1,6 @@
 import { useState } from "react";
-import type { FormEvent } from "react";
 import { Link } from "react-router";
-import { registerUser } from "./auth";
+import { loginUser, registerUser } from "./auth";
 import { ApiError } from "@/services/api";
 import { Input } from "@/components/ui/input";
 import {
@@ -16,6 +15,7 @@ import {
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import type { SubmitEvent } from "react";
+import { useNavigate } from "react-router";
 
 type FormStatus = "idle" | "submitting" | "success";
 type RegisterCardProps = { onSwitch: () => void };
@@ -25,11 +25,12 @@ function isValidEmail(email: string): boolean {
 }
 
 export function RegisterCard({ onSwitch }: RegisterCardProps) {
+  let navigate = useNavigate();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState<FormStatus>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
 
   async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -55,14 +56,18 @@ export function RegisterCard({ onSwitch }: RegisterCardProps) {
     setStatus("submitting");
 
     try {
-      const user = await registerUser({
+      await registerUser({
         email: trimmedEmail,
         password,
       });
 
-      setRegisteredEmail(user.email);
       setStatus("success");
+      await loginUser({
+        email: trimmedEmail,
+        password,
+      });
       setPassword("");
+      navigate("/dashboard");
     } catch (err) {
       setStatus("idle");
 
@@ -73,29 +78,6 @@ export function RegisterCard({ onSwitch }: RegisterCardProps) {
 
       setError("Registration failed. Please try again.");
     }
-  }
-
-  if (status === "success" && registeredEmail) {
-    return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-12">
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          Account created
-        </h1>
-        <p className="mt-3 text-sm text-zinc-600">
-          Registered as{" "}
-          <span className="font-medium text-zinc-900">{registeredEmail}</span>.
-          Login will be available once the session API is ready.
-        </p>
-        <p className="mt-6 text-sm text-zinc-600">
-          <Link
-            className="underline underline-offset-2 hover:text-zinc-900"
-            to="/"
-          >
-            Back to home
-          </Link>
-        </p>
-      </main>
-    );
   }
 
   const isSubmitting = status === "submitting";
