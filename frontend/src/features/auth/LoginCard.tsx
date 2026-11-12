@@ -56,10 +56,11 @@ export function LoginCard({ onSwitch }: LoginCardProps) {
     setStatus("submitting");
 
     try {
-      await loginUser({
+      const user = await loginUser({
         email: trimmedEmail,
         password,
       });
+      console.log("user=", user);
       setStatus("success");
       setPassword("");
       navigate("/dashboard");

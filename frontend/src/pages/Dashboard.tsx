@@ -9,6 +9,7 @@ import { ServicesHealth } from "@/features/topology/dashboardCards/ServicesHealt
 import { ServicesImpacted } from "@/features/topology/dashboardCards/ServicesImpacted";
 import { mockIncidents } from "@/features/incidents/mockIncidents";
 import { WelcomeDashboardBanner } from "@/components/WelcomeDashboardBanner";
+import { mockCriticalNodes } from "@/features/topology/mockCriticalNodes";
 
 export default function Dashboard() {
   return (
@@ -25,7 +26,7 @@ export default function Dashboard() {
           <ServicesHealth />
         </div>
         <div className="flex flex-col gap-4 w-2/5">
-          <CriticalNodes />
+          <CriticalNodes criticalNodes={mockCriticalNodes} />
           <TeamCard />
         </div>
       </div>
