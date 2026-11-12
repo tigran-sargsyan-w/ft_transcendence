@@ -45,6 +45,30 @@ def main():
     test_password = require_env("FT_CR_PG_PASSWORD")
     override = Path(require_env("FT_APP_COMPOSE_OVERRIDE")).resolve()
 
+    custom_dir = os.environ.get("FT_CR_OVERRIDE_DIR")
+
+    if custom_dir:
+        config_dir = Path(custom_dir)
+
+        check(
+            config_dir.is_absolute()
+            and config_dir.is_dir()
+            and not config_dir.is_symlink(),
+            "Invalid Clean-Room override directory",
+        )
+
+        app_override = config_dir / "app.override.yml"
+        vault_override = config_dir / "vault.override.yml"
+
+        for config in (app_override, vault_override):
+            check(
+                config.is_file() and not config.is_symlink(),
+                f"Missing or invalid override file: {config.name}",
+            )
+    else:
+        app_override = APP_OVERRIDE
+        vault_override = VAULT_OVERRIDE
+
     check(
         app_project.startswith("ft-cr-")
         and vault_project.startswith("ft-cr-")
@@ -53,7 +77,7 @@ def main():
     )
 
     check(
-        override == APP_OVERRIDE.resolve(),
+        override == app_override.resolve(),
         "Unexpected application Compose override",
     )
 
@@ -91,7 +115,7 @@ def main():
         "docker", "compose",
         "-p", vault_project,
         "-f", str(ROOT / "infra/vault/server/compose.yml"),
-        "-f", str(VAULT_OVERRIDE),
+        "-f", str(vault_override),
         "--profile", "setup",
         "--profile", "maintenance",
     ])
@@ -101,7 +125,7 @@ def main():
         "-p", app_project,
         "-f", str(ROOT / "compose.yml"),
         "-f", str(ROOT / "compose.vault.yml"),
-        "-f", str(APP_OVERRIDE),
+        "-f", str(app_override),
         "--profile", "vault-setup",
         "--profile", "vault-maintenance",
     ])

@@ -78,6 +78,59 @@ describe('User registration (e2e)', () => {
     expect(passwordMatches).toBe(true);
   });
 
+  it('gives a default display name and no avatar when none is sent', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send({ email, password: 'password123' })
+      .expect(201);
+
+    expect(response.body.data.displayName).toBe(
+      `User ${response.body.data.id.slice(0, 8)}`,
+    );
+    expect(response.body.data.avatarUrl).toBeNull();
+  });
+
+  it('stores the display name trimmed, and HTML as it is', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send({
+        email,
+        password: 'password123',
+        displayName: '  <b>Ada</b> Lovelace ',
+      })
+      .expect(201);
+
+    expect(response.body.data.displayName).toBe('<b>Ada</b> Lovelace');
+
+    const storedUser = await prisma.user.findUnique({ where: { email } });
+
+    expect(storedUser?.displayName).toBe('<b>Ada</b> Lovelace');
+  });
+
+  it('accepts a display name of 64 characters', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send({ email, password: 'password123', displayName: 'a'.repeat(64) })
+      .expect(201);
+  });
+
+  it.each([
+    ['empty', ''],
+    ['only spaces', '   '],
+    ['too long', 'a'.repeat(65)],
+    ['not a string', 42],
+    ['containing a NUL character', 'a\u0000b'],
+  ])('rejects a display name that is %s', async (_label, displayName) => {
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send({ email, password: 'password123', displayName })
+      .expect(400);
+
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    expect(response.body.error.details).toHaveProperty('displayName');
+    expect(await prisma.user.count({ where: { email } })).toBe(0);
+  });
+
   it('rejects invalid registration input', async () => {
     const response = await request(app.getHttpServer())
       .post('/api/v1/auth/register')

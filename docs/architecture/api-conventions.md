@@ -59,8 +59,9 @@ The `code` is stable and machine-readable. An error that defines its own code us
 | `TOO_MANY_REQUESTS` | 429 | Too many login attempts, or too many analyses | none |
 | `SERVICE_UNAVAILABLE` | 503 | `GET /health` cannot reach a dependency, cannot read the migrations of the repository (`{ "migrations": "unavailable" }`), or the database has migrations that are not applied | `{ "<dependency>": "unavailable" }`, or `{ "migrations": "pending" }` |
 | `INTERNAL_ERROR` | 500 | Unexpected server error. The message is always `Internal server error`; the real error is only logged | none |
-| `BAD_REQUEST` | 400 | Malformed request, such as invalid JSON | none |
+| `BAD_REQUEST` | 400 | Malformed request, such as invalid JSON, or an id in the path that is not a UUID | none |
 | `NOT_FOUND` | 404 | Unknown route | none |
+| `USER_NOT_FOUND` | 404 | `GET /users/:id` with an id that no user has | none |
 | `PAYLOAD_TOO_LARGE` | 413 | Request body over the size limit | none |
 | `TOPOLOGY_UNKNOWN_ENVIRONMENT` | — | `topology:subscribe` with an `environmentId` the server does not follow | none |
 | `TOPOLOGY_UNAVAILABLE` | — | `topology:subscribe` before the server has any topology | none |
