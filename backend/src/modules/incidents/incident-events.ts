@@ -28,7 +28,10 @@ export type EditableFields = {
   commanderId: string;
 };
 
-export type NewEvent = { type: string; data: Record<string, unknown> };
+type Change = { from: string; to: string };
+
+// `data` is `{ "<field>": { from, to } }`.
+export type NewEvent = { type: string; data: Record<string, Change> };
 
 // The event of each field, in the order they are written.
 const EVENT_OF_FIELD: Record<keyof EditableFields, string> = {
@@ -70,8 +73,6 @@ export type StoredEvent = {
   createdAt: Date;
   actor: UserRef;
 };
-
-type Change = { from: string; to: string };
 
 const changeOf = (data: unknown, field: string) =>
   (data as Record<string, Change>)[field];
