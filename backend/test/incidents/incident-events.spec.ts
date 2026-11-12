@@ -189,6 +189,13 @@ describe('statusHistory and resolvedAt', () => {
     );
   });
 
+  it('gives null when the history does not end on resolved', () => {
+    // A read that saw `resolved` while a reopen was being written.
+    expect(
+      resolvedAt('resolved', statusHistory(events.slice(0, 5))),
+    ).toBeNull();
+  });
+
   it('gives null when the incident is not resolved, even if it was once', () => {
     expect(resolvedAt('open', statusHistory(events.slice(0, 5)))).toBeNull();
   });

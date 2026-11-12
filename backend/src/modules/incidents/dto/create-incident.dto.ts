@@ -8,14 +8,14 @@ import {
   MaxLength,
 } from 'class-validator';
 import { SEVERITIES } from '../incident-events.js';
-import { NoNul, Trim } from './validators.js';
+import { PlainText, Trim } from './validators.js';
 
 export class CreateIncidentDto {
   @Trim()
   @IsString()
   @IsNotEmpty()
   @MaxLength(200)
-  @NoNul()
+  @PlainText()
   title!: string;
 
   @IsIn(SEVERITIES)

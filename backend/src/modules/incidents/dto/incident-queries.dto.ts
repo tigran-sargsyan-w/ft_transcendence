@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { SEVERITIES, STATUSES, TIMELINE_KINDS } from '../incident-events.js';
+import { PlainText } from './validators.js';
 
 // Every filter is optional.
 export class ListIncidentsDto {
@@ -15,6 +16,7 @@ export class ListIncidentsDto {
   @IsOptional()
   @IsString()
   @IsNotEmpty()
+  @PlainText()
   environmentId?: string;
 }
 

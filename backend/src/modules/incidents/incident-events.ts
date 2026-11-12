@@ -176,10 +176,14 @@ export function statusHistory(
 }
 
 // The date of the last change to `resolved`, while the incident is resolved:
-// the history ends on the current status.
+// the history ends on the current status. The incident and its history are
+// read one after the other, so a reopen written in between must not give
+// `resolved` the date of the reopen.
 export function resolvedAt(
   status: string,
   history: { status: string; at: string }[],
 ) {
-  return status === 'resolved' ? (history.at(-1)?.at ?? null) : null;
+  const last = history.at(-1);
+
+  return status === 'resolved' && last?.status === 'resolved' ? last.at : null;
 }

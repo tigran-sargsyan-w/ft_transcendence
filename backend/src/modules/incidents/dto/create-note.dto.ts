@@ -1,5 +1,5 @@
 import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
-import { NoNul, Trim } from './validators.js';
+import { PlainText, Trim } from './validators.js';
 
 export class CreateNoteDto {
   // Plain text, as the chat messages will be.
@@ -7,6 +7,6 @@ export class CreateNoteDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(2000)
-  @NoNul()
+  @PlainText()
   body!: string;
 }

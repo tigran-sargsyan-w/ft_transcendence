@@ -229,6 +229,7 @@ describe('Incidents (e2e)', () => {
       ['a blank title', { title: '   ' }, 'title'],
       ['a title of 201 characters', { title: 'x'.repeat(201) }, 'title'],
       ['a NUL character in the title', { title: 'a\0b' }, 'title'],
+      ['a lone surrogate in the title', { title: '\ud800' }, 'title'],
       ['an unknown severity', { severity: 'sev0' }, 'severity'],
       ['no environmentId', { environmentId: undefined }, 'environmentId'],
       ['no seed', { seedNodeIds: [] }, 'seedNodeIds'],
@@ -355,17 +356,19 @@ describe('Incidents (e2e)', () => {
       expect(other.environmentId).toBe('env_other');
     });
 
-    it.each(['?status=mitigated', '?severity=sev9', '?unknown=1'])(
-      'refuses the filter %s',
-      async (query) => {
-        const response = await http()
-          .get(`/api/v1/incidents${query}`)
-          .set('Cookie', ada.cookie)
-          .expect(400);
+    it.each([
+      '?status=mitigated',
+      '?severity=sev9',
+      '?unknown=1',
+      '?environmentId=%00',
+    ])('refuses the filter %s', async (query) => {
+      const response = await http()
+        .get(`/api/v1/incidents${query}`)
+        .set('Cookie', ada.cookie)
+        .expect(400);
 
-        expect(response.body.error.code).toBe('VALIDATION_ERROR');
-      },
-    );
+      expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    });
   });
 
   describe('PATCH /incidents/:id', () => {
@@ -450,6 +453,33 @@ describe('Incidents (e2e)', () => {
       expect(await eventCount(id)).toBe(1);
     });
 
+    it('does not take the commander in capitals for another one', async () => {
+      const { id } = (await create(ada.cookie).expect(201)).body.data;
+
+      // Ada is already the commander: nothing changes.
+      const same = await patch(ada.cookie, id, {
+        version: 1,
+        commanderId: ada.id.toUpperCase(),
+      }).expect(200);
+
+      expect(same.body.data.version).toBe(1);
+      expect(await eventCount(id)).toBe(1);
+
+      // Another user: the id is stored and told in small letters.
+      await patch(ada.cookie, id, {
+        version: 1,
+        commanderId: bob.id.toUpperCase(),
+      }).expect(200);
+
+      const entries = (await timeline(ada.cookie, id).expect(200)).body.data;
+
+      expect(entries[1].data).toEqual({
+        kind: 'action',
+        action: 'role_changed',
+        userId: bob.id,
+      });
+    });
+
     it('dates resolvedAt from the last change to resolved, and reopens', async () => {
       const { id } = (await create(ada.cookie).expect(201)).body.data;
       const resolved = await patch(ada.cookie, id, {
@@ -468,11 +498,27 @@ describe('Incidents (e2e)', () => {
 
       expect(reopened.body.data.resolvedAt).toBeNull();
       expect(reopened.body.data.statusHistory).toHaveLength(3);
+
+      // Resolved again: the date of the second time, not of the first.
+      const again = await patch(ada.cookie, id, {
+        version: 3,
+        status: 'resolved',
+      }).expect(200);
+      const { statusHistory } = again.body.data;
+
+      expect(statusHistory).toHaveLength(4);
+      expect(again.body.data.resolvedAt).toBe(statusHistory[3].at);
+      expect(again.body.data.resolvedAt).not.toBe(statusHistory[1].at);
     });
 
     const invalid: [string, Record<string, unknown>, string][] = [
       ['no version', { status: 'resolved' }, 'version'],
       ['a version of 0', { version: 0, status: 'resolved' }, 'version'],
+      [
+        'a version too big for the column',
+        { version: 3_000_000_000, status: 'resolved' },
+        'version',
+      ],
       [
         'a version that is not a number',
         { version: '1', status: 'open' },
@@ -484,6 +530,11 @@ describe('Incidents (e2e)', () => {
       ['an unknown severity', { version: 1, severity: 'sev0' }, 'severity'],
       ['a blank title', { version: 1, title: ' ' }, 'title'],
       ['a NUL in the title', { version: 1, title: 'a\0' }, 'title'],
+      [
+        'a lone surrogate in the title',
+        { version: 1, title: '\ud800' },
+        'title',
+      ],
       [
         'a commanderId that is not a UUID',
         { version: 1, commanderId: 'x' },
@@ -720,6 +771,7 @@ describe('Incidents (e2e)', () => {
       ['a blank note', '   '],
       ['a note of 2001 characters', 'x'.repeat(2001)],
       ['a NUL character', 'a\0b'],
+      ['a lone surrogate', '\ud800'],
       ['a body that is not text', 12],
       ['no body', undefined],
     ];
