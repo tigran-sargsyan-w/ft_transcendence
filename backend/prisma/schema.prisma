@@ -18,6 +18,10 @@ model User {
   updatedAt    DateTime  @updatedAt
   sessions     Session[]
 
+  createdIncidents   Incident[]      @relation("IncidentCreator")
+  commandedIncidents Incident[]      @relation("IncidentCommander")
+  incidentEvents     IncidentEvent[]
+
   @@map("users")
 }
 
@@ -31,4 +35,53 @@ model Session {
   expiresAt DateTime
 
   @@map("sessions")
+}
+
+// Incident room v1 (docs/adr/0004). `severity` and `status` are plain text:
+// the allowed values are in the code (incident-events.ts) and checked by the
+// DTOs, so the rules do not depend on the generated client.
+model Incident {
+  id               String          @id @default(uuid()) @db.Uuid
+  environmentId    String
+  title            String
+  // sev1 (most severe) to sev4.
+  severity         String
+  // open, investigating or resolved.
+  status           String
+  seedNodeIds      String[]
+  createdById      String          @db.Uuid
+  createdBy        User            @relation("IncidentCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  commanderId      String          @db.Uuid
+  commander        User            @relation("IncidentCommander", fields: [commanderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  // The topology the incident was opened against.
+  openedAtEpoch    String
+  openedAtRevision Int
+  // Starts at 1, +1 for each update (optimistic locking).
+  version          Int             @default(1)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  events           IncidentEvent[]
+
+  @@map("incidents")
+}
+
+// The timeline: rows are only ever inserted.
+model IncidentEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  // Sorts the timeline: the order of insertion, with gaps.
+  seq        Int      @default(autoincrement())
+  incidentId String   @db.Uuid
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  // The incident version this event belongs to (a note: the version read).
+  version    Int
+  // created, title_changed, severity_changed, status_changed,
+  // commander_changed or note_added.
+  type       String
+  actorId    String   @db.Uuid
+  actor      User     @relation(fields: [actorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  data       Json
+  createdAt  DateTime @default(now())
+
+  @@index([incidentId, seq])
+  @@map("incident_events")
 }
