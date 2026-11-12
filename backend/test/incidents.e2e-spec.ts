@@ -439,6 +439,15 @@ describe('Incidents (e2e)', () => {
 
       expect(response.body.data.version).toBe(1);
       expect(await eventCount(id)).toBe(1);
+
+      // Whatever version it sends: there is nothing to refuse.
+      const old = await patch(ada.cookie, id, {
+        version: 99,
+        status: 'open',
+      }).expect(200);
+
+      expect(old.body.data.version).toBe(1);
+      expect(await eventCount(id)).toBe(1);
     });
 
     it('dates resolvedAt from the last change to resolved, and reopens', async () => {
