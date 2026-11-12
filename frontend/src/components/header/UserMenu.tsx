@@ -11,10 +11,13 @@ import { Link } from "react-router";
 import { logoutUser } from "@/features/auth/auth";
 import { useNavigate } from "react-router";
 import { getInitial } from "@/lib/user";
+import { useAuth } from "@/features/auth/AuthContext";
 
 export function UserMenu() {
   let navigate = useNavigate();
 
+  const { auth } = useAuth();
+  const userName = auth.user.console.log(auth.user);
   async function handleLogout() {
     try {
       await logoutUser();
