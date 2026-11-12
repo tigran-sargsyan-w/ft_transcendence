@@ -11,69 +11,74 @@ import {
 } from "@/components/ui/card";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
+import { loginUser } from "./auth";
+import { useNavigate } from "react-router";
+import { ApiError } from "@/services/api";
+import type { SubmitEvent } from "react";
 
 type LoginCardProps = { onSwitch: () => void };
 
-// type FormStatus = "idle" | "submitting" | "success";
+type FormStatus = "idle" | "submitting" | "success";
 
-// function isValidEmail(email: string): boolean {
-//   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-// }
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
 
 export function LoginCard({ onSwitch }: LoginCardProps) {
+  let navigate = useNavigate();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  // const [status, setStatus] = useState<FormStatus>("idle");
+  const [status, setStatus] = useState<FormStatus>("idle");
   const [error, setError] = useState<string | null>(null);
 
-  // async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-  //   event.preventDefault();
-  //   setError(null);
+  async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
 
-  //   const trimmedEmail = email.trim();
+    const trimmedEmail = email.trim();
 
-  //   if (!isValidEmail(trimmedEmail)) {
-  //     setError("Enter a valid email address.");
-  //     return;
-  //   }
+    if (!isValidEmail(trimmedEmail)) {
+      setError("Enter a valid email address.");
+      return;
+    }
 
-  //   if (password.length < 8) {
-  //     setError("Password must be at least 8 characters.");
-  //     return;
-  //   }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
 
-  //   if (password.length > 64) {
-  //     setError("Password must be at most 64 characters.");
-  //     return;
-  //   }
+    if (password.length > 64) {
+      setError("Password must be at most 64 characters.");
+      return;
+    }
 
-  //   setStatus("submitting");
+    setStatus("submitting");
 
-  //   try {
-  //     const user = await registerUser({
-  //       email: trimmedEmail,
-  //       password,
-  //     });
+    try {
+      await loginUser({
+        email: trimmedEmail,
+        password,
+      });
+      setStatus("success");
+      setPassword("");
+      navigate("/dashboard");
+    } catch (err) {
+      setStatus("idle");
 
-  //     setRegisteredEmail(user.email);
-  //     setStatus("success");
-  //     setPassword("");
-  //   } catch (err) {
-  //     setStatus("idle");
+      if (err instanceof ApiError) {
+        setError(err.message);
+        return;
+      }
 
-  //     if (err instanceof RegisterError) {
-  //       setError(err.message);
-  //       return;
-  //     }
-
-  //     setError("Registration failed. Please try again.");
-  //   }
-  // }
+      setError("Login failed. Please try again.");
+    }
+  }
 
   const isSubmitting = status === "submitting";
 
   return (
-    <form noValidate className="w-full max-w-100">
+    <form noValidate onSubmit={handleSubmit} className="w-full max-w-100">
       <Card>
         <CardHeader>
           <CardTitle>Sign in</CardTitle>

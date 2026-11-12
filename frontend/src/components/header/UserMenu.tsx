@@ -8,8 +8,21 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Link } from "react-router";
+import { logoutUser } from "@/features/auth/auth";
+import { useNavigate } from "react-router";
 
 export function UserMenu() {
+  let navigate = useNavigate();
+
+  async function handleLogout() {
+    try {
+      await logoutUser();
+      navigate("/");
+    } catch (error) {
+      console.error("Logout failed", error);
+    }
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger>
@@ -27,7 +40,7 @@ export function UserMenu() {
           <Link to="/organization">Organization</Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem>Log out</DropdownMenuItem>
+        <DropdownMenuItem onSelect={handleLogout}>Log out</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

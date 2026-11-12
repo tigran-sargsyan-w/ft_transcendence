@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Link } from "react-router";
 import { loginUser, registerUser } from "./auth";
 import { ApiError } from "@/services/api";
 import { Input } from "@/components/ui/input";
