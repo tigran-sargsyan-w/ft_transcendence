@@ -63,8 +63,10 @@ The `code` is stable and machine-readable. An error that defines its own code us
 | `NOT_FOUND` | 404 | Unknown route | none |
 | `USER_NOT_FOUND` | 404 | `GET /users/:id` with an id that no user has | none |
 | `PAYLOAD_TOO_LARGE` | 413 | Request body over the size limit | none |
-| `TOPOLOGY_UNKNOWN_ENVIRONMENT` | — | `topology:subscribe` with an `environmentId` the server does not follow | none |
-| `TOPOLOGY_UNAVAILABLE` | — | `topology:subscribe` before the server has any topology | none |
+| `INCIDENT_NOT_FOUND` | 404 | No incident has that id (routes of `/incidents`) | none |
+| `INCIDENT_VERSION_CONFLICT` | 409 | `PATCH /incidents/:id` with a `version` that is not the current one | the current incident |
+| `TOPOLOGY_UNKNOWN_ENVIRONMENT` | 404 | An `environmentId` the server does not follow: `topology:subscribe` (in the acknowledgement), the analyses, `POST /incidents` | none |
+| `TOPOLOGY_UNAVAILABLE` | 503 | No topology yet: `topology:subscribe` (in the acknowledgement), the analyses, `POST /incidents` | none |
 | `TOPOLOGY_NOT_SUBSCRIBED` | — | `topology:resync` from a socket that has not subscribed | none |
 
 A `—` in the status column marks a code that only travels in the acknowledgement of a Socket.IO command, never in an HTTP response (see [Realtime topology protocol](./realtime-topology.md#errors)).
