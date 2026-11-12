@@ -238,5 +238,5 @@ volumes:
 
 networks:
   vault_private:
-    driver: bridge
-    internal: true
+    external: true
+    name: transcendence-vault-dev_vault_private

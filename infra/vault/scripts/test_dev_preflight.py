@@ -160,11 +160,11 @@ class PreflightTests(unittest.TestCase):
                 },
                 "default": {
                     "name": preflight.APP_PROJECT + "_default",
+                    "external": True,
                 },
                 "collector_control": {
                     "name": preflight.APP_PROJECT + "_collector_control",
-                    "driver": "bridge",
-                    "internal": True,
+                    "external": True,
                 },
             },
         }
@@ -188,7 +188,7 @@ class PreflightTests(unittest.TestCase):
             },
             "networks": {"vault_private": {
                 "name": preflight.VAULT_PROJECT + "_vault_private",
-                "internal": True,
+                "external": True,
             }},
         }
 
@@ -205,6 +205,15 @@ class PreflightTests(unittest.TestCase):
                 "com.docker.compose.project": owner,
             }}]
         if command[:3] == ["docker", "network", "inspect"]:
+            if command[3] == preflight.APP_PROJECT + "_default":
+                return [{
+                    "Name": command[3],
+                    "Internal": False,
+                    "Driver": "bridge",
+                    "Labels": {
+                        "com.docker.compose.project": preflight.APP_PROJECT,
+                    },
+                }]
             if command[3] == preflight.APP_PROJECT + "_collector_control":
                 return [{
                     "Name": command[3],
@@ -357,7 +366,7 @@ class PreflightTests(unittest.TestCase):
             self.run_preflight()
 
     def test_wrong_private_network_rejected(self):
-        self.vault_model["networks"]["vault_private"]["internal"] = False
+        self.vault_model["networks"]["vault_private"]["external"] = False
         with self.assertRaisesRegex(preflight.PreflightError, "Vault network"):
             self.run_preflight()
 

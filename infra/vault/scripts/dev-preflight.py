@@ -204,6 +204,20 @@ class Preflight:
 
         control_name = APP_PROJECT + "_collector_control"
         default_name = APP_PROJECT + "_default"
+        default_network = json_command(
+            ["docker", "network", "inspect", default_name]
+        )
+        require(
+            isinstance(default_network, list)
+            and len(default_network) == 1
+            and default_network[0].get("Name") == default_name
+            and default_network[0].get("Driver") == "bridge"
+            and default_network[0].get("Internal") is False
+            and (default_network[0].get("Labels") or {}).get(
+                "com.docker.compose.project"
+            ) == APP_PROJECT,
+            "Unexpected existing application default network"
+        )
         control = json_command(
             ["docker", "network", "inspect", control_name]
         )
@@ -313,19 +327,13 @@ class Preflight:
                 and app_network.get("external") is True,
                 "Application target Vault network differs")
         networks = app.get("networks", {})
-        control = networks.get("collector_control", {})
-        require(
-            control.get("name") == APP_PROJECT + "_collector_control"
-            and control.get("driver") == "bridge"
-            and control.get("internal") is True
-            and not control.get("external", False),
-            "Target Collector control network differs"
-        )
-        require(
-            networks.get("default", {}).get("name")
-            == APP_PROJECT + "_default",
-            "Target application default network differs"
-        )
+        for key in ("collector_control", "default"):
+            target = networks.get(key, {})
+            require(
+                target.get("name") == APP_PROJECT + "_" + key
+                and target.get("external") is True,
+                "Target application network differs: " + key
+            )
         require(
             set(services["docker-proxy"].get("networks") or {})
             == {"collector_control"},
@@ -375,7 +383,8 @@ class Preflight:
                         "com.docker.compose.project") == expected_owner,
                     "Target runtime volume missing or has wrong owner: " + name)
         net = vault.get("networks", {}).get("vault_private", {})
-        require(net.get("name") == self.network and net.get("internal") is True,
+        require(net.get("name") == self.network
+                and net.get("external") is True,
                 "Unexpected target Vault network")
         for name in ("vault", "vault-storage-permissions", "vault-tls-files"):
             require(name in vault_services and compose_mount(vault_services[name],

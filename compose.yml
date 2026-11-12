@@ -679,10 +679,12 @@ volumes:
 
 networks:
   default:
+    external: true
+    name: transcendence-app-dev_default
 
   collector_control:
-    driver: bridge
-    internal: true
+    external: true
+    name: transcendence-app-dev_collector_control
 
   vault_private:
     external: true
