@@ -1,76 +1,217 @@
-# Issue #115 — unified Vault-only development Compose (stages A/B)
+# Issue #115 — Unified Vault-backed Development Startup
 
-**Status:** YAML consolidation completed; **live cutover not performed**.
-Do not use `docker compose up` against the current legacy containers until the
-preflight/transition phase has been explicitly reviewed and approved. Existing
-Vault Raft, PostgreSQL and AppRole volumes must not be recreated.
+## Status
 
-## Target layout
+Live cutover to the two-file Compose architecture is complete.
 
-The normal development configuration has exactly two Compose files:
+The unified startup has been validated against the existing
+development installation. This is not a fresh-machine bootstrap
+or a production deployment.
 
-- `compose.yml`: full Vault-only application, its agents, PostgreSQL, backend,
-  frontend, collector, graph engine, Nginx, and one-shot maintenance helpers.
-- `infra/vault/server/compose.yml`: separately managed Vault Server, Raft,
-  backend AppRole storage, TLS and operator maintenance helpers.
+## Architecture
 
-The project names remain `transcendence-app-dev` and
-`transcendence-vault-dev`. The existing cross-project network is
-`transcendence-vault-dev_vault_private`, and the persistent volumes keep
-their original Docker names. The normal development profile does not expose
-PostgreSQL, Backend, Frontend, Collector, Graph Engine or Docker Socket Proxy
-ports; loopback Nginx is the public development entry point.
+The development environment uses two Compose files:
 
-Legacy `compose.vault.yml`, `compose.dev.yml` and tracked runtime overlays
-have been consolidated and are no longer selected by any normal script.
-The Clean-Room templates remain separate **test fixtures**, never a normal
-runtime profile. The old per-user overrides in `$HOME/.local/state` are **not**
-deleted: existing Docker labels may still refer to them until cutover.
+- `compose.yml` — application services and maintenance helpers.
+- `infra/vault/server/compose.yml` — Vault Server and operator tools.
 
-## Configuration and secret contract
+Existing Docker project names are preserved:
 
-`FT_DEV_TLS_DIR` is a **non-secret path** to the existing trusted TLS
-directory (default:
-`${XDG_STATE_HOME:-$HOME/.local/state}/transcendence/dev/tls`).
-The normal startup entry point will set this variable only for child
-processes; developers will not have to export it manually.
+- Application: `transcendence-app-dev`
+- Vault: `transcendence-vault-dev`
 
-The application receives its runtime database DSN through
-`DATABASE_URL_FILE` from the restricted Vault Agent mount. No application
-database URL or PostgreSQL bootstrap password belongs in Compose environment.
-An **existing, initialized** PostgreSQL volume is a prerequisite to routine
-startup. The default `POSTGRES_USER`/`POSTGRES_DB` values in the new model are
-provisional until the live deployment identity has been checked. If those
-values differ, stop and reconcile **non-secret identity settings** before
-cutover. Never create another PostgreSQL volume to solve a mismatch.
+The existing Vault Raft, PostgreSQL and AppRole volumes are reused.
+Routine startup must not recreate or replace these resources.
 
-Optional Compose `develop.watch` rules live in the application file; normal
-`up` does not start watch mode. One-shot provisioning, migration and
-maintenance services remain explicitly profile-gated.
+## Prerequisites
 
-## Read-only validation and cutover boundary
+The development machine must already have:
+
+- Docker Engine and Docker Compose v2.
+- Python 3, Bash, flock and OpenSSL.
+- The existing initialized Vault Raft storage.
+- The existing PostgreSQL data volume.
+- Configured Vault AppRoles, ACL policies and KV secrets.
+- Valid local TLS material and existing Docker networks.
+- The original Shamir unseal shares stored securely outside Git.
+
+The default TLS state directory is:
+
+`${XDG_STATE_HOME:-$HOME/.local/state}/transcendence/dev/tls`
+
+Fresh bootstrap, missing volumes and initial credential provisioning
+are separate trusted operator procedures.
+
+## Routine startup
+
+From the repository root:
 
 ```bash
-python3 -m unittest discover -s infra/vault/scripts -p 'test_compose_unification.py' -v
-python3 -m unittest discover -s infra/vault/scripts -p 'test_dev_preflight.py' -v
+./scripts/dev-start.sh
+```
+
+This is the normal entry point for an already prepared installation.
+
+The workflow:
+
+1. Acquires the shared migration/provisioning lock.
+2. Validates the existing infrastructure and Compose provenance.
+3. Starts only containers that are stopped.
+4. Verifies Vault initialization, seal state and Raft storage.
+5. Waits for PostgreSQL and required service health.
+6. Verifies Prisma migration history and checksums.
+7. Refuses pending migrations in normal startup mode.
+8. Verifies Vault Agent secret delivery.
+9. Waits for Vite and Nginx HTTPS readiness.
+10. Checks Backend HTTPS and Collector Docker Proxy access.
+
+Running the same command again must preserve running container
+identities and avoid unnecessary migrations.
+
+No automatic Vault initialization, AppRole rotation or
+PostgreSQL password rotation is performed.
+
+## Available commands
+
+### Read-only configuration preflight
+
+```bash
 ./scripts/dev-start.sh --check
 ```
 
-`--check` inspects existing containers and both target Compose models. It
-accepts only the known historical labels or the exact single-file labels; it
-does **not** recreate anything. If historical labels are found, it reports
-that cutover remains required. Normal `./scripts/dev-start.sh` stays disabled.
+Validates container identity, Compose configuration, TLS,
+network isolation, mounts and persistent volumes.
 
-The standalone application migration helpers also refuse to act on old
-development Compose provenance, preventing unintentional container recreation
-while the model changes. Clean-Room projects remain independently supported.
+Preflight may recognize historical Compose provenance for
+diagnostic purposes. Normal startup rejects legacy containers.
 
-**Separate upcoming work (stages C–E):** verify live PostgreSQL identity,
-validate service-by-service diffs and data preservation, explicitly cut over
-containers, implement one-command Vault readiness/unseal/recovery and
-migration orchestration, run isolated Clean-Room integration tests, then
-revise operator onboarding. No automatic bootstrap or credential rotation is
-introduced by this consolidation.
+This command does not establish runtime service readiness.
 
-Never use `docker compose down -v`, delete a Raft/PostgreSQL volume, overwrite
-the TLS CA or initialize an already prepared Vault as part of cutover.
+### Read-only startup plan
+
+```bash
+./scripts/dev-start.sh --plan
+```
+
+Reports container states, health, Vault seal state and Prisma
+migration status.
+
+Exits nonzero when startup is required, a mandatory component
+is unhealthy, Vault is sealed or migrations are pending.
+
+It does not start containers or apply migrations.
+
+### Normal startup
+
+```bash
+./scripts/dev-start.sh
+```
+
+Starts stopped containers without recreating them.
+
+Pending Prisma migrations require explicit authorization.
+
+### Controlled migrations
+
+```bash
+./scripts/dev-start.sh --migrate
+```
+
+When Prisma migrations are current, this is a no-op.
+
+When migrations are pending, the workflow stops Backend before
+running the existing controlled migration and provisioning
+scripts, then audits the migration state before resuming Backend.
+
+Migration failure leaves Backend stopped.
+
+Do not run this mode merely to repair Vault Agent authentication.
+
+## Vault credentials
+
+The Backend receives PostgreSQL credentials through a
+restricted Vault Agent-rendered file.
+
+Backend AppRole parameters:
+
+- Token TTL: 1 hour.
+- Maximum token TTL: 4 hours.
+- SecretID TTL: 168 hours.
+- SecretID maximum uses: 20.
+- Default token policy: disabled.
+
+The Backend ACL permits its specific KV read and token
+self-lookup/self-renewal operations.
+
+Expired or exhausted SecretIDs require operator-controlled
+recovery. Credential rotation is not part of routine startup.
+
+Follow `infra/vault/scripts/APPROLE-ROTATION.md` for the
+rotate/recover, Agent verification and finalize procedure.
+
+Never print, commit or paste Vault tokens, SecretIDs,
+database connection strings or Shamir shares.
+
+## Failure handling
+
+If the Vault Agent is unhealthy, inspect its health status
+and authentication failures before restarting or rotating.
+
+If a container is stopped, normal startup resumes that
+existing container. Unexpected ownership, mounts, volumes,
+TLS configuration or Compose provenance fail closed.
+
+Frontend readiness is checked through Vite HTTP and Nginx
+HTTPS with bounded retries.
+
+Do not use `docker compose down -v` against existing
+development projects.
+
+Do not recreate Vault Raft or PostgreSQL volumes to fix
+a startup error.
+
+## Validation performed
+
+Verified against the existing development installation:
+
+- Nine-container unified Compose cutover.
+- Repeatable startup without container recreation.
+- Migration no-op when Prisma history is current.
+- Detection of unhealthy Vault Agent.
+- Operator-controlled Backend AppRole recovery.
+- Python-to-Bash migration lock inheritance.
+- Rejection of competing lock acquisition.
+- Detection and recovery of a stopped Frontend.
+- Vite and HTTPS readiness after container restart.
+- Preservation of the other eight container identities.
+
+Unit tests cover startup, preflight, migration auditing,
+migration authorization and HTTP readiness.
+
+## Remaining validation
+
+A real pending Prisma migration still requires an isolated
+Clean-Room integration test, including failure and rollback
+behavior.
+
+The interactive Shamir unseal path also requires an independent
+end-to-end validation before being considered fully tested.
+
+This implementation does not introduce a new auto-unseal trust
+provider, automatic AppRole rotation or production high
+availability.
+
+## Developer onboarding
+
+For an already prepared development machine:
+
+```bash
+./scripts/dev-start.sh --check
+./scripts/dev-start.sh --plan
+./scripts/dev-start.sh
+```
+
+Use `--migrate` only when a reviewed migration needs to be applied.
+
+If trusted infrastructure is missing, stop and follow the
+separate bootstrap or recovery procedures.

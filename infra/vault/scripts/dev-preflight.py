@@ -405,8 +405,10 @@ class Preflight:
         self.tls_mounts()
         self.target_models()
         if self.legacy:
-            print("INFO: Legacy containers detected; unified cutover still required")
-        print("RESULT: PREFLIGHT PASSED (read-only; runtime cutover not approved)")
+            print("INFO: Legacy Compose provenance detected")
+            print("RESULT: PREFLIGHT PASSED (read-only; legacy startup blocked)")
+        else:
+            print("RESULT: PREFLIGHT PASSED (read-only; unified Compose provenance)")
 
 
 def main():
