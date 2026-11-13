@@ -7,6 +7,7 @@
 # Phase 4E: Prisma migrations and minimum runtime PostgreSQL grants.
 # Phase 5A: provision backend AppRole and start Vault Backend Agent only.
 # Phase 5B: start the existing Vault-only NestJS backend, and verify DB health.
+# Phase 5C: start Docker Socket Proxy, Collector and Graph Engine only.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,7 +15,7 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'HELP'
-Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--help]
+Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--help]
 
   --plan          Read-only inventory: dependencies, local setup, Docker state.
   --prepare-host  Prepare domain, nginx TLS, local CA trust and Vault TLS.
@@ -40,6 +41,8 @@ Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-reso
   --check-backend-agent   Read-only agent identity, health and secret-access check.
   --prepare-backend       Build/start ONLY Vault-backed NestJS backend (no other services).
   --check-backend         Read-only backend identity, health and local HTTP/DB check.
+  --prepare-support-services  Start Docker Socket Proxy, Collector and Graph Engine only.
+  --check-support-services    Check their networks, mounts and HTTP readiness.
   --help          Show this message.
 
 This is an INCREMENTAL fresh-machine bootstrap, not a complete installer.
@@ -50,7 +53,7 @@ HELP
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend) ;;
+  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -199,6 +202,7 @@ case "$MODE" in
     python3 scripts/dev/bootstrap_migrations.py plan
     python3 scripts/dev/bootstrap_backend_agent.py plan
     python3 scripts/dev/bootstrap_backend.py plan
+    python3 scripts/dev/bootstrap_support_services.py plan
     say "RESULT: BOOTSTRAP PLAN COMPLETE (read-only)"
     ;;
   --check-host)
@@ -246,6 +250,22 @@ case "$MODE" in
     ;;
   --check-migrations)
     python3 scripts/dev/bootstrap_migrations.py check
+    ;;
+  --check-support-services)
+    python3 scripts/dev/bootstrap_support_services.py check
+    ;;
+  --prepare-support-services)
+    host_check || fail "Host preparation incomplete"
+    python3 scripts/dev/bootstrap_resources.py check || fail "Docker resources incomplete"
+    python3 scripts/dev/bootstrap_backend.py check || fail "Vault-backed NestJS backend incomplete"
+    python3 scripts/dev/bootstrap_support_services.py plan
+    say ""
+    say "This stage starts ONLY Docker Socket Proxy, Collector and Graph Engine."
+    say "Existing trusted containers are preserved; no Vault or PostgreSQL changes."
+    say "The Docker socket stays read-only and isolated on collector_control."
+    say "Frontend, Nginx and other application services are NOT started."
+    confirm "Prepare Docker Proxy, Collector and Graph Engine on this VM?" || fail "Cancelled"
+    python3 scripts/dev/bootstrap_support_services.py apply
     ;;
   --check-backend)
     python3 scripts/dev/bootstrap_backend.py check
