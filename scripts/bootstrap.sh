@@ -4,6 +4,7 @@
 # Phase 3: Vault server. Phase 4A: KV v2, ACL policies, AppRoles.
 # Phase 4B: initial PostgreSQL credentials stored in Vault KV v2.
 # Phase 4C: PostgreSQL 18. Phase 4D: Vault-backed PostgreSQL roles.
+# Phase 4E: Prisma migrations and minimum runtime PostgreSQL grants.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -11,7 +12,7 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'HELP'
-Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--help]
+Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--help]
 
   --plan          Read-only inventory: dependencies, local setup, Docker state.
   --prepare-host  Prepare domain, nginx TLS, local CA trust and Vault TLS.
@@ -31,6 +32,8 @@ Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-reso
   --check-postgres    Read-only PostgreSQL container, auth and health verification.
   --prepare-postgres-roles  Initially provision backend/migrator roles from Vault DSNs.
   --check-postgres-roles    Read-only PostgreSQL role state/grants verification.
+  --prepare-migrations    Apply reviewed Prisma migrations and reconcile table grants.
+  --check-migrations      Read-only migration checksums and least-privilege grants verification.
   --help          Show this message.
 
 This is an INCREMENTAL fresh-machine bootstrap, not a complete installer.
@@ -41,7 +44,7 @@ HELP
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles) ;;
+  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -187,7 +190,7 @@ case "$MODE" in
     python3 scripts/dev/bootstrap_vault_secrets.py plan
     python3 scripts/dev/bootstrap_postgres.py plan
     python3 scripts/dev/bootstrap_postgres_roles.py plan
-    say "INFO: Prisma migrations and final table grants follow in a later phase"
+    python3 scripts/dev/bootstrap_migrations.py plan
     say "RESULT: BOOTSTRAP PLAN COMPLETE (read-only)"
     ;;
   --check-host)
@@ -232,6 +235,23 @@ case "$MODE" in
     ;;
   --check-postgres-roles)
     python3 scripts/dev/bootstrap_postgres_roles.py check
+    ;;
+  --check-migrations)
+    python3 scripts/dev/bootstrap_migrations.py check
+    ;;
+  --prepare-migrations)
+    host_check || fail "Host preparation incomplete"
+    python3 scripts/dev/bootstrap_resources.py check || fail "Docker resources incomplete"
+    python3 scripts/dev/bootstrap_postgres_roles.py check || fail "PostgreSQL roles incomplete"
+    python3 scripts/dev/bootstrap_migrations.py plan
+    say ""
+    say "This stage runs only the existing Prisma migration and SQL grant workflow."
+    say "It may issue an initial migrator AppRole SecretID in its dedicated volume."
+    say "Existing Vault DSNs and PostgreSQL passwords are never rotated."
+    say "No application, frontend or Nginx containers are started."
+    say "Unknown migration history or altered migration checksums are REFUSED."
+    confirm "Apply Prisma migrations and reconcile PostgreSQL grants?" || fail "Cancelled"
+    python3 scripts/dev/bootstrap_migrations.py apply
     ;;
   --prepare-postgres-roles)
     host_check || fail "Host preparation incomplete"
