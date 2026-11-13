@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ft_transcendence fresh-machine bootstrap (incremental implementation).
 # Phase 1: host TLS/domain. Phase 2: Docker networks/volumes.
-# Phase 3: Vault server and development-only initialization.
-# PostgreSQL initialization is NOT implemented in this version.
+# Phase 3: Vault server. Phase 4A: KV v2, ACL policies, AppRoles.
+# PostgreSQL and database secrets are NOT implemented in this version.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,7 +10,7 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'HELP'
-Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--help]
+Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--help]
 
   --plan          Read-only inventory: dependencies, local setup, Docker state.
   --prepare-host  Prepare domain, nginx TLS, local CA trust and Vault TLS.
@@ -22,6 +22,8 @@ Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-reso
   --prepare-vault      Start/init a new Vault (DEV ONLY, protected recovery file).
                        Existing initialized Vault is NEVER reinitialized.
   --check-vault        Read-only check of Vault identity and readiness.
+  --prepare-vault-config  Configure Vault KV v2, ACL policies and AppRoles (no DB secrets).
+  --check-vault-config    Authenticated read-only validation of Vault configuration.
   --help          Show this message.
 
 This is an INCREMENTAL fresh-machine bootstrap, not a complete installer.
@@ -32,7 +34,7 @@ HELP
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault) ;;
+  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -56,6 +58,7 @@ source /etc/os-release
 [[ -x scripts/install-deps.sh ]] || fail "Missing executable scripts/install-deps.sh"
 [[ -f infra/vault/server/tls-init.sh ]] || fail "Missing Vault TLS initialization script"
 [[ -f scripts/dev/bootstrap_vault.py ]] || fail "Missing Vault bootstrap helper"
+[[ -f scripts/dev/bootstrap_vault_config.py ]] || fail "Missing Vault configuration helper"
 
 # Keep the state convention used by issue #115 dev-preflight.py.
 TLS_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/transcendence/dev/tls"
@@ -173,6 +176,7 @@ case "$MODE" in
     inventory_docker
     python3 scripts/dev/bootstrap_resources.py plan
     python3 scripts/dev/bootstrap_vault.py plan
+    say "INFO: Vault config read-only check is available via --check-vault-config"
     say "INFO: PostgreSQL provisioning is not implemented in this phase"
     say "RESULT: BOOTSTRAP PLAN COMPLETE (read-only)"
     ;;
@@ -212,6 +216,20 @@ case "$MODE" in
     say "PostgreSQL and application containers will NOT be started."
     confirm "Initialize or resume local development Vault on this VM?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_vault.py apply
+    ;;
+  --check-vault-config)
+    python3 scripts/dev/bootstrap_vault_config.py check
+    ;;
+  --prepare-vault-config)
+    host_check || fail "Host preparation incomplete"
+    python3 scripts/dev/bootstrap_resources.py check || fail "Docker resources incomplete"
+    python3 scripts/dev/bootstrap_vault.py check || fail "Vault is not ready"
+    say ""
+    say "This stage configures only KV v2, ACL policies and three Vault AppRoles."
+    say "No database secrets, PostgreSQL services or application containers are created."
+    say "Existing policies or roles with unexpected settings will be preserved and rejected."
+    confirm "Configure Vault policies and AppRoles on this VM?" || fail "Cancelled"
+    python3 scripts/dev/bootstrap_vault_config.py apply
     ;;
   --prepare-host)
     say ""
