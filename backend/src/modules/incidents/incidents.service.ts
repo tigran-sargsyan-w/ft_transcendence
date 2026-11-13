@@ -116,6 +116,12 @@ async function viewIncident(db: Db, id: string) {
   return incidentOf(incident, histories.get(incident.id) ?? []);
 }
 
+// The incident and its history are two reads. In one transaction at this level
+// they see the same data: without it, a reopen committed in between would give
+// `resolved` next to a history that ends on `open`. Only for reads: an update
+// at this level could be refused by PostgreSQL when the row changed.
+const ONE_SNAPSHOT = { isolationLevel: 'RepeatableRead' } as const;
+
 // v1 has no organization, no participant and no role: every signed-in user
 // sees and changes every incident. That is only for the demo data; the
 // isolation by organization and the permissions will come separately
@@ -127,29 +133,31 @@ export class IncidentsService {
     private readonly topology: TopologyService,
   ) {}
 
-  async list(query: ListIncidentsDto) {
-    // An undefined filter is ignored by Prisma.
-    const incidents = await this.prisma.incident.findMany({
-      where: {
-        status: query.status,
-        severity: query.severity,
-        environmentId: query.environmentId,
-      },
-      include: WITH_COMMANDER,
-      orderBy: { createdAt: 'desc' },
-    });
-    const histories = await statusHistories(
-      this.prisma,
-      incidents.map((incident) => incident.id),
-    );
+  list(query: ListIncidentsDto) {
+    return this.prisma.$transaction(async (tx) => {
+      // An undefined filter is ignored by Prisma.
+      const incidents = await tx.incident.findMany({
+        where: {
+          status: query.status,
+          severity: query.severity,
+          environmentId: query.environmentId,
+        },
+        include: WITH_COMMANDER,
+        orderBy: { createdAt: 'desc' },
+      });
+      const histories = await statusHistories(
+        tx,
+        incidents.map((incident) => incident.id),
+      );
 
-    return incidents.map((incident) =>
-      summaryOf(incident, histories.get(incident.id) ?? []),
-    );
+      return incidents.map((incident) =>
+        summaryOf(incident, histories.get(incident.id) ?? []),
+      );
+    }, ONE_SNAPSHOT);
   }
 
   get(id: string) {
-    return viewIncident(this.prisma, id);
+    return this.prisma.$transaction((tx) => viewIncident(tx, id), ONE_SNAPSHOT);
   }
 
   create(userId: string, dto: CreateIncidentDto) {
