@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ft_transcendence fresh-machine bootstrap (incremental implementation).
-# Phase 1: prepare host TLS/domain. Phase 2: prepare Docker networks/volumes.
-# Vault/PostgreSQL initialization is NOT implemented in this version.
+# Phase 1: host TLS/domain. Phase 2: Docker networks/volumes.
+# Phase 3: Vault server and development-only initialization.
+# PostgreSQL initialization is NOT implemented in this version.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -9,7 +10,7 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'HELP'
-Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--help]
+Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--help]
 
   --plan          Read-only inventory: dependencies, local setup, Docker state.
   --prepare-host  Prepare domain, nginx TLS, local CA trust and Vault TLS.
@@ -18,6 +19,9 @@ Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-reso
   --prepare-resources  Create missing Compose-compatible Docker networks/volumes.
                        Does NOT start containers or initialize Vault/PostgreSQL.
   --check-resources    Read-only verification of Docker networks/volumes.
+  --prepare-vault      Start/init a new Vault (DEV ONLY, protected recovery file).
+                       Existing initialized Vault is NEVER reinitialized.
+  --check-vault        Read-only check of Vault identity and readiness.
   --help          Show this message.
 
 This is an INCREMENTAL fresh-machine bootstrap, not a complete installer.
@@ -28,7 +32,7 @@ HELP
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources) ;;
+  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -51,6 +55,7 @@ source /etc/os-release
 [[ ${ID:-} == ubuntu ]] || fail "This bootstrap currently supports Ubuntu only"
 [[ -x scripts/install-deps.sh ]] || fail "Missing executable scripts/install-deps.sh"
 [[ -f infra/vault/server/tls-init.sh ]] || fail "Missing Vault TLS initialization script"
+[[ -f scripts/dev/bootstrap_vault.py ]] || fail "Missing Vault bootstrap helper"
 
 # Keep the state convention used by issue #115 dev-preflight.py.
 TLS_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/transcendence/dev/tls"
@@ -167,7 +172,8 @@ case "$MODE" in
     fi
     inventory_docker
     python3 scripts/dev/bootstrap_resources.py plan
-    say "INFO: Vault/PostgreSQL provisioning is not implemented in this phase"
+    python3 scripts/dev/bootstrap_vault.py plan
+    say "INFO: PostgreSQL provisioning is not implemented in this phase"
     say "RESULT: BOOTSTRAP PLAN COMPLETE (read-only)"
     ;;
   --check-host)
@@ -190,6 +196,22 @@ case "$MODE" in
     say "No containers, Vault initialization, database or secrets are created."
     confirm "Create missing Docker networks and volumes on this VM?" || fail "Cancelled; no resources created"
     python3 scripts/dev/bootstrap_resources.py apply
+    ;;
+  --check-vault)
+    python3 scripts/dev/bootstrap_vault.py check
+    ;;
+  --prepare-vault)
+    host_check || fail "Host preparation incomplete; run --prepare-host first"
+    python3 scripts/dev/bootstrap_resources.py check || fail "Docker resources incomplete"
+    python3 scripts/dev/bootstrap_vault.py plan
+    say ""
+    say "This stage creates/starts ONLY the trusted Vault container and its permissions helper."
+    say "New, uninitialized Vault will be initialized with Shamir 2-of-3."
+    say "Root token and all unseal shares will be saved in a local protected DEV file."
+    say "This file is sensitive: export it to secure storage OUTSIDE the VM and Git."
+    say "PostgreSQL and application containers will NOT be started."
+    confirm "Initialize or resume local development Vault on this VM?" || fail "Cancelled"
+    python3 scripts/dev/bootstrap_vault.py apply
     ;;
   --prepare-host)
     say ""
