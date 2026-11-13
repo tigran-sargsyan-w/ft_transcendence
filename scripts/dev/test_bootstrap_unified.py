@@ -50,6 +50,59 @@ class UnifiedTests(unittest.TestCase):
         self.assertEqual(cmd.call_count, unified.READ_ONLY_ATTEMPTS)
         self.assertEqual(sleep.call_count, unified.READ_ONLY_ATTEMPTS - 1)
 
+    def test_health_report_fast_path_only_three_checks(self):
+        with patch.object(unified, "command", return_value=True) as command, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            unified.health_report()
+        self.assertEqual([call.args[0] for call in command.call_args_list],
+                         ["--check-host", "--check-resources", "--check-nginx"])
+        self.assertTrue(all(call.kwargs["quiet"] for call in command.call_args_list))
+        self.assertIn("RESULT: DEVELOPMENT HEALTHY", output.getvalue())
+
+    def test_health_report_localizes_first_failing_dependency(self):
+        checks = {"nginx": False, "postgres": False}
+        with patch.object(unified, "checked", side_effect=lambda name: checks.get(name, True)) as ck, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "postgres"):
+                unified.health_report()
+        self.assertEqual([c.args[0] for c in ck.call_args_list],
+                         ["host", "resources", "nginx", "vault", "vault-config", "vault-secrets", "postgres"])
+        self.assertIn("FAIL: postgres; inspect --check-postgres", output.getvalue())
+        self.assertNotIn("RESULT: DEVELOPMENT HEALTHY", output.getvalue())
+
+    def test_health_report_rejects_intermittent_instead_of_false_healthy(self):
+        vals = [True, True, False] + [True] * (len(unified.STAGES) - 2)
+        with patch.object(unified, "checked", side_effect=vals) as ck, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "Intermittent"):
+                unified.health_report()
+        self.assertEqual(ck.call_count, len(unified.STAGES) + 1)
+        self.assertIn("WARN: end-to-end check failed", output.getvalue())
+
+    def test_health_report_host_failure_never_probes_docker(self):
+        with patch.object(unified, "checked", return_value=False) as ck, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "host"):
+                unified.health_report()
+        self.assertEqual([c.args[0] for c in ck.call_args_list], ["host"])
+        self.assertIn("FAIL: host; inspect --check-host", output.getvalue())
+
+    def test_health_report_resources_failure_stops(self):
+        with patch.object(unified, "checked", side_effect=[True, False]) as ck, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "resources"):
+                unified.health_report()
+        self.assertEqual([c.args[0] for c in ck.call_args_list], ["host", "resources"])
+        self.assertIn("FAIL: resources; inspect --check-resources", output.getvalue())
+
+    def test_health_report_main_read_only_no_lock_or_mutation(self):
+        with patch.object(unified.os, "geteuid", return_value=1000), \
+             patch.object(unified, "health_report") as report, \
+             patch.object(unified, "exclusive_orchestrator_lock") as lock:
+            self.assertEqual(unified.main(["health-report"]), 0)
+        report.assert_called_once()
+        lock.assert_not_called()
+
     def test_initialization_requires_tty(self):
         with patch.object(unified.sys.stdin, "isatty", return_value=False):
             with self.assertRaises(unified.UnifiedStartupError):

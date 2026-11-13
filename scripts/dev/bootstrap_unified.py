@@ -397,6 +397,50 @@ def check():
     print("RESULT: UNIFIED STACK READY (read-only)", flush=True)
 
 
+
+def health_report():
+    """Safe, read-only full-stack readiness with failure localization.
+
+    Fast path executes the existing transitive Nginx readiness probe once,
+    just like --check-all. On failure, a separate diagnostic pass checks the
+    trusted stages in dependency order, stopping at the first failing stage.
+    The per-stage helpers retain their identity/ACL/HTTP checks; stdout and
+    stderr remain suppressed to avoid accidentally displaying secrets.
+
+    This command deliberately never starts, repairs, unseals, or provisions.
+    """
+    print("=== Vault-backed development health report (read-only) ===", flush=True)
+    for name in ("host", "resources"):
+        if not checked(name):
+            print(f"FAIL: {name}; inspect {STAGE_BY_NAME[name][0]}", flush=True)
+            raise UnifiedStartupError(f"Health report failed at {name}")
+        print(f"PASS: {name}", flush=True)
+
+    # The Nginx check verifies TLS, HTTPS routes, Vite and API, and traverses
+    # the backend, support services, Vault Agent, migrations, PG roles, and
+    # Vault configuration. Do not repeat this expensive chain on success.
+    if checked("nginx"):
+        print("PASS: end-to-end Nginx HTTPS, application and trusted dependencies", flush=True)
+        print("RESULT: DEVELOPMENT HEALTHY (read-only)", flush=True)
+        return
+
+    print("WARN: end-to-end check failed; locating the first failing dependency", flush=True)
+    for name, _, _ in STAGES[2:]:
+        if not checked(name):
+            print(f"FAIL: {name}; inspect {STAGE_BY_NAME[name][0]}", flush=True)
+            raise UnifiedStartupError(
+                f"Health report failed at {name} (or one of its checked dependencies)"
+            )
+        print(f"PASS: {name}", flush=True)
+
+    # All independently repeated probes passed after initial end-to-end
+    # failure. Do not call this healthy: that could hide intermittent faults.
+    raise UnifiedStartupError(
+        "Intermittent readiness failure: initial HTTPS check failed; "
+        "all individual read-only checks later passed"
+    )
+
+
 @contextmanager
 def exclusive_orchestrator_lock():
     # Separate lock from infra/vault/scripts/run-migrations.sh: child stages
@@ -425,13 +469,15 @@ def exclusive_orchestrator_lock():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("initialize", "start", "check", "recover"))
+    parser.add_argument("mode", choices=("initialize", "start", "check", "recover", "health-report"))
     args = parser.parse_args(argv)
     try:
         if os.geteuid() == 0:
             raise UnifiedStartupError("Run as an ordinary user, not with sudo")
         if args.mode == "check":
             check()
+        elif args.mode == "health-report":
+            health_report()
         else:
             with exclusive_orchestrator_lock():
                 if args.mode == "initialize":
