@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ft_transcendence fresh-machine bootstrap (incremental implementation).
-# Phase 1: inspect a fresh Ubuntu host, prepare local domain + TLS only.
+# Phase 1: prepare host TLS/domain. Phase 2: prepare Docker networks/volumes.
 # Vault/PostgreSQL initialization is NOT implemented in this version.
 set -Eeuo pipefail
 
@@ -9,15 +9,18 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'HELP'
-Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--help]
+Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--help]
 
   --plan          Read-only inventory: dependencies, local setup, Docker state.
   --prepare-host  Prepare domain, nginx TLS, local CA trust and Vault TLS.
                   Does NOT start Docker or initialize Vault/PostgreSQL.
   --check-host    Verify host preparation without modifying anything.
+  --prepare-resources  Create missing Compose-compatible Docker networks/volumes.
+                       Does NOT start containers or initialize Vault/PostgreSQL.
+  --check-resources    Read-only verification of Docker networks/volumes.
   --help          Show this message.
 
-This is the FIRST phase of fresh-machine bootstrap, not a complete installer.
+This is an INCREMENTAL fresh-machine bootstrap, not a complete installer.
 Do not run Docker Compose `up` or `make up` after this step: the existing
 runtime is designed for previously initialized infrastructure.
 HELP
@@ -25,7 +28,7 @@ HELP
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --plan|--prepare-host|--check-host) ;;
+  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -152,7 +155,7 @@ inventory_docker() {
   fi
 }
 
-say "=== Fresh Ubuntu bootstrap: phase 1 / host preparation ==="
+say "=== Fresh Ubuntu bootstrap: host + Docker resources ==="
 ./scripts/install-deps.sh --check || fail "Dependencies not ready; run ./scripts/install-deps.sh first"
 
 case "$MODE" in
@@ -163,6 +166,7 @@ case "$MODE" in
       say "RESULT: HOST PREPARATION NEEDED"
     fi
     inventory_docker
+    python3 scripts/dev/bootstrap_resources.py plan
     say "INFO: Vault/PostgreSQL provisioning is not implemented in this phase"
     say "RESULT: BOOTSTRAP PLAN COMPLETE (read-only)"
     ;;
@@ -173,6 +177,19 @@ case "$MODE" in
       say "RESULT: HOST PREPARATION INCOMPLETE (read-only)"
       exit 1
     fi
+    ;;
+  --check-resources)
+    python3 scripts/dev/bootstrap_resources.py check
+    ;;
+  --prepare-resources)
+    host_check || fail "Host preparation incomplete; run --prepare-host first"
+    python3 scripts/dev/bootstrap_resources.py plan
+    say ""
+    say "This stage creates only missing Docker networks and named volumes."
+    say "Existing resources will be checked and retained, never removed."
+    say "No containers, Vault initialization, database or secrets are created."
+    confirm "Create missing Docker networks and volumes on this VM?" || fail "Cancelled; no resources created"
+    python3 scripts/dev/bootstrap_resources.py apply
     ;;
   --prepare-host)
     say ""
