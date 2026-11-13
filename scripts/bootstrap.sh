@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# ft_transcendence fresh-machine bootstrap (incremental implementation).
+# Phase 1: inspect a fresh Ubuntu host, prepare local domain + TLS only.
+# Vault/PostgreSQL initialization is NOT implemented in this version.
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+usage() {
+  cat <<'HELP'
+Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--help]
+
+  --plan          Read-only inventory: dependencies, local setup, Docker state.
+  --prepare-host  Prepare domain, nginx TLS, local CA trust and Vault TLS.
+                  Does NOT start Docker or initialize Vault/PostgreSQL.
+  --check-host    Verify host preparation without modifying anything.
+  --help          Show this message.
+
+This is the FIRST phase of fresh-machine bootstrap, not a complete installer.
+Do not run Docker Compose `up` or `make up` after this step: the existing
+runtime is designed for previously initialized infrastructure.
+HELP
+}
+
+MODE="${1:---plan}"
+case "$MODE" in
+  --plan|--prepare-host|--check-host) ;;
+  --help|-h) usage; exit 0 ;;
+  *) usage >&2; exit 2 ;;
+esac
+(( $# <= 1 )) || { usage >&2; exit 2; }
+
+say() { printf '%s\n' "$*"; }
+fail() { say "ERROR: $*" >&2; exit 1; }
+confirm() {
+  local answer
+  [[ -t 0 ]] || fail "An interactive terminal is required for confirmation"
+  printf '%s [y/N] ' "$1"
+  IFS= read -r answer || return 1
+  [[ "$answer" == 'y' || "$answer" == 'Y' || "$answer" == 'yes' || "$answer" == 'YES' ]]
+}
+
+[[ $(id -u) != 0 ]] || fail "Run as a regular user, not with sudo"
+[[ -r /etc/os-release ]] || fail "Cannot determine host OS"
+# shellcheck disable=SC1091
+source /etc/os-release
+[[ ${ID:-} == ubuntu ]] || fail "This bootstrap currently supports Ubuntu only"
+[[ -x scripts/install-deps.sh ]] || fail "Missing executable scripts/install-deps.sh"
+[[ -f infra/vault/server/tls-init.sh ]] || fail "Missing Vault TLS initialization script"
+
+# Keep the state convention used by issue #115 dev-preflight.py.
+TLS_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/transcendence/dev/tls"
+CA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ft-transcendence/vault-ca"
+if [[ -n ${FT_DEV_TLS_DIR:-} && ${FT_DEV_TLS_DIR%/} != "${TLS_DIR%/}" ]]; then
+  fail "FT_DEV_TLS_DIR differs from the unified runtime's expected TLS path"
+fi
+export FT_DEV_TLS_DIR="$TLS_DIR"
+
+# Never follow an unexpected symbolic link to host key material.
+for path in "$TLS_DIR" "$CA_DIR" \
+  "$TLS_DIR/ca.crt" "$TLS_DIR/vault.crt" "$TLS_DIR/vault.key" \
+  "$CA_DIR/ca.key"; do
+  [[ ! -L "$path" ]] || fail "Refusing symlink in trusted TLS state: $path"
+done
+
+vault_tls_status() {
+  local present=0 path
+  for path in "$TLS_DIR/ca.crt" "$TLS_DIR/vault.crt" \
+              "$TLS_DIR/vault.key" "$CA_DIR/ca.key"; do
+    if [[ -e "$path" ]]; then
+      [[ -f "$path" && -s "$path" ]] || fail "Invalid Vault TLS file: $path"
+      (( present += 1 ))
+    fi
+  done
+  if (( present == 0 )); then
+    say "TODO: Vault TLS certificate and CA (not generated)"
+    return 1
+  fi
+  (( present == 4 )) || fail "Incomplete Vault TLS state: refuse to overwrite or regenerate keys"
+  openssl verify -purpose sslserver -verify_hostname vault \
+    -CAfile "$TLS_DIR/ca.crt" "$TLS_DIR/vault.crt" >/dev/null 2>&1 \
+    || fail "Vault TLS certificate validation failed"
+  openssl x509 -in "$TLS_DIR/vault.crt" -noout -checkend 0 >/dev/null 2>&1 \
+    || fail "Vault TLS certificate has expired"
+  say "PASS: Existing Vault TLS chain, hostname and expiry"
+  return 0
+}
+
+host_check() {
+  local missing=0
+  say "=== Local host setup ==="
+  if python3 -m scripts.dev.domains check >/dev/null 2>&1; then
+    say "PASS: Local transcendence.test domain"
+  else
+    say "TODO: Local transcendence.test domain"
+    missing=1
+  fi
+  if python3 -m scripts.dev.certificates check >/dev/null 2>&1; then
+    say "PASS: Browser-facing Nginx TLS certificate"
+  else
+    say "TODO: Browser-facing Nginx TLS certificate"
+    missing=1
+  fi
+  if python3 -m scripts.dev.ca_trust check >/dev/null 2>&1; then
+    say "PASS: Local CA trust"
+  else
+    say "TODO: Local CA trust"
+    missing=1
+  fi
+  if vault_tls_status; then :; else missing=1; fi
+  (( missing == 0 ))
+}
+
+inventory_docker() {
+  say "=== Existing Docker resources (read-only) ==="
+  local found=0 label item
+  for item in \
+    transcendence-vault-dev_vault_data \
+    transcendence-vault-dev_backend_agent_auth \
+    transcendence-vault-dev_backend_rendered \
+    transcendence-app-dev_postgres_data \
+    transcendence-app-dev_migrator_vault_auth \
+    transcendence-app-dev_migrator_vault_rendered \
+    transcendence-app-dev_postgres_provisioner_vault_auth \
+    transcendence-app-dev_postgres_provisioner_rendered; do
+    if docker volume inspect "$item" >/dev/null 2>&1; then
+      say "EXISTS: volume $item"
+      found=1
+    fi
+  done
+  for item in \
+    transcendence-vault-dev_vault_private \
+    transcendence-app-dev_default \
+    transcendence-app-dev_collector_control; do
+    if docker network inspect "$item" >/dev/null 2>&1; then
+      say "EXISTS: network $item"
+      found=1
+    fi
+  done
+  # Never print environment variables, mounts or secret content.
+  for label in transcendence-app-dev transcendence-vault-dev; do
+    if [[ -n $(docker ps -aq --filter "label=com.docker.compose.project=$label") ]]; then
+      say "EXISTS: containers owned by $label"
+      found=1
+    fi
+  done
+  if (( found == 0 )); then
+    say "PASS: No previously managed runtime resources found"
+  else
+    say "INFO: Existing runtime resources detected; later provisioning must inspect them before changes"
+  fi
+}
+
+say "=== Fresh Ubuntu bootstrap: phase 1 / host preparation ==="
+./scripts/install-deps.sh --check || fail "Dependencies not ready; run ./scripts/install-deps.sh first"
+
+case "$MODE" in
+  --plan)
+    if host_check; then
+      say "RESULT: HOST PREPARATION ALREADY READY"
+    else
+      say "RESULT: HOST PREPARATION NEEDED"
+    fi
+    inventory_docker
+    say "INFO: Vault/PostgreSQL provisioning is not implemented in this phase"
+    say "RESULT: BOOTSTRAP PLAN COMPLETE (read-only)"
+    ;;
+  --check-host)
+    if host_check; then
+      say "RESULT: HOST PREPARATION READY (read-only)"
+    else
+      say "RESULT: HOST PREPARATION INCOMPLETE (read-only)"
+      exit 1
+    fi
+    ;;
+  --prepare-host)
+    say ""
+    say "This stage can modify /etc/hosts, local CA trust and local TLS files."
+    say "It does not create/start Docker containers, networks or volumes."
+    confirm "Prepare local domain and TLS on this VM?" || fail "Cancelled; no preparation started"
+    python3 -m scripts.dev.domains setup
+    python3 -m scripts.dev.certificates setup
+    python3 -m scripts.dev.ca_trust setup
+    if vault_tls_status; then
+      say "KEEP: Existing valid Vault TLS material"
+    else
+      say "=== Initialize new local Vault CA and certificate ==="
+      ./infra/vault/server/tls-init.sh
+    fi
+    host_check || fail "Host preparation checks did not pass"
+    say "RESULT: HOST PREPARATION READY"
+    say "NEXT: Infrastructure/bootstrap provisioning (not yet implemented)"
+    ;;
+esac
