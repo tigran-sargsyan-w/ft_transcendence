@@ -1,0 +1,200 @@
+"""Phase 6A orchestration tests: offline, no Docker or host modifications."""
+
+import contextlib
+import io
+import os
+import tempfile
+import types
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import bootstrap_unified as unified
+
+
+class UnifiedTests(unittest.TestCase):
+    def test_fixed_stage_order(self):
+        self.assertEqual([s[0] for s in unified.STAGES], [
+            "host", "resources", "vault", "vault-config", "vault-secrets",
+            "postgres", "postgres-roles", "migrations", "backend-agent",
+            "backend", "support-services", "frontend", "nginx",
+        ])
+
+    def test_unknown_command_denied(self):
+        with self.assertRaises(unified.UnifiedStartupError):
+            unified.command("--delete-volumes")
+
+    def test_command_check_is_quiet(self):
+        with patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as run:
+            self.assertTrue(unified.command("--check-nginx", quiet=True))
+        self.assertEqual(run.call_args.args[0], [str(unified.BOOTSTRAP), "--check-nginx"])
+        self.assertEqual(run.call_args.kwargs["stdout"], unified.subprocess.DEVNULL)
+        self.assertEqual(run.call_args.kwargs["stderr"], unified.subprocess.DEVNULL)
+
+    def test_command_failed_check(self):
+        with patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=1)):
+            self.assertFalse(unified.command("--check-nginx", quiet=True))
+
+    def test_check_all_is_read_only(self):
+        with patch.object(unified, "command", return_value=True) as cmd, contextlib.redirect_stdout(io.StringIO()):
+            unified.check()
+        self.assertEqual([call.args[0] for call in cmd.call_args_list],
+                         [stage[1] for stage in unified.STAGES])
+        self.assertTrue(all(call.kwargs["quiet"] for call in cmd.call_args_list))
+
+    def test_check_stops_on_first_failure(self):
+        with patch.object(unified, "command", return_value=False) as cmd:
+            with self.assertRaises(unified.UnifiedStartupError):
+                unified.check()
+        self.assertEqual(cmd.call_count, 1)
+
+    def test_initialization_requires_tty(self):
+        with patch.object(unified.sys.stdin, "isatty", return_value=False):
+            with self.assertRaises(unified.UnifiedStartupError):
+                unified.initialize()
+
+    def test_initialization_all_ready_has_no_apply(self):
+        with patch.object(unified.sys.stdin, "isatty", return_value=True), \
+             patch.object(unified, "command", return_value=True) as cmd, \
+             contextlib.redirect_stdout(io.StringIO()):
+            unified.initialize()
+        self.assertEqual([call.args[0] for call in cmd.call_args_list],
+                         [stage[1] for stage in unified.STAGES])
+
+    def test_initialization_prepares_only_missing_stage(self):
+        responses = [False, True, True] + [True] * (len(unified.STAGES) - 1)
+        with patch.object(unified.sys.stdin, "isatty", return_value=True), \
+             patch.object(unified, "command", side_effect=responses) as cmd, \
+             contextlib.redirect_stdout(io.StringIO()):
+            unified.initialize()
+        self.assertEqual([call.args[0] for call in cmd.call_args_list][:3],
+                         ["--check-host", "--prepare-host", "--check-host"])
+        self.assertNotIn("--prepare-vault", [call.args[0] for call in cmd.call_args_list])
+
+    def test_initialization_halts_on_denied_prepare(self):
+        with patch.object(unified.sys.stdin, "isatty", return_value=True), \
+             patch.object(unified, "command", side_effect=[False, False]) as cmd:
+            with self.assertRaises(unified.UnifiedStartupError):
+                unified.initialize()
+        self.assertEqual(cmd.call_count, 2)
+
+    def test_routine_does_not_run_any_prepare_flag(self):
+        with patch.object(unified, "checked", return_value=True) as ck, \
+             patch.object(unified, "vault_seal_guard") as vault, \
+             contextlib.redirect_stdout(io.StringIO()):
+            unified.start()
+        self.assertEqual([call.args[0] for call in ck.call_args_list],
+                         [stage[0] for stage in unified.STAGES])
+        vault.assert_called_once()
+
+    def test_routine_fails_before_database_if_vault_sealed(self):
+        with patch.object(unified, "checked", return_value=True) as ck, \
+             patch.object(unified, "vault_seal_guard", side_effect=unified.UnifiedStartupError("sealed")):
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "sealed"):
+                unified.start()
+        self.assertEqual([call.args[0] for call in ck.call_args_list], ["host", "resources"])
+
+    def test_routine_rejects_incomplete_migrations_without_apply(self):
+        checks = lambda name: name != "migrations"
+        with patch.object(unified, "checked", side_effect=checks), \
+             patch.object(unified, "vault_seal_guard"), \
+             contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "migrations"):
+                unified.start()
+
+    def test_resume_ready_is_keep(self):
+        with patch.object(unified, "checked", return_value=True), \
+             patch.object(unified, "guard_resume") as guard, \
+             contextlib.redirect_stdout(io.StringIO()):
+            unified.resume("nginx")
+        guard.assert_not_called()
+
+    def test_resume_stopped_requires_identity(self):
+        with self.assertRaisesRegex(unified.UnifiedStartupError, "Missing"):
+            unified.verify_stopped_container(None, lambda _: None, "postgres")
+        with self.assertRaisesRegex(unified.UnifiedStartupError, "Untrusted"):
+            unified.verify_stopped_container({"State":{"Status":"exited"}},
+                 lambda _: (_ for _ in ()).throw(ValueError("secret!")), "postgres")
+
+    def test_resume_rejects_unknown_state(self):
+        with self.assertRaisesRegex(unified.UnifiedStartupError, "Unexpected"):
+            unified.verify_stopped_container({"State":{"Status":"restarting"}}, lambda _: None, "postgres")
+
+    def test_resume_accepts_known_stopped(self):
+        self.assertEqual(unified.verify_stopped_container(
+            {"State":{"Running":False,"Status":"exited"}}, lambda _: None, "postgres"), "stopped")
+
+    def test_resume_refuses_running_but_unhealthy(self):
+        pg = types.ModuleType("bootstrap_postgres")
+        pg.NAME = "known-pg"
+        pg.exact_container = lambda _: {"State":{"Running":True,"Status":"running"}}
+        pg.verify_identity = lambda _: None
+        with patch.dict("sys.modules", {"bootstrap_postgres":pg}):
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "already running but unhealthy"):
+                unified.guard_resume("postgres")
+
+    def test_resume_does_not_run_helper_if_guard_fails(self):
+        with patch.object(unified, "checked", return_value=False), \
+             patch.object(unified, "guard_resume", side_effect=unified.UnifiedStartupError("stop")), \
+             patch.object(unified.subprocess, "run") as run:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "stop"):
+                unified.resume("postgres")
+        run.assert_not_called()
+
+    def test_resume_uses_apply_helper_not_prepare(self):
+        with patch.object(unified, "checked", side_effect=[False, True]), \
+             patch.object(unified, "guard_resume", return_value=("stopped",)), \
+             patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as run, \
+             contextlib.redirect_stdout(io.StringIO()):
+            unified.resume("nginx")
+        self.assertEqual(run.call_args.args[0], [unified.sys.executable,
+           str(unified.ROOT / "scripts/dev/bootstrap_nginx.py"), "apply"])
+
+    def test_resume_halts_on_failed_apply(self):
+        with patch.object(unified, "checked", return_value=False), \
+             patch.object(unified, "guard_resume", return_value=("stopped",)), \
+             patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=1)):
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "resume failed"):
+                unified.resume("backend")
+
+    def test_vault_seal_refuses_unseal(self):
+        vault = types.ModuleType("bootstrap_vault")
+        vault.inspect_container = lambda: {"State":{"Running":True}}
+        vault.verify_identity = lambda _: None
+        vault.status = lambda tries: {"initialized":True,"sealed":True}
+        vault.verify_topology = lambda *_args, **_kwargs: None
+        with patch.dict("sys.modules", {"bootstrap_vault": vault}):
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "Unseal manually"):
+                unified.vault_seal_guard()
+
+    def test_lock_is_exclusive_and_permissions_private(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp) / "private"
+            with patch.object(unified, "STATE", state), patch.object(unified, "LOCK", state / "unified.lock"):
+                with unified.exclusive_orchestrator_lock():
+                    self.assertEqual((state / "unified.lock").stat().st_mode & 0o777, 0o600)
+                    with self.assertRaisesRegex(unified.UnifiedStartupError, "already running"):
+                        with unified.exclusive_orchestrator_lock():
+                            pass
+
+    def test_symlink_lock_denied(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp)
+            target = state / "target"
+            target.write_text("do not touch")
+            link = state / "unified.lock"
+            link.symlink_to(target)
+            with patch.object(unified, "STATE", state), patch.object(unified, "LOCK", link):
+                with self.assertRaisesRegex(unified.UnifiedStartupError, "safely open"):
+                    with unified.exclusive_orchestrator_lock():
+                        pass
+            self.assertEqual(target.read_text(), "do not touch")
+
+    def test_main_refuses_root(self):
+        with patch.object(unified.os, "geteuid", return_value=0):
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(unified.main(["start"]), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
