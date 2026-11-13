@@ -5,6 +5,7 @@
 # Phase 4B: initial PostgreSQL credentials stored in Vault KV v2.
 # Phase 4C: PostgreSQL 18. Phase 4D: Vault-backed PostgreSQL roles.
 # Phase 4E: Prisma migrations and minimum runtime PostgreSQL grants.
+# Phase 5A: provision backend AppRole and start Vault Backend Agent only.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,7 +13,7 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'HELP'
-Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--help]
+Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--help]
 
   --plan          Read-only inventory: dependencies, local setup, Docker state.
   --prepare-host  Prepare domain, nginx TLS, local CA trust and Vault TLS.
@@ -34,6 +35,8 @@ Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-reso
   --check-postgres-roles    Read-only PostgreSQL role state/grants verification.
   --prepare-migrations    Apply reviewed Prisma migrations and reconcile table grants.
   --check-migrations      Read-only migration checksums and least-privilege grants verification.
+  --prepare-backend-agent Provision backend AppRole and start only the Vault backend Agent.
+  --check-backend-agent   Read-only agent identity, health and secret-access check.
   --help          Show this message.
 
 This is an INCREMENTAL fresh-machine bootstrap, not a complete installer.
@@ -44,7 +47,7 @@ HELP
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations) ;;
+  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -191,6 +194,7 @@ case "$MODE" in
     python3 scripts/dev/bootstrap_postgres.py plan
     python3 scripts/dev/bootstrap_postgres_roles.py plan
     python3 scripts/dev/bootstrap_migrations.py plan
+    python3 scripts/dev/bootstrap_backend_agent.py plan
     say "RESULT: BOOTSTRAP PLAN COMPLETE (read-only)"
     ;;
   --check-host)
@@ -239,11 +243,28 @@ case "$MODE" in
   --check-migrations)
     python3 scripts/dev/bootstrap_migrations.py check
     ;;
+  --check-backend-agent)
+    python3 scripts/dev/bootstrap_backend_agent.py check
+    ;;
+  --prepare-backend-agent)
+    host_check || fail "Host preparation incomplete"
+    python3 scripts/dev/bootstrap_resources.py check || fail "Docker resources incomplete"
+    python3 scripts/dev/bootstrap_migrations.py check || fail "Prisma migrations/grants incomplete"
+    python3 scripts/dev/bootstrap_backend_agent.py plan
+    say ""
+    say "This stage provisions initial backend AppRole credentials ONLY if absent."
+    say "It starts only the Vault backend Agent and verifies healthy secret delivery."
+    say "Existing credentials and Agent containers will not be recreated or rotated."
+    say "Backend, frontend, Nginx and other application services will NOT be started."
+    confirm "Prepare backend Vault Agent on this VM?" || fail "Cancelled"
+    python3 scripts/dev/bootstrap_backend_agent.py apply
+    ;;
   --prepare-migrations)
     host_check || fail "Host preparation incomplete"
     python3 scripts/dev/bootstrap_resources.py check || fail "Docker resources incomplete"
     python3 scripts/dev/bootstrap_postgres_roles.py check || fail "PostgreSQL roles incomplete"
     python3 scripts/dev/bootstrap_migrations.py plan
+    python3 scripts/dev/bootstrap_backend_agent.py plan
     say ""
     say "This stage runs only the existing Prisma migration and SQL grant workflow."
     say "It may issue an initial migrator AppRole SecretID in its dedicated volume."
