@@ -9,6 +9,7 @@
 # Phase 5B: start the existing Vault-only NestJS backend, and verify DB health.
 # Phase 5C: start Docker Socket Proxy, Collector and Graph Engine only.
 # Phase 5D: start React/Vite frontend and verify local backend proxy.
+# Phase 5E: start localhost-only Nginx with trusted HTTPS routes.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,7 +17,7 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'HELP'
-Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--help]
+Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--help]
 
   --plan          Read-only inventory: dependencies, local setup, Docker state.
   --prepare-host  Prepare domain, nginx TLS, local CA trust and Vault TLS.
@@ -46,6 +47,8 @@ Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-reso
   --check-support-services    Check their networks, mounts and HTTP readiness.
   --prepare-frontend       Build/start ONLY React/Vite frontend, without Nginx.
   --check-frontend         Verify frontend Compose identity and local HTTP/API proxy.
+  --prepare-nginx          Start only trusted Nginx on loopback 8080/8443 (HTTPS).
+  --check-nginx            Verify Nginx identity, TLS, redirect and HTTPS routes.
   --help          Show this message.
 
 This is an INCREMENTAL fresh-machine bootstrap, not a complete installer.
@@ -56,7 +59,7 @@ HELP
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend) ;;
+  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -207,6 +210,7 @@ case "$MODE" in
     python3 scripts/dev/bootstrap_backend.py plan
     python3 scripts/dev/bootstrap_support_services.py plan
     python3 scripts/dev/bootstrap_frontend.py plan
+    python3 scripts/dev/bootstrap_nginx.py plan
     say "RESULT: BOOTSTRAP PLAN COMPLETE (read-only)"
     ;;
   --check-host)
@@ -254,6 +258,22 @@ case "$MODE" in
     ;;
   --check-migrations)
     python3 scripts/dev/bootstrap_migrations.py check
+    ;;
+  --check-nginx)
+    python3 scripts/dev/bootstrap_nginx.py check
+    ;;
+  --prepare-nginx)
+    host_check || fail "Host preparation incomplete"
+    python3 scripts/dev/bootstrap_resources.py check || fail "Docker resources incomplete"
+    python3 scripts/dev/bootstrap_frontend.py check || fail "Frontend is not ready"
+    python3 scripts/dev/bootstrap_nginx.py plan
+    say ""
+    say "This stage starts ONLY Nginx on 127.0.0.1:8080/8443."
+    say "It verifies the existing mkcert TLS chain without generating/replacing keys."
+    say "Existing trusted containers are preserved and NEVER recreated."
+    say "No Vault, PostgreSQL, migrations or application services are changed."
+    confirm "Start local HTTPS Nginx gateway on this VM?" || fail "Cancelled"
+    python3 scripts/dev/bootstrap_nginx.py apply
     ;;
   --check-frontend)
     python3 scripts/dev/bootstrap_frontend.py check
