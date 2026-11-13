@@ -55,13 +55,20 @@ def json_result(command, **kwargs):
 
 
 def inspect_container():
-    try:
-        output = call(["docker", "inspect", NAME], accepted=(0, 1), timeout=25)
-    except VaultBootstrapError:
-        raise
-    # `docker inspect` returns exit 1 for an absent container.
-    if not output.strip():
+    # Docker 29 can return `[]` when inspecting a missing container.
+    # Detect absence by exact container name instead of accepting inspect
+    # failures, which could conceal an unrelated Docker error.
+    names = call([
+        "docker", "container", "ls", "--all",
+        "--filter", f"name=^/{NAME}$",
+        "--format", "{{.Names}}",
+    ], timeout=25).decode("utf-8").splitlines()
+    if not names:
         return None
+    if names != [NAME]:
+        raise VaultBootstrapError("Unexpected Vault container inventory")
+
+    output = call(["docker", "container", "inspect", NAME], timeout=25)
     try:
         items = json.loads(output)
     except (TypeError, ValueError):

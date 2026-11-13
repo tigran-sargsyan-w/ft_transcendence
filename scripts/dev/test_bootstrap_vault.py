@@ -2,6 +2,7 @@
 import contextlib
 import importlib.util
 import io
+import json
 import os
 import stat
 import tempfile
@@ -32,6 +33,34 @@ class BootstrapVaultTests(unittest.TestCase):
             ],
             "NetworkSettings": {"Networks": {v.PROJECT + "_vault_private": {}}},
         }
+
+    def test_absent_container_is_not_an_inspect_error(self):
+        with patch.object(v, "call", return_value=b"") as run:
+            self.assertIsNone(v.inspect_container())
+            run.assert_called_once()
+            self.assertEqual(run.call_args.args[0][:4],
+                             ["docker", "container", "ls", "--all"])
+
+    def test_existing_container_is_inspected(self):
+        data = self.valid_inspect()
+        with patch.object(v, "call", side_effect=[
+            (v.NAME + "\n").encode(), json.dumps([data]).encode(),
+        ]) as run:
+            self.assertEqual(v.inspect_container(), data)
+            self.assertEqual(run.call_count, 2)
+
+    def test_unexpected_container_inventory_is_rejected(self):
+        with patch.object(v, "call", return_value=b"unexpected-name\n"):
+            with self.assertRaisesRegex(v.VaultBootstrapError, "inventory"):
+                v.inspect_container()
+
+    def test_inspection_failure_not_treated_as_absent(self):
+        with patch.object(v, "call", side_effect=[
+            (v.NAME + "\n").encode(),
+            v.VaultBootstrapError("Docker inspect failed"),
+        ]):
+            with self.assertRaisesRegex(v.VaultBootstrapError, "inspect failed"):
+                v.inspect_container()
 
     def test_correct_compose_identity_accepted(self):
         self.assertIsNotNone(v.verify_identity(self.valid_inspect()))
