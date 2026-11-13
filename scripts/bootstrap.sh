@@ -6,6 +6,7 @@
 # Phase 4C: PostgreSQL 18. Phase 4D: Vault-backed PostgreSQL roles.
 # Phase 4E: Prisma migrations and minimum runtime PostgreSQL grants.
 # Phase 5A: provision backend AppRole and start Vault Backend Agent only.
+# Phase 5B: start the existing Vault-only NestJS backend, and verify DB health.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -13,7 +14,7 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'HELP'
-Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--help]
+Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--help]
 
   --plan          Read-only inventory: dependencies, local setup, Docker state.
   --prepare-host  Prepare domain, nginx TLS, local CA trust and Vault TLS.
@@ -37,6 +38,8 @@ Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-reso
   --check-migrations      Read-only migration checksums and least-privilege grants verification.
   --prepare-backend-agent Provision backend AppRole and start only the Vault backend Agent.
   --check-backend-agent   Read-only agent identity, health and secret-access check.
+  --prepare-backend       Build/start ONLY Vault-backed NestJS backend (no other services).
+  --check-backend         Read-only backend identity, health and local HTTP/DB check.
   --help          Show this message.
 
 This is an INCREMENTAL fresh-machine bootstrap, not a complete installer.
@@ -47,7 +50,7 @@ HELP
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent) ;;
+  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -195,6 +198,7 @@ case "$MODE" in
     python3 scripts/dev/bootstrap_postgres_roles.py plan
     python3 scripts/dev/bootstrap_migrations.py plan
     python3 scripts/dev/bootstrap_backend_agent.py plan
+    python3 scripts/dev/bootstrap_backend.py plan
     say "RESULT: BOOTSTRAP PLAN COMPLETE (read-only)"
     ;;
   --check-host)
@@ -242,6 +246,22 @@ case "$MODE" in
     ;;
   --check-migrations)
     python3 scripts/dev/bootstrap_migrations.py check
+    ;;
+  --check-backend)
+    python3 scripts/dev/bootstrap_backend.py check
+    ;;
+  --prepare-backend)
+    host_check || fail "Host preparation incomplete"
+    python3 scripts/dev/bootstrap_resources.py check || fail "Docker resources incomplete"
+    python3 scripts/dev/bootstrap_backend_agent.py check || fail "Backend Vault Agent incomplete"
+    python3 scripts/dev/bootstrap_backend.py plan
+    say ""
+    say "This stage builds/starts ONLY the existing NestJS backend Compose service."
+    say "Backend reads DATABASE_URL_FILE from Vault-rendered, read-only volume."
+    say "Existing containers are preserved; no Vault credentials or DB passwords rotate."
+    say "Collector, Graph Engine, frontend, Nginx and other services are NOT started."
+    confirm "Build/start Vault-backed NestJS backend on this VM?" || fail "Cancelled"
+    python3 scripts/dev/bootstrap_backend.py apply
     ;;
   --check-backend-agent)
     python3 scripts/dev/bootstrap_backend_agent.py check
