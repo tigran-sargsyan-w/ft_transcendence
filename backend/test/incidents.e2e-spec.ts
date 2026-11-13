@@ -13,7 +13,11 @@ import { PrismaService } from '../src/shared/prisma/prisma.service.js';
 import { ENVIRONMENT_ID, api, db, web } from './topology/fixtures.js';
 
 const password = 'password123';
-const emails = ['incidents-e2e-a@example.com', 'incidents-e2e-b@example.com'];
+const emails = [
+  'incidents-e2e-a@example.com',
+  'incidents-e2e-b@example.com',
+  'incidents-e2e-c@example.com',
+];
 const DB_NODE = 'svc:demo:db';
 
 const snapshot: TopologySnapshot = {
@@ -88,6 +92,10 @@ describe('Incidents (e2e)', () => {
       .post(`/api/v1/incidents/${id}/notes`)
       .set('Cookie', cookie)
       .send({ body });
+
+  // Only the incidents of the test users: the table may hold others.
+  const incidentCount = () =>
+    prisma.incident.count({ where: { createdBy: { email: { in: emails } } } });
 
   const eventCount = (incidentId: string) =>
     prisma.incidentEvent.count({ where: { incidentId } });
@@ -206,6 +214,14 @@ describe('Incidents (e2e)', () => {
       expect(response.body.data.title).toBe('🚨 db down');
     });
 
+    it('does not say that a missing title holds a NUL character', async () => {
+      const response = await create(ada.cookie, { title: undefined }).expect(
+        400,
+      );
+
+      expect(response.body.error.details.title.join(' ')).not.toContain('NUL');
+    });
+
     it('ignores a duplicate in seedNodeIds', async () => {
       const response = await create(ada.cookie, {
         seedNodeIds: [DB_NODE, DB_NODE],
@@ -255,7 +271,7 @@ describe('Incidents (e2e)', () => {
 
       expect(response.body.error.code).toBe('VALIDATION_ERROR');
       expect(response.body.error.details).toHaveProperty(field);
-      expect(await prisma.incident.count()).toBe(0);
+      expect(await incidentCount()).toBe(0);
     });
 
     it('names the unknown node', async () => {
@@ -280,7 +296,7 @@ describe('Incidents (e2e)', () => {
       }).expect(404);
 
       expect(unknown.body.error.code).toBe('TOPOLOGY_UNKNOWN_ENVIRONMENT');
-      expect(await prisma.incident.count()).toBe(0);
+      expect(await incidentCount()).toBe(0);
     });
   });
 
@@ -351,10 +367,27 @@ describe('Incidents (e2e)', () => {
 
       const list = (query: string) =>
         http().get(`/api/v1/incidents${query}`).set('Cookie', bob.cookie);
+      // Ada commands all of them: the incidents of anyone else are not counted.
       const titles = async (query: string) =>
-        (await list(query).expect(200)).body.data.map(
-          (incident: { title: string }) => incident.title,
-        );
+        (await list(query).expect(200)).body.data
+          .filter(
+            (incident: { commander: { id: string } }) =>
+              incident.commander.id === ada.id,
+          )
+          .map((incident: { title: string }) => incident.title);
+
+      // Someone else's incident is in the list, but not in Ada's titles.
+      const carol = await createUser(emails[2], 'Carol');
+
+      await create(carol.cookie, {
+        title: 'not ada',
+        environmentId: 'env_other',
+      }).expect(201);
+      expect(
+        (await list('').expect(200)).body.data.some(
+          (incident: { title: string }) => incident.title === 'not ada',
+        ),
+      ).toBe(true);
 
       expect(await titles('')).toEqual(['other', 'second', 'first']);
       expect(await titles(`?environmentId=${ENVIRONMENT_ID}`)).toEqual([
@@ -820,6 +853,16 @@ describe('Incidents (e2e)', () => {
       expect(response.body.error.code).toBe('VALIDATION_ERROR');
       expect(response.body.error.details).toHaveProperty('body');
       expect(await eventCount(id)).toBe(1);
+    });
+
+    it('does not say that a missing note holds a NUL character', async () => {
+      const response = await addNote(
+        ada.cookie,
+        randomUUID(),
+        undefined,
+      ).expect(400);
+
+      expect(response.body.error.details.body.join(' ')).not.toContain('NUL');
     });
 
     it('accepts a note of 2000 characters', async () => {
