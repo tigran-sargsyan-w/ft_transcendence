@@ -8,6 +8,7 @@
 # Phase 5A: provision backend AppRole and start Vault Backend Agent only.
 # Phase 5B: start the existing Vault-only NestJS backend, and verify DB health.
 # Phase 5C: start Docker Socket Proxy, Collector and Graph Engine only.
+# Phase 5D: start React/Vite frontend and verify local backend proxy.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,7 +16,7 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'HELP'
-Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--help]
+Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--help]
 
   --plan          Read-only inventory: dependencies, local setup, Docker state.
   --prepare-host  Prepare domain, nginx TLS, local CA trust and Vault TLS.
@@ -43,6 +44,8 @@ Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-reso
   --check-backend         Read-only backend identity, health and local HTTP/DB check.
   --prepare-support-services  Start Docker Socket Proxy, Collector and Graph Engine only.
   --check-support-services    Check their networks, mounts and HTTP readiness.
+  --prepare-frontend       Build/start ONLY React/Vite frontend, without Nginx.
+  --check-frontend         Verify frontend Compose identity and local HTTP/API proxy.
   --help          Show this message.
 
 This is an INCREMENTAL fresh-machine bootstrap, not a complete installer.
@@ -53,7 +56,7 @@ HELP
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services) ;;
+  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -203,6 +206,7 @@ case "$MODE" in
     python3 scripts/dev/bootstrap_backend_agent.py plan
     python3 scripts/dev/bootstrap_backend.py plan
     python3 scripts/dev/bootstrap_support_services.py plan
+    python3 scripts/dev/bootstrap_frontend.py plan
     say "RESULT: BOOTSTRAP PLAN COMPLETE (read-only)"
     ;;
   --check-host)
@@ -250,6 +254,22 @@ case "$MODE" in
     ;;
   --check-migrations)
     python3 scripts/dev/bootstrap_migrations.py check
+    ;;
+  --check-frontend)
+    python3 scripts/dev/bootstrap_frontend.py check
+    ;;
+  --prepare-frontend)
+    host_check || fail "Host preparation incomplete"
+    python3 scripts/dev/bootstrap_resources.py check || fail "Docker resources incomplete"
+    python3 scripts/dev/bootstrap_support_services.py check || fail "Support services incomplete"
+    python3 scripts/dev/bootstrap_frontend.py plan
+    say ""
+    say "This stage builds/starts ONLY the React/Vite frontend Compose service."
+    say "Frontend has no published host ports or Vault/DB credentials."
+    say "Existing containers are preserved, never recreated by the bootstrap."
+    say "Nginx and any other not-yet-created application services are NOT started."
+    confirm "Build/start React/Vite frontend on this VM?" || fail "Cancelled"
+    python3 scripts/dev/bootstrap_frontend.py apply
     ;;
   --check-support-services)
     python3 scripts/dev/bootstrap_support_services.py check
