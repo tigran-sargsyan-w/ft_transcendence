@@ -93,66 +93,128 @@ def verify_stopped_container(item, verify, label):
     except Exception:
         raise UnifiedStartupError(f"Untrusted {label} container; manual review required") from None
     state = item.get("State") or {}
-    if state.get("Running") is True:
+    if state.get("Running") is True and state.get("Status") == "running":
         return "running"
-    if state.get("Status") in ("created", "exited"):
+    if state.get("Running") is False and state.get("Status") in ("created", "exited"):
         return "stopped"
     raise UnifiedStartupError(f"Unexpected {label} state; manual review required")
 
 
 def guard_resume(name):
-    """Never use an apply helper unless expected containers already exist.
+    """Validate every existing container before a single Docker start.
 
-    This prevents routine startup from silently provisioning a new PostgreSQL
-    cluster, issuing a SecretID, or creating replacement Compose containers.
+    No `up`, image builds, provisioning, unseal or migrations are allowed in
+    routine recovery. Each target retains its exact inspected Docker ID.
     """
     if name == "postgres":
         import bootstrap_postgres as pg
-        states = (verify_stopped_container(pg.exact_container(pg.NAME), pg.verify_identity, name),)
+        targets = ((pg.NAME, pg.exact_container(pg.NAME), pg.verify_identity),)
     elif name == "backend-agent":
         import bootstrap_backend_agent as agent
         if agent.credential_inventory() != "present":
             raise UnifiedStartupError("Backend AppRole missing; use --initialize after review")
-        states = (verify_stopped_container(agent.inspect_agent(), agent.verify_identity, name),)
+        targets = ((agent.NAME, agent.inspect_agent(), agent.verify_identity),)
     elif name == "backend":
         import bootstrap_backend as backend
-        states = (verify_stopped_container(backend.container(), backend.verify_identity, name),)
+        targets = ((backend.NAME, backend.container(), backend.verify_identity),)
     elif name == "support-services":
         import bootstrap_support_services as support
-        states = tuple(verify_stopped_container(
-            support.inspect(service),
-            lambda item, service=service: support.verify_identity(service, item),
-            service,
-        ) for service in support.SERVICES)
+        targets = tuple(
+            (support.name(service), support.inspect(service),
+             lambda item, service=service: support.verify_identity(service, item))
+            for service in support.SERVICES
+        )
     elif name == "frontend":
         import bootstrap_frontend as frontend
-        states = (verify_stopped_container(frontend.container(), frontend.verify_identity, name),)
+        targets = ((frontend.NAME, frontend.container(), frontend.verify_identity),)
     elif name == "nginx":
         import bootstrap_nginx as nginx
-        states = (verify_stopped_container(nginx.container(), nginx.verify_identity, name),)
+        targets = ((nginx.NAME, nginx.container(), nginx.verify_identity),)
     else:
         raise UnifiedStartupError(f"Cannot resume stage {name}")
-    if all(state == "running" for state in states):
+
+    verified = []
+    for container_name, item, verify in targets:
+        state = verify_stopped_container(item, verify, container_name)
+        if not isinstance(item.get("Id"), str) or not item["Id"]:
+            raise UnifiedStartupError(f"Missing trusted Docker ID: {container_name}")
+        verified.append((container_name, item["Id"], verify, state))
+    if all(state == "running" for _, _, _, state in verified):
         raise UnifiedStartupError(f"{name} is already running but unhealthy; manual review required")
-    return states
+    return tuple(verified)
+
+
+def start_existing_only(name, targets):
+    """Resume verified containers under the existing migration/provision lock.
+
+    Bootstrap stage `apply` recursively rechecks the entire dependency graph
+    before each Docker start, increasing the risk of Docker CLI timeouts.
+    In routine recovery, prior stages are already fully
+    checked by the orchestrator, and post-start checks stay mandatory.
+    """
+    import bootstrap_postgres as pg
+    try:
+        with pg.LOCK.open("rb") as lock:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise UnifiedStartupError(
+                    "Another provisioning/migration workflow is running"
+                ) from None
+            # Prevalidate the *entire* set before starting anything.
+            for container_name, container_id, verify, expected in targets:
+                current = pg.exact_container(container_name)
+                if current is None or current.get("Id") != container_id:
+                    raise UnifiedStartupError(f"Container changed: {container_name}")
+                actual = verify_stopped_container(current, verify, container_name)
+                if actual != expected:
+                    raise UnifiedStartupError(f"Container state changed: {container_name}")
+
+            for container_name, container_id, verify, state in targets:
+                if state == "running":
+                    print(f"KEEP: {container_name}", flush=True)
+                    continue
+                try:
+                    result = subprocess.run(
+                        ["docker", "start", container_name], cwd=ROOT,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        check=False, timeout=90,
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    raise UnifiedStartupError(
+                        f"Docker start interrupted for {container_name}; inspect manually"
+                    ) from None
+                if result.returncode != 0:
+                    raise UnifiedStartupError(
+                        f"Docker start failed for {container_name}; inspect manually"
+                    )
+                after = pg.exact_container(container_name)
+                if after is None or after.get("Id") != container_id:
+                    raise UnifiedStartupError(f"Container identity changed: {container_name}")
+                verify_stopped_container(after, verify, container_name)
+                if (after.get("State") or {}).get("Running") is not True:
+                    raise UnifiedStartupError(f"Container did not start: {container_name}")
+                print(f"START: {container_name}", flush=True)
+    except pg.PostgresBootstrapError:
+        raise UnifiedStartupError(f"Docker inspection failed during {name} recovery") from None
+    except OSError:
+        raise UnifiedStartupError(f"Cannot acquire startup/migration lock for {name}") from None
 
 
 def resume(name):
     if checked(name):
         print(f"KEEP: {name} ready", flush=True)
         return
-    guard_resume(name)
-    print(f"RESUME: {name} (existing containers only)", flush=True)
-    # Invoke reviewed per-stage apply directly: its own flock, identity and
-    # prerequisite checks remain active. The top-level prepare flag would
-    # prompt and is reserved for the interactive --initialize path.
-    script = ROOT / "scripts/dev" / ("bootstrap_" + name.replace("-", "_") + ".py")
     try:
-        result = subprocess.run([sys.executable, str(script), "apply"], cwd=ROOT, check=False)
-    except OSError:
-        raise UnifiedStartupError(f"Cannot invoke {name} resume helper") from None
-    if result.returncode != 0:
-        raise UnifiedStartupError(f"{name} resume failed; no cleanup attempted")
+        targets = guard_resume(name)
+    except UnifiedStartupError:
+        raise
+    except Exception:
+        raise UnifiedStartupError(f"Cannot inspect trusted {name} containers") from None
+    print(f"RESUME: {name} (existing containers only)", flush=True)
+    start_existing_only(name, targets)
+    # The full transitive readiness/identity check still runs after every
+    # start, with the existing bounded retry budget for read-only probes.
     require(name)
 
 

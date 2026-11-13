@@ -124,6 +124,12 @@ class UnifiedTests(unittest.TestCase):
         with self.assertRaisesRegex(unified.UnifiedStartupError, "Unexpected"):
             unified.verify_stopped_container({"State":{"Status":"restarting"}}, lambda _: None, "postgres")
 
+    def test_resume_rejects_inconsistent_docker_state(self):
+        with self.assertRaisesRegex(unified.UnifiedStartupError, "Unexpected"):
+            unified.verify_stopped_container(
+                {"State": {"Running": True, "Status": "exited"}}, lambda _: None, "backend"
+            )
+
     def test_resume_accepts_known_stopped(self):
         self.assertEqual(unified.verify_stopped_container(
             {"State":{"Running":False,"Status":"exited"}}, lambda _: None, "postgres"), "stopped")
@@ -131,7 +137,7 @@ class UnifiedTests(unittest.TestCase):
     def test_resume_refuses_running_but_unhealthy(self):
         pg = types.ModuleType("bootstrap_postgres")
         pg.NAME = "known-pg"
-        pg.exact_container = lambda _: {"State":{"Running":True,"Status":"running"}}
+        pg.exact_container = lambda _: {"Id":"unchanged", "State":{"Running":True,"Status":"running"}}
         pg.verify_identity = lambda _: None
         with patch.dict("sys.modules", {"bootstrap_postgres":pg}):
             with self.assertRaisesRegex(unified.UnifiedStartupError, "already running but unhealthy"):
@@ -140,26 +146,154 @@ class UnifiedTests(unittest.TestCase):
     def test_resume_does_not_run_helper_if_guard_fails(self):
         with patch.object(unified, "checked", return_value=False), \
              patch.object(unified, "guard_resume", side_effect=unified.UnifiedStartupError("stop")), \
-             patch.object(unified.subprocess, "run") as run:
+             patch.object(unified, "start_existing_only") as start:
             with self.assertRaisesRegex(unified.UnifiedStartupError, "stop"):
                 unified.resume("postgres")
-        run.assert_not_called()
+        start.assert_not_called()
 
-    def test_resume_uses_apply_helper_not_prepare(self):
+    def test_resume_uses_only_verified_direct_start(self):
+        targets = (("trusted-nginx", "id1", lambda x:x, "stopped"),)
         with patch.object(unified, "checked", side_effect=[False, True]), \
-             patch.object(unified, "guard_resume", return_value=("stopped",)), \
-             patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as run, \
+             patch.object(unified, "guard_resume", return_value=targets), \
+             patch.object(unified, "start_existing_only") as start, \
              contextlib.redirect_stdout(io.StringIO()):
             unified.resume("nginx")
-        self.assertEqual(run.call_args.args[0], [unified.sys.executable,
-           str(unified.ROOT / "scripts/dev/bootstrap_nginx.py"), "apply"])
+        start.assert_called_once_with("nginx", targets)
 
-    def test_resume_halts_on_failed_apply(self):
+    def test_resume_halts_on_failed_start(self):
         with patch.object(unified, "checked", return_value=False), \
-             patch.object(unified, "guard_resume", return_value=("stopped",)), \
-             patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=1)):
-            with self.assertRaisesRegex(unified.UnifiedStartupError, "resume failed"):
+             patch.object(unified, "guard_resume", return_value=(("a", "id", lambda x:x, "stopped"),)), \
+             patch.object(unified, "start_existing_only", side_effect=unified.UnifiedStartupError("stop")):
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "stop"):
                 unified.resume("backend")
+
+    def test_resume_rejects_missing_container_id(self):
+        pg = types.ModuleType("bootstrap_postgres")
+        pg.NAME = "known-pg"
+        pg.exact_container = lambda _: {"State":{"Running":False,"Status":"exited"}}
+        pg.verify_identity = lambda _: None
+        with patch.dict("sys.modules", {"bootstrap_postgres":pg}):
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "Missing trusted Docker ID"):
+                unified.guard_resume("postgres")
+
+    def test_start_existing_uses_only_docker_start_and_no_compose(self):
+        pg = types.ModuleType("bootstrap_postgres")
+        pg.LOCK = Path(__file__)
+        pg.PostgresBootstrapError = type("PostgresBootstrapError", (Exception,), {})
+        before = {"Id":"id1", "State":{"Running":False, "Status":"exited"}}
+        after = {"Id":"id1", "State":{"Running":True, "Status":"running"}}
+        pg.exact_container = MagicMock(side_effect=[before, after])
+        verify = MagicMock()
+        with patch.dict("sys.modules", {"bootstrap_postgres":pg}), \
+             patch.object(unified.fcntl, "flock") as lock, \
+             patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as run, \
+             contextlib.redirect_stdout(io.StringIO()):
+            unified.start_existing_only("frontend", (("existing-frontend", "id1", verify, "stopped"),))
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0], ["docker", "start", "existing-frontend"])
+        self.assertIs(run.call_args.kwargs["stdout"], unified.subprocess.DEVNULL)
+        self.assertIs(run.call_args.kwargs["stderr"], unified.subprocess.DEVNULL)
+        self.assertEqual(verify.call_count, 2)
+        self.assertGreaterEqual(lock.call_count, 1)
+
+    def test_guard_resume_frontend_verifies_identity_and_id(self):
+        frontend = types.ModuleType("bootstrap_frontend")
+        frontend.NAME = "trusted-frontend"
+        frontend.container = MagicMock(return_value={
+            "Id":"retained-id", "State":{"Running":False,"Status":"exited"},
+        })
+        frontend.verify_identity = MagicMock()
+        with patch.dict("sys.modules", {"bootstrap_frontend": frontend}):
+            targets = unified.guard_resume("frontend")
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(targets[0][:2], ("trusted-frontend", "retained-id"))
+        self.assertEqual(targets[0][3], "stopped")
+        frontend.verify_identity.assert_called_once()
+
+    def test_start_existing_refuses_replacement_after_start(self):
+        pg = types.ModuleType("bootstrap_postgres")
+        pg.LOCK = Path(__file__)
+        pg.PostgresBootstrapError = type("PostgresBootstrapError", (Exception,), {})
+        pg.exact_container = MagicMock(side_effect=[
+            {"Id":"before", "State":{"Running":False,"Status":"exited"}},
+            {"Id":"replaced", "State":{"Running":True,"Status":"running"}},
+        ])
+        with patch.dict("sys.modules", {"bootstrap_postgres":pg}), \
+             patch.object(unified.fcntl, "flock"), \
+             patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as run:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "identity changed"):
+                unified.start_existing_only("frontend", (("frontend", "before", lambda _:None, "stopped"),))
+        self.assertEqual(run.call_count, 1)
+
+    def test_start_existing_keeps_verified_running_siblings(self):
+        pg = types.ModuleType("bootstrap_postgres")
+        pg.LOCK = Path(__file__)
+        pg.PostgresBootstrapError = type("PostgresBootstrapError", (Exception,), {})
+        pg.exact_container = MagicMock(side_effect=[
+            {"Id":"run-id", "State":{"Running":True,"Status":"running"}},
+            {"Id":"stop-id", "State":{"Running":False,"Status":"exited"}},
+            {"Id":"stop-id", "State":{"Running":True,"Status":"running"}},
+        ])
+        targets = (("running", "run-id", lambda _:None, "running"),
+                   ("stopped", "stop-id", lambda _:None, "stopped"))
+        with patch.dict("sys.modules", {"bootstrap_postgres":pg}), \
+             patch.object(unified.fcntl, "flock"), \
+             patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as run, \
+             contextlib.redirect_stdout(io.StringIO()):
+            unified.start_existing_only("support-services", targets)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0], ["docker", "start", "stopped"])
+
+    def test_start_existing_verifies_all_before_start(self):
+        pg = types.ModuleType("bootstrap_postgres")
+        pg.LOCK = Path(__file__)
+        pg.PostgresBootstrapError = type("PostgresBootstrapError", (Exception,), {})
+        pg.exact_container = MagicMock(side_effect=[
+            {"Id":"ok", "State":{"Running":False,"Status":"exited"}},
+            {"Id":"surprise", "State":{"Running":False,"Status":"exited"}},
+        ])
+        targets = (("a", "ok", lambda _:None, "stopped"), ("b", "expected", lambda _:None, "stopped"))
+        with patch.dict("sys.modules", {"bootstrap_postgres":pg}), \
+             patch.object(unified.fcntl, "flock"), \
+             patch.object(unified.subprocess, "run") as run:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "Container changed"):
+                unified.start_existing_only("support-services", targets)
+        run.assert_not_called()
+
+    def test_start_existing_never_starts_unhealthy_running(self):
+        pg = types.ModuleType("bootstrap_postgres")
+        pg.LOCK = Path(__file__)
+        pg.PostgresBootstrapError = type("PostgresBootstrapError", (Exception,), {})
+        pg.exact_container = MagicMock(return_value={"Id":"id1", "State":{"Running":True,"Status":"running"}})
+        with patch.dict("sys.modules", {"bootstrap_postgres":pg}), \
+             patch.object(unified.fcntl, "flock"), \
+             patch.object(unified.subprocess, "run") as run:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "Container state changed"):
+                unified.start_existing_only("frontend", (("frontend", "id1", lambda _:None, "stopped"),))
+        run.assert_not_called()
+
+    def test_start_existing_stops_on_docker_start_failure(self):
+        pg = types.ModuleType("bootstrap_postgres")
+        pg.LOCK = Path(__file__)
+        pg.PostgresBootstrapError = type("PostgresBootstrapError", (Exception,), {})
+        pg.exact_container = MagicMock(return_value={"Id":"id1", "State":{"Running":False,"Status":"exited"}})
+        with patch.dict("sys.modules", {"bootstrap_postgres":pg}), \
+             patch.object(unified.fcntl, "flock"), \
+             patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=1)) as run:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "Docker start failed"):
+                unified.start_existing_only("frontend", (("frontend", "id1", lambda _:None, "stopped"),))
+        self.assertEqual(run.call_count, 1)
+
+    def test_start_existing_honors_migration_lock(self):
+        pg = types.ModuleType("bootstrap_postgres")
+        pg.LOCK = Path(__file__)
+        pg.PostgresBootstrapError = type("PostgresBootstrapError", (Exception,), {})
+        with patch.dict("sys.modules", {"bootstrap_postgres":pg}), \
+             patch.object(unified.fcntl, "flock", side_effect=BlockingIOError), \
+             patch.object(unified.subprocess, "run") as run:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "provisioning/migration"):
+                unified.start_existing_only("frontend", (("frontend", "id1", lambda _:None, "stopped"),))
+        run.assert_not_called()
 
     def test_read_only_retries_recover_without_mutation(self):
         with patch.object(unified, "command", side_effect=[False, True]) as command, \
