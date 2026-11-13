@@ -22,9 +22,10 @@ import {
 import { UpdateIncidentDto } from './dto/update-incident.dto.js';
 import { IncidentsService } from './incidents.service.js';
 
-// Anyone who registers can open incidents and add notes, and the timeline is
-// never purged: 30 per minute and per client for each of these two routes,
-// counted apart from each other and from the login and the analyses.
+// Anyone who registers can open incidents, change them and add notes, and the
+// timeline is never purged: 30 per minute and per client for each of these
+// three routes, counted apart from each other and from the login and the
+// analyses.
 const LimitWrites = () =>
   applyDecorators(
     UseGuards(ThrottlerGuard),
@@ -51,6 +52,7 @@ export class IncidentsController {
     return this.incidents.get(id);
   }
 
+  @LimitWrites()
   @Patch(':id')
   update(
     @Param('id', ParseUUIDPipe) id: string,

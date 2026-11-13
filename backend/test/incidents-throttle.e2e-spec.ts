@@ -56,6 +56,13 @@ describe('Incidents rate limit (e2e)', () => {
       .set('X-Forwarded-For', forwardedFor)
       .send({});
 
+  const change = (forwardedFor: string) =>
+    request(app.getHttpServer())
+      .patch(`/api/v1/incidents/${randomUUID()}`)
+      .set('Cookie', cookie)
+      .set('X-Forwarded-For', forwardedFor)
+      .send({});
+
   const note = (forwardedFor: string) =>
     request(app.getHttpServer())
       .post(`/api/v1/incidents/${randomUUID()}/notes`)
@@ -72,6 +79,15 @@ describe('Incidents rate limit (e2e)', () => {
 
     expect(response.body.error.code).toBe('TOO_MANY_REQUESTS');
     await open('203.0.113.12').expect(400);
+  });
+
+  it('refuses the 31st change of an incident within a minute, for that client only', async () => {
+    for (let i = 0; i < 30; i++) {
+      await change('203.0.113.51').expect(400);
+    }
+
+    await change('203.0.113.51').expect(429);
+    await change('203.0.113.52').expect(400);
   });
 
   it('refuses the 31st note within a minute, for that client only', async () => {

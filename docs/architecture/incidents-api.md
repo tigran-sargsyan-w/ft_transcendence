@@ -141,12 +141,12 @@ Shape and codes: [API conventions](./api-conventions.md).
 | 404 | `INCIDENT_NOT_FOUND` | No incident has that id |
 | 404 | `TOPOLOGY_UNKNOWN_ENVIRONMENT` | `POST` for an environment the server does not follow |
 | 409 | `INCIDENT_VERSION_CONFLICT` | The `version` is not the current one; `details` is the current incident |
-| 429 | `TOO_MANY_REQUESTS` | More than 30 `POST /incidents`, or more than 30 `POST /incidents/:id/notes`, with a valid session in a minute from the same client address, whatever their content (a refused body counts too). That client then stays blocked for a minute (`Retry-After` says how long). The two counts are kept in memory by the server, and are separate from each other and from the login's and the analyses'. Reading and `PATCH` are not limited |
+| 429 | `TOO_MANY_REQUESTS` | More than 30 `POST /incidents`, more than 30 `PATCH /incidents/:id` or more than 30 `POST /incidents/:id/notes`, with a valid session in a minute from the same client address, whatever their content (a refused body counts too). That client then stays blocked for a minute (`Retry-After` says how long). The three counts are kept in memory by the server, and are separate from each other and from the login's and the analyses'. Reading is not limited |
 | 503 | `TOPOLOGY_UNAVAILABLE` | `POST` before the server has any topology |
 
 ## Limits of v1
 
 - No participants, runbook, saved analysis, "compromised" mark, invitations or chat; no live updates (Socket.IO comes next).
-- No pagination, no purge. Opening incidents and adding notes are limited (see the errors); `PATCH` is not.
+- No pagination, no purge. Opening incidents, changing them and adding notes are limited (see the errors); reading is not.
 - No idempotency: a `POST` that is sent again after a lost answer opens a second incident.
 - An incident is opened against the topology the server knows at that moment (`epoch` and `revision` are stored for the replay); it cannot be opened while the topology is unknown.

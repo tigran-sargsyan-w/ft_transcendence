@@ -56,7 +56,7 @@ The `code` is stable and machine-readable. An error that defines its own code us
 | `EMAIL_ALREADY_EXISTS` | 409 | Registration with an email already in use | none |
 | `AUTH_INVALID_CREDENTIALS` | 401 | Login with an unknown email or a wrong password (same answer for both) | none |
 | `UNAUTHORIZED` | 401 | Missing, unknown or expired session on a protected route | none |
-| `TOO_MANY_REQUESTS` | 429 | Too many login attempts, analyses, incidents opened or notes added | none |
+| `TOO_MANY_REQUESTS` | 429 | Too many login attempts, analyses, incidents opened or changed, or notes added | none |
 | `SERVICE_UNAVAILABLE` | 503 | `GET /health` cannot reach a dependency, cannot read the migrations of the repository (`{ "migrations": "unavailable" }`), or the database has migrations that are not applied | `{ "<dependency>": "unavailable" }`, or `{ "migrations": "pending" }` |
 | `INTERNAL_ERROR` | 500 | Unexpected server error. The message is always `Internal server error`; the real error is only logged | none |
 | `BAD_REQUEST` | 400 | Malformed request, such as invalid JSON, or an id in the path that is not a UUID | none |
