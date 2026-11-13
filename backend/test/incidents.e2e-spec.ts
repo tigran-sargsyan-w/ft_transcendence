@@ -395,6 +395,13 @@ describe('Incidents (e2e)', () => {
         'first',
       ]);
       expect(await titles('?environmentId=env_other')).toEqual(['other']);
+      // The server filter itself, on everybody's incidents.
+      const inOther = (await list('?environmentId=env_other').expect(200)).body
+        .data;
+
+      expect(
+        inOther.map((incident: { title: string }) => incident.title).sort(),
+      ).toEqual(['not ada', 'other']);
       expect(await titles('?status=investigating')).toEqual(['first']);
       expect(await titles('?severity=sev1')).toEqual(['second']);
       expect(await titles('?environmentId=nope')).toEqual([]);

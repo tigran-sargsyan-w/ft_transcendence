@@ -118,8 +118,10 @@ async function viewIncident(db: Db, id: string) {
 
 // The incident and its history are two reads. In one transaction at this level
 // they see the same data: without it, a reopen committed in between would give
-// `resolved` next to a history that ends on `open`. Only for reads: an update
-// at this level could be refused by PostgreSQL when the row changed.
+// `resolved` next to a history that ends on `open`. Only for `get` and `list`:
+// an update at this level could be refused by PostgreSQL when the row changed.
+// So the two paths of `update` that only read (nothing to change, and the 409)
+// can still see such a reopen; `resolvedAt` ignores a history that disagrees.
 const ONE_SNAPSHOT = { isolationLevel: 'RepeatableRead' } as const;
 
 // v1 has no organization, no participant and no role: every signed-in user
