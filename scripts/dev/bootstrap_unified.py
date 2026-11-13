@@ -18,6 +18,7 @@ from pathlib import Path
 import stat
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP = ROOT / "scripts/bootstrap.sh"
@@ -42,6 +43,8 @@ STAGES = (
 )
 STAGE_BY_NAME = {name: (check, prepare) for name, check, prepare in STAGES}
 RESUMABLE = ("postgres", "backend-agent", "backend", "support-services", "frontend", "nginx")
+READ_ONLY_ATTEMPTS = 3
+READ_ONLY_RETRY_DELAY = 1
 
 
 class UnifiedStartupError(Exception):
@@ -63,7 +66,13 @@ def command(flag, *, quiet=False):
 
 
 def checked(name):
-    return command(STAGE_BY_NAME[name][0], quiet=True)
+    """Retry only read-only probes; never retry provisioning or mutation."""
+    for attempt in range(READ_ONLY_ATTEMPTS):
+        if command(STAGE_BY_NAME[name][0], quiet=True):
+            return True
+        if attempt + 1 < READ_ONLY_ATTEMPTS:
+            time.sleep(READ_ONLY_RETRY_DELAY)
+    return False
 
 
 def require(name):
@@ -183,10 +192,22 @@ def initialize():
 
 def start():
     print("=== Vault-backed routine startup (no provisioning or migrations) ===", flush=True)
-    for name, _, _ in STAGES:
+    require("host")
+    require("resources")
+    vault_seal_guard()
+    # Nginx's check walks the full trusted dependency chain down to Vault and
+    # PostgreSQL. Rechecking each dependency separately is expensive and can
+    # saturate a small VM with redundant nested Docker/psql invocations.
+    if checked("nginx"):
+        print("KEEP: complete Vault-backed stack ready", flush=True)
+        print("RESULT: UNIFIED STARTUP READY", flush=True)
+        return
+    # Recover only existing trusted stopped containers, in dependency order.
+    # A running but persistently unhealthy container still fails closed.
+    for name, _, _ in STAGES[2:]:
         if name == "vault":
-            vault_seal_guard()
-        if name in RESUMABLE:
+            require(name)
+        elif name in RESUMABLE:
             resume(name)
         else:
             require(name)
@@ -195,8 +216,10 @@ def start():
 
 def check():
     print("=== Unified read-only readiness check ===", flush=True)
-    for name, _, _ in STAGES:
-        require(name)
+    require("host")
+    require("resources")
+    # Nginx's read-only check covers the entire transitive service chain.
+    require("nginx")
     print("RESULT: UNIFIED STACK READY (read-only)", flush=True)
 
 

@@ -39,14 +39,16 @@ class UnifiedTests(unittest.TestCase):
         with patch.object(unified, "command", return_value=True) as cmd, contextlib.redirect_stdout(io.StringIO()):
             unified.check()
         self.assertEqual([call.args[0] for call in cmd.call_args_list],
-                         [stage[1] for stage in unified.STAGES])
+                         ["--check-host", "--check-resources", "--check-nginx"])
         self.assertTrue(all(call.kwargs["quiet"] for call in cmd.call_args_list))
 
     def test_check_stops_on_first_failure(self):
-        with patch.object(unified, "command", return_value=False) as cmd:
+        with patch.object(unified, "command", return_value=False) as cmd, \
+             patch.object(unified.time, "sleep") as sleep:
             with self.assertRaises(unified.UnifiedStartupError):
                 unified.check()
-        self.assertEqual(cmd.call_count, 1)
+        self.assertEqual(cmd.call_count, unified.READ_ONLY_ATTEMPTS)
+        self.assertEqual(sleep.call_count, unified.READ_ONLY_ATTEMPTS - 1)
 
     def test_initialization_requires_tty(self):
         with patch.object(unified.sys.stdin, "isatty", return_value=False):
@@ -62,21 +64,23 @@ class UnifiedTests(unittest.TestCase):
                          [stage[1] for stage in unified.STAGES])
 
     def test_initialization_prepares_only_missing_stage(self):
-        responses = [False, True, True] + [True] * (len(unified.STAGES) - 1)
+        responses = [False] * unified.READ_ONLY_ATTEMPTS + [True, True] + [True] * (len(unified.STAGES) - 1)
         with patch.object(unified.sys.stdin, "isatty", return_value=True), \
              patch.object(unified, "command", side_effect=responses) as cmd, \
+             patch.object(unified.time, "sleep"), \
              contextlib.redirect_stdout(io.StringIO()):
             unified.initialize()
-        self.assertEqual([call.args[0] for call in cmd.call_args_list][:3],
-                         ["--check-host", "--prepare-host", "--check-host"])
+        self.assertEqual([call.args[0] for call in cmd.call_args_list][:5],
+                         ["--check-host"] * unified.READ_ONLY_ATTEMPTS + ["--prepare-host", "--check-host"])
         self.assertNotIn("--prepare-vault", [call.args[0] for call in cmd.call_args_list])
 
     def test_initialization_halts_on_denied_prepare(self):
         with patch.object(unified.sys.stdin, "isatty", return_value=True), \
-             patch.object(unified, "command", side_effect=[False, False]) as cmd:
+             patch.object(unified, "command", side_effect=[False] * (unified.READ_ONLY_ATTEMPTS + 1)) as cmd, \
+             patch.object(unified.time, "sleep"):
             with self.assertRaises(unified.UnifiedStartupError):
                 unified.initialize()
-        self.assertEqual(cmd.call_count, 2)
+        self.assertEqual(cmd.call_count, unified.READ_ONLY_ATTEMPTS + 1)
 
     def test_routine_does_not_run_any_prepare_flag(self):
         with patch.object(unified, "checked", return_value=True) as ck, \
@@ -84,7 +88,7 @@ class UnifiedTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             unified.start()
         self.assertEqual([call.args[0] for call in ck.call_args_list],
-                         [stage[0] for stage in unified.STAGES])
+                         ["host", "resources", "nginx"])
         vault.assert_called_once()
 
     def test_routine_fails_before_database_if_vault_sealed(self):
@@ -95,7 +99,7 @@ class UnifiedTests(unittest.TestCase):
         self.assertEqual([call.args[0] for call in ck.call_args_list], ["host", "resources"])
 
     def test_routine_rejects_incomplete_migrations_without_apply(self):
-        checks = lambda name: name != "migrations"
+        checks = lambda name: name not in ("nginx", "migrations")
         with patch.object(unified, "checked", side_effect=checks), \
              patch.object(unified, "vault_seal_guard"), \
              contextlib.redirect_stdout(io.StringIO()):
@@ -156,6 +160,33 @@ class UnifiedTests(unittest.TestCase):
              patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=1)):
             with self.assertRaisesRegex(unified.UnifiedStartupError, "resume failed"):
                 unified.resume("backend")
+
+    def test_read_only_retries_recover_without_mutation(self):
+        with patch.object(unified, "command", side_effect=[False, True]) as command, \
+             patch.object(unified.time, "sleep") as sleep:
+            self.assertTrue(unified.checked("nginx"))
+        self.assertEqual([item.args[0] for item in command.call_args_list],
+                         ["--check-nginx", "--check-nginx"])
+        self.assertEqual(sleep.call_count, 1)
+        self.assertTrue(all(item.kwargs["quiet"] for item in command.call_args_list))
+
+    def test_read_only_persistent_failure_no_apply(self):
+        with patch.object(unified, "command", return_value=False) as command, \
+             patch.object(unified.time, "sleep"):
+            self.assertFalse(unified.checked("nginx"))
+        self.assertEqual(command.call_count, unified.READ_ONLY_ATTEMPTS)
+        self.assertTrue(all(item.args[0] == "--check-nginx" for item in command.call_args_list))
+
+    def test_start_fast_path_without_any_apply(self):
+        with patch.object(unified, "command", return_value=True) as command, \
+             patch.object(unified, "vault_seal_guard") as guard, \
+             patch.object(unified, "guard_resume") as resume, \
+             contextlib.redirect_stdout(io.StringIO()):
+            unified.start()
+        self.assertEqual([item.args[0] for item in command.call_args_list],
+                         ["--check-host", "--check-resources", "--check-nginx"])
+        guard.assert_called_once()
+        resume.assert_not_called()
 
     def test_vault_seal_refuses_unseal(self):
         vault = types.ModuleType("bootstrap_vault")
