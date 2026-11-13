@@ -3,7 +3,7 @@
 # Phase 1: host TLS/domain. Phase 2: Docker networks/volumes.
 # Phase 3: Vault server. Phase 4A: KV v2, ACL policies, AppRoles.
 # Phase 4B: initial PostgreSQL credentials stored in Vault KV v2.
-# Phase 4C: initialize local PostgreSQL 18 cluster. Roles/migrations follow.
+# Phase 4C: PostgreSQL 18. Phase 4D: Vault-backed PostgreSQL roles.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -11,7 +11,7 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'HELP'
-Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--help]
+Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--help]
 
   --plan          Read-only inventory: dependencies, local setup, Docker state.
   --prepare-host  Prepare domain, nginx TLS, local CA trust and Vault TLS.
@@ -29,6 +29,8 @@ Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-reso
   --check-vault-secrets    Verify both Vault database secrets (read-only).
   --prepare-postgres  Initialize and start PostgreSQL 18, without retaining an admin password.
   --check-postgres    Read-only PostgreSQL container, auth and health verification.
+  --prepare-postgres-roles  Initially provision backend/migrator roles from Vault DSNs.
+  --check-postgres-roles    Read-only PostgreSQL role state/grants verification.
   --help          Show this message.
 
 This is an INCREMENTAL fresh-machine bootstrap, not a complete installer.
@@ -39,7 +41,7 @@ HELP
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres) ;;
+  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -184,7 +186,8 @@ case "$MODE" in
     say "INFO: Vault config read-only check is available via --check-vault-config"
     python3 scripts/dev/bootstrap_vault_secrets.py plan
     python3 scripts/dev/bootstrap_postgres.py plan
-    say "INFO: PostgreSQL application-role provisioning and Prisma migrations follow in later phases"
+    python3 scripts/dev/bootstrap_postgres_roles.py plan
+    say "INFO: Prisma migrations and final table grants follow in a later phase"
     say "RESULT: BOOTSTRAP PLAN COMPLETE (read-only)"
     ;;
   --check-host)
@@ -226,6 +229,23 @@ case "$MODE" in
     ;;
   --check-postgres)
     python3 scripts/dev/bootstrap_postgres.py check
+    ;;
+  --check-postgres-roles)
+    python3 scripts/dev/bootstrap_postgres_roles.py check
+    ;;
+  --prepare-postgres-roles)
+    host_check || fail "Host preparation incomplete"
+    python3 scripts/dev/bootstrap_resources.py check || fail "Docker resources incomplete"
+    python3 scripts/dev/bootstrap_postgres.py check || fail "PostgreSQL not ready"
+    python3 scripts/dev/bootstrap_vault_secrets.py check || fail "Vault database credentials incomplete"
+    python3 scripts/dev/bootstrap_postgres_roles.py plan
+    say ""
+    say "This stage provisions only PostgreSQL backend/migrator roles via existing Vault tooling."
+    say "It may create initial AppRole credentials in the dedicated Docker volume."
+    say "Existing database role passwords are verified, NEVER changed or rotated."
+    say "Prisma migrations and table grants are NOT applied in this stage."
+    confirm "Provision PostgreSQL roles using Vault credentials on this VM?" || fail "Cancelled"
+    python3 scripts/dev/bootstrap_postgres_roles.py apply
     ;;
   --prepare-postgres)
     host_check || fail "Host preparation incomplete"
