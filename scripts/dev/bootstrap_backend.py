@@ -110,7 +110,7 @@ def verify_identity(item):
     opts = host.get("SecurityOpt") or []
     caps = host.get("CapDrop") or []
     if (set(nets) != {DEFAULT_NETWORK}
-            or host.get("ReadOnlyRootfs") is not True
+            or host.get("ReadonlyRootfs") is not True
             or host.get("Privileged") is not False
             or host.get("PortBindings")
             or not any(str(x).lower().startswith("no-new-privileges") for x in opts)

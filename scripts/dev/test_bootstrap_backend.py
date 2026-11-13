@@ -30,7 +30,7 @@ def valid(*, running=True, health="healthy"):
             "Cmd": ["sh", "-ec", "sh scripts/wait-for-database-secret.sh; exec npm run start:prod"],
         },
         "HostConfig": {
-            "ReadOnlyRootfs": True, "Privileged": False,
+            "ReadonlyRootfs": True, "Privileged": False,
             "PortBindings": {}, "CapDrop": ["ALL"],
             "SecurityOpt": ["no-new-privileges:true"],
         },
@@ -73,7 +73,20 @@ class BackendTests(unittest.TestCase):
             backend.verify_identity(item)
 
     def test_must_have_readonly_rootfs(self):
-        item = valid(); item["HostConfig"]["ReadOnlyRootfs"] = False
+        item = valid(); item["HostConfig"]["ReadonlyRootfs"] = False
+        with self.assertRaises(backend.BackendBootstrapError):
+            backend.verify_identity(item)
+
+    def test_wrong_docker_field_name_is_not_accepted(self):
+        item = valid()
+        item["HostConfig"].pop("ReadonlyRootfs")
+        item["HostConfig"]["ReadOnlyRootfs"] = True
+        with self.assertRaises(backend.BackendBootstrapError):
+            backend.verify_identity(item)
+
+    def test_missing_readonly_rootfs_is_refused(self):
+        item = valid()
+        item["HostConfig"].pop("ReadonlyRootfs")
         with self.assertRaises(backend.BackendBootstrapError):
             backend.verify_identity(item)
 
