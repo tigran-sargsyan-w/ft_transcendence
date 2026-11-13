@@ -2,7 +2,8 @@
 # ft_transcendence fresh-machine bootstrap (incremental implementation).
 # Phase 1: host TLS/domain. Phase 2: Docker networks/volumes.
 # Phase 3: Vault server. Phase 4A: KV v2, ACL policies, AppRoles.
-# PostgreSQL and database secrets are NOT implemented in this version.
+# Phase 4B: initial PostgreSQL credentials stored in Vault KV v2.
+# PostgreSQL server initialization is NOT implemented in this version.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,7 +11,7 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'HELP'
-Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--help]
+Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--help]
 
   --plan          Read-only inventory: dependencies, local setup, Docker state.
   --prepare-host  Prepare domain, nginx TLS, local CA trust and Vault TLS.
@@ -24,6 +25,8 @@ Usage: ./scripts/bootstrap.sh [--plan|--prepare-host|--check-host|--prepare-reso
   --check-vault        Read-only check of Vault identity and readiness.
   --prepare-vault-config  Configure Vault KV v2, ACL policies and AppRoles (no DB secrets).
   --check-vault-config    Authenticated read-only validation of Vault configuration.
+  --prepare-vault-secrets  Create missing PostgreSQL DSNs in Vault KV v2 (no overwrite).
+  --check-vault-secrets    Verify both Vault database secrets (read-only).
   --help          Show this message.
 
 This is an INCREMENTAL fresh-machine bootstrap, not a complete installer.
@@ -34,7 +37,7 @@ HELP
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config) ;;
+  --plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -177,7 +180,8 @@ case "$MODE" in
     python3 scripts/dev/bootstrap_resources.py plan
     python3 scripts/dev/bootstrap_vault.py plan
     say "INFO: Vault config read-only check is available via --check-vault-config"
-    say "INFO: PostgreSQL provisioning is not implemented in this phase"
+    python3 scripts/dev/bootstrap_vault_secrets.py plan
+    say "INFO: PostgreSQL server initialization is not implemented in this phase"
     say "RESULT: BOOTSTRAP PLAN COMPLETE (read-only)"
     ;;
   --check-host)
@@ -216,6 +220,22 @@ case "$MODE" in
     say "PostgreSQL and application containers will NOT be started."
     confirm "Initialize or resume local development Vault on this VM?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_vault.py apply
+    ;;
+  --check-vault-secrets)
+    python3 scripts/dev/bootstrap_vault_secrets.py check
+    ;;
+  --prepare-vault-secrets)
+    host_check || fail "Host preparation incomplete"
+    python3 scripts/dev/bootstrap_resources.py check || fail "Docker resources incomplete"
+    python3 scripts/dev/bootstrap_vault_config.py check || fail "Vault configuration incomplete"
+    python3 scripts/dev/bootstrap_vault_secrets.py plan
+    say ""
+    say "This stage creates ONLY missing backend/migrator PostgreSQL DSNs in Vault KV v2."
+    say "Credentials are generated inside a temporary private-network helper container."
+    say "Existing valid database secrets will never be rotated or replaced."
+    say "No PostgreSQL or application containers are started."
+    confirm "Create missing PostgreSQL secrets in Vault on this VM?" || fail "Cancelled"
+    python3 scripts/dev/bootstrap_vault_secrets.py apply
     ;;
   --check-vault-config)
     python3 scripts/dev/bootstrap_vault_config.py check
