@@ -221,6 +221,181 @@ class UnifiedTests(unittest.TestCase):
                         pass
             self.assertEqual(target.read_text(), "do not touch")
 
+    def recovery_fixture(self, *, running=True, initialized=True, sealed=True, progress=0):
+        vault = types.ModuleType("bootstrap_vault")
+        vault.NAME = "trusted-vault"
+        item = {
+            "Id": "trusted-container-id",
+            "State": {"Running": running, "Status": "running" if running else "exited"},
+            "HostConfig": {"Privileged": False, "PortBindings": {}},
+        }
+        vault.inspect_container = MagicMock(return_value=item)
+        vault.verify_identity = MagicMock()
+        vault.status = MagicMock(return_value={
+            "initialized": initialized, "sealed": sealed, "progress": progress,
+        })
+        vault.verify_topology = MagicMock()
+        return vault, item
+
+    def test_recovery_requires_existing_container(self):
+        vault, item = self.recovery_fixture()
+        vault.inspect_container.return_value = None
+        with patch.dict("sys.modules", {"bootstrap_vault": vault}), \
+             patch.object(unified.subprocess, "run") as cmd:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "missing"):
+                unified.recovery_vault()
+        cmd.assert_not_called()
+
+    def test_recovery_rejects_untrusted_vault(self):
+        vault, item = self.recovery_fixture()
+        vault.verify_identity.side_effect = ValueError("sensitive internal info")
+        with patch.dict("sys.modules", {"bootstrap_vault": vault}), \
+             patch.object(unified.subprocess, "run") as cmd:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "inspection failed") as caught:
+                unified.recovery_vault()
+        self.assertNotIn("sensitive internal info", str(caught.exception))
+        cmd.assert_not_called()
+
+    def test_recovery_rejects_public_vault_ports(self):
+        vault, item = self.recovery_fixture()
+        item["HostConfig"]["PortBindings"] = {"8200/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8200"}]}
+        with patch.dict("sys.modules", {"bootstrap_vault": vault}), \
+             patch.object(unified.subprocess, "run") as cmd:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "privileges/ports"):
+                unified.recovery_vault()
+        cmd.assert_not_called()
+
+    def test_recovery_rejects_uninitialized_without_provisioning(self):
+        vault, item = self.recovery_fixture(initialized=False)
+        with patch.dict("sys.modules", {"bootstrap_vault": vault}), \
+             patch.object(unified.subprocess, "run") as cmd:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "not initialized"):
+                unified.recovery_vault()
+        cmd.assert_not_called()
+
+    def test_recovery_starts_only_known_stopped_vault(self):
+        vault, item = self.recovery_fixture(running=False, sealed=False)
+        running = {**item, "State": {"Running": True, "Status": "running"}}
+        vault.inspect_container.side_effect = [item, running]
+        with patch.dict("sys.modules", {"bootstrap_vault": vault}), \
+             patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as cmd, \
+             contextlib.redirect_stdout(io.StringIO()):
+            got, state = unified.recovery_vault()
+        self.assertIs(got, vault)
+        self.assertFalse(state["sealed"])
+        self.assertEqual(cmd.call_args.args[0], ["docker", "start", "trusted-vault"])
+        self.assertIs(cmd.call_args.kwargs["stdout"], unified.subprocess.DEVNULL)
+        self.assertIs(cmd.call_args.kwargs["stderr"], unified.subprocess.DEVNULL)
+        vault.verify_identity.assert_called()
+
+    def test_recovery_refuses_changed_container_after_start(self):
+        vault, item = self.recovery_fixture(running=False)
+        replacement = {**item, "Id": "replaced", "State": {"Running": True, "Status": "running"}}
+        vault.inspect_container.side_effect = [item, replacement]
+        with patch.dict("sys.modules", {"bootstrap_vault": vault}), \
+             patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)):
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "identity changed"):
+                unified.recovery_vault()
+
+    def test_unseal_already_ready_never_prompts(self):
+        vault, item = self.recovery_fixture(sealed=False)
+        with patch.object(unified.subprocess, "run") as cmd:
+            unified.interactive_unseal(vault, {"initialized": True, "sealed": False})
+        cmd.assert_not_called()
+
+    def test_unseal_requires_tty(self):
+        vault, item = self.recovery_fixture()
+        with patch.object(unified.sys.stdin, "isatty", return_value=False), \
+             patch.object(unified.subprocess, "run") as cmd:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "interactive TTY"):
+                unified.interactive_unseal(vault, vault.status())
+        cmd.assert_not_called()
+
+    def test_unseal_two_hidden_prompts_with_no_argv_keys(self):
+        vault, item = self.recovery_fixture()
+        vault.status.side_effect = [
+            {"initialized": True, "sealed": True, "progress": 1},
+            {"initialized": True, "sealed": False, "progress": 0},
+        ]
+        with patch.object(unified.sys.stdin, "isatty", return_value=True), \
+             patch.object(unified.sys.stdout, "isatty", return_value=True), \
+             patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as cmd:
+            unified.interactive_unseal(vault, {"initialized": True, "sealed": True, "progress": 0})
+        self.assertEqual(cmd.call_count, 2)
+        for invoked in cmd.call_args_list:
+            self.assertEqual(invoked.args[0], [
+                "docker", "exec", "-it", "trusted-vault", "vault", "operator", "unseal"
+            ])
+            self.assertNotIn("input", invoked.kwargs)
+            self.assertNotIn("env", invoked.kwargs)
+            self.assertNotIn("capture_output", invoked.kwargs)
+            self.assertNotIn("shell", invoked.kwargs)
+
+    def test_unseal_partial_progress_needs_one_share(self):
+        vault, item = self.recovery_fixture(progress=1)
+        vault.status.return_value = {"initialized": True, "sealed": False, "progress": 0}
+        with patch.object(unified.sys.stdin, "isatty", return_value=True), \
+             patch.object(unified.sys.stdout, "isatty", return_value=True), \
+             patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as cmd:
+            unified.interactive_unseal(vault, {"initialized": True, "sealed": True, "progress": 1})
+        self.assertEqual(cmd.call_count, 1)
+
+    def test_unseal_refuses_invalid_progress(self):
+        vault, item = self.recovery_fixture()
+        with patch.object(unified.sys.stdin, "isatty", return_value=True), \
+             patch.object(unified.sys.stdout, "isatty", return_value=True), \
+             patch.object(unified.subprocess, "run") as cmd:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "progress"):
+                unified.interactive_unseal(vault, {"initialized": True, "sealed": True, "progress": 5})
+        cmd.assert_not_called()
+
+    def test_unseal_failed_cli_does_not_retry(self):
+        vault, item = self.recovery_fixture()
+        with patch.object(unified.sys.stdin, "isatty", return_value=True), \
+             patch.object(unified.sys.stdout, "isatty", return_value=True), \
+             patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=2)) as cmd:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "rejected/interrupted"):
+                unified.interactive_unseal(vault, {"initialized": True, "sealed": True, "progress": 0})
+        self.assertEqual(cmd.call_count, 1)
+
+    def test_unseal_rejects_unexpected_result(self):
+        vault, item = self.recovery_fixture()
+        vault.status.return_value = {"initialized": True, "sealed": True, "progress": 0}
+        with patch.object(unified.sys.stdin, "isatty", return_value=True), \
+             patch.object(unified.sys.stdout, "isatty", return_value=True), \
+             patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)):
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "progress unexpected"):
+                unified.interactive_unseal(vault, {"initialized": True, "sealed": True, "progress": 0})
+
+    def test_recover_only_starts_application_after_unseal(self):
+        events = []
+        with patch.object(unified, "require", side_effect=lambda name: events.append("require:" + name)), \
+             patch.object(unified, "recovery_vault", side_effect=lambda: ("vault", {"sealed": True})), \
+             patch.object(unified, "interactive_unseal", side_effect=lambda *_: events.append("unseal")), \
+             patch.object(unified, "start", side_effect=lambda: events.append("start")), \
+             contextlib.redirect_stdout(io.StringIO()):
+            unified.recover()
+        self.assertEqual(events, ["require:host", "require:resources", "unseal", "require:vault", "start"])
+
+    def test_recover_failed_unseal_never_starts_application(self):
+        with patch.object(unified, "require") as req, \
+             patch.object(unified, "recovery_vault", return_value=("vault", {"sealed": True})), \
+             patch.object(unified, "interactive_unseal", side_effect=unified.UnifiedStartupError("refused")), \
+             patch.object(unified, "start") as start, \
+             contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "refused"):
+                unified.recover()
+        self.assertEqual(req.call_count, 2)
+        start.assert_not_called()
+
+    def test_recover_main_uses_existing_lock(self):
+        with patch.object(unified.os, "geteuid", return_value=1000), \
+             patch.object(unified, "exclusive_orchestrator_lock") as lock, \
+             patch.object(unified, "recover") as recover:
+            self.assertEqual(unified.main(["recover"]), 0)
+        lock.assert_called_once_with()
+        recover.assert_called_once_with()
+
     def test_main_refuses_root(self):
         with patch.object(unified.os, "geteuid", return_value=0):
             with contextlib.redirect_stderr(io.StringIO()):

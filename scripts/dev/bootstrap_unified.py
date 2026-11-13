@@ -4,6 +4,8 @@
 initialize: explicit interactive first-time provisioning using established stages.
 start: resume ONLY existing, verified containers after Vault is unsealed.
 check: read-only validation of the entire already-running stack.
+recover: resume a known Vault container, prompt for manual Shamir shares,
+         then resume existing application containers without provisioning.
 
 Each established stage owns its existing migration/provisioning lock. This
 orchestrator uses a DIFFERENT lock; sharing the stage lock would self-deadlock.
@@ -173,6 +175,116 @@ def vault_seal_guard():
         )
 
 
+
+def recovery_vault():
+    """Resume only a known, initialized Vault; never create or initialize one."""
+    import bootstrap_vault as vault
+
+    try:
+        before = vault.inspect_container()
+        if before is None:
+            raise UnifiedStartupError(
+                "Vault container missing: recovery cannot provision a replacement"
+            )
+        vault.verify_identity(before)
+        host = before.get("HostConfig") or {}
+        if host.get("Privileged") is not False or host.get("PortBindings"):
+            raise UnifiedStartupError("Unexpected Vault host privileges/ports")
+        state = before.get("State") or {}
+        if state.get("Running") is True and state.get("Status") == "running":
+            print("KEEP: trusted Vault container running", flush=True)
+        elif state.get("Running") is False and state.get("Status") in ("created", "exited"):
+            # This only starts the existing container; no Compose up, no init.
+            try:
+                result = subprocess.run(
+                    ["docker", "start", vault.NAME], cwd=ROOT,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    check=False, timeout=90,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                raise UnifiedStartupError("Unable to start trusted Vault container") from None
+            if result.returncode != 0:
+                raise UnifiedStartupError("Trusted Vault container start failed")
+            after = vault.inspect_container()
+            if after is None or not before.get("Id") or before.get("Id") != after.get("Id"):
+                raise UnifiedStartupError("Vault identity changed during recovery")
+            vault.verify_identity(after)
+            if (after.get("State") or {}).get("Running") is not True:
+                raise UnifiedStartupError("Vault did not start successfully")
+            print("START: existing trusted Vault container", flush=True)
+        else:
+            raise UnifiedStartupError("Unexpected Vault container state; manual review required")
+        seal = vault.status(tries=30)
+        vault.verify_topology(seal, require_ready=False)
+        if seal.get("initialized") is not True:
+            raise UnifiedStartupError("Vault not initialized; refusing recovery or reinitialization")
+        return vault, seal
+    except UnifiedStartupError:
+        raise
+    except Exception:
+        raise UnifiedStartupError("Vault recovery inspection failed; manual review required") from None
+
+
+def interactive_unseal(vault, state):
+    """The Vault CLI, not this process, reads each share from a trusted TTY."""
+    if not state["sealed"]:
+        return
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        raise UnifiedStartupError(
+            "Vault sealed: interactive TTY required. Run --recover from a terminal "
+            "or unseal manually and use --start"
+        )
+    progress = state.get("progress")
+    if type(progress) is not int or not 0 <= progress < 2:
+        raise UnifiedStartupError("Unexpected Vault unseal progress; manual review required")
+    print("Vault is sealed (development Shamir 2-of-3).", flush=True)
+    print("Enter distinct unseal shares ONLY into the hidden Vault CLI prompts.", flush=True)
+    print("Do not pass shares as arguments or paste them into this chat.", flush=True)
+    while state["sealed"]:
+        print(f"UNSEAL: requesting share {progress + 1} of 2", flush=True)
+        # Never use shell=True, argv secrets, environment secrets or captured IO.
+        # HashiCorp Vault prompts for a hidden key when none is supplied.
+        try:
+            result = subprocess.run(
+                ["docker", "exec", "-it", vault.NAME, "vault", "operator", "unseal"],
+                cwd=ROOT, check=False, timeout=180,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            raise UnifiedStartupError("Interactive Vault unseal command interrupted") from None
+        if result.returncode != 0:
+            raise UnifiedStartupError("Vault unseal rejected/interrupted; no application recovery")
+        try:
+            state = vault.status(tries=10)
+            vault.verify_topology(state, require_ready=False)
+        except Exception:
+            raise UnifiedStartupError("Vault unseal result uncertain; manual review required") from None
+        if state.get("initialized") is not True:
+            raise UnifiedStartupError("Vault initialization changed unexpectedly")
+        if state.get("sealed"):
+            next_progress = state.get("progress")
+            if type(next_progress) is not int or next_progress != progress + 1:
+                raise UnifiedStartupError("Vault unseal progress unexpected; stop safely")
+            progress = next_progress
+            if progress >= 2:
+                raise UnifiedStartupError("Vault still sealed at key threshold; stop safely")
+        elif progress != 1:
+            raise UnifiedStartupError("Vault unsealed before expected threshold; manual review")
+    print("PASS: Vault unsealed using operator-entered shares", flush=True)
+
+
+def recover():
+    """After reboot: only resume known resources and require manual Vault unseal."""
+    print("=== Trusted reboot recovery (manual Shamir unseal) ===", flush=True)
+    require("host")
+    require("resources")
+    vault, seal = recovery_vault()
+    interactive_unseal(vault, seal)
+    require("vault")
+    # Reuse Phase 6A's guarded, non-provisioning application recovery path.
+    start()
+    print("RESULT: REBOOT RECOVERY READY", flush=True)
+
+
 def initialize():
     if not sys.stdin.isatty():
         raise UnifiedStartupError("--initialize requires an interactive terminal")
@@ -251,7 +363,7 @@ def exclusive_orchestrator_lock():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("initialize", "start", "check"))
+    parser.add_argument("mode", choices=("initialize", "start", "check", "recover"))
     args = parser.parse_args(argv)
     try:
         if os.geteuid() == 0:
@@ -262,6 +374,8 @@ def main(argv=None):
             with exclusive_orchestrator_lock():
                 if args.mode == "initialize":
                     initialize()
+                elif args.mode == "recover":
+                    recover()
                 else:
                     start()
         return 0

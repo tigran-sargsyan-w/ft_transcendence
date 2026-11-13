@@ -11,6 +11,7 @@
 # Phase 5D: start React/Vite frontend and verify local backend proxy.
 # Phase 5E: start localhost-only Nginx with trusted HTTPS routes.
 # Phase 6A: trusted first-time initialization and safe routine orchestration.
+# Phase 6B: manual-Shamir reboot recovery of existing trusted containers.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,10 +19,11 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'HELP'
-Usage: ./scripts/bootstrap.sh [--initialize|--start|--check-all|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--help]
+Usage: ./scripts/bootstrap.sh [--initialize|--start|--recover|--check-all|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--help]
 
   --initialize    Trusted first install: sequential stages with per-step confirmation.
   --start         Resume only existing verified containers (Vault must be unsealed).
+  --recover       Resume existing Vault, prompt for manual unseal, then start stack.
   --check-all     Read-only complete-stack health verification.
   --plan          Read-only inventory: dependencies, local setup, Docker state.
   --prepare-host  Prepare domain, nginx TLS, local CA trust and Vault TLS.
@@ -57,14 +59,15 @@ Usage: ./scripts/bootstrap.sh [--initialize|--start|--check-all|--plan|--prepare
 
 Phase 6A: --initialize is the confirmed first-time entry point; --start
 never creates new Vault, database, credentials, or applies new migrations.
-A sealed Vault requires manual unseal; reboot recovery is a later phase.
+After reboot use --recover in a terminal; shares are entered at hidden Vault
+CLI prompts, never as command arguments or Compose environment variables.
 Do not use raw Docker Compose `up` or `make up` to bypass these guards.
 HELP
 }
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --initialize|--start|--check-all|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx) ;;
+  --initialize|--start|--recover|--check-all|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -202,6 +205,9 @@ case "$MODE" in
     ;;
   --start)
     python3 scripts/dev/bootstrap_unified.py start
+    ;;
+  --recover)
+    python3 scripts/dev/bootstrap_unified.py recover
     ;;
   --check-all)
     python3 scripts/dev/bootstrap_unified.py check
