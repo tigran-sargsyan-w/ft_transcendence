@@ -67,7 +67,8 @@ def run_helper(mode, token):
     try:
         result = subprocess.run(
             helper_command(mode), input=(token + "\n").encode("utf-8"),
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=30 if mode == "check" else 180,
             check=False, env=env,
         )
     except (OSError, subprocess.TimeoutExpired):

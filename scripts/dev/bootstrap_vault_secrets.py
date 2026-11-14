@@ -75,7 +75,7 @@ def run_helper(mode, root_token):
         result = subprocess.run(
             helper_command(mode), input=(root_token + "\n").encode("utf-8"),
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=safe_env,
-            check=False, timeout=180,
+            check=False, timeout=30 if mode == "check" else 180,
         )
     except (OSError, subprocess.TimeoutExpired):
         raise SecretsBootstrapError("Database secrets helper unavailable or timed out") from None
