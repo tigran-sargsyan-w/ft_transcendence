@@ -180,6 +180,47 @@ def inspect(kind, name):
     return result[0]
 
 
+def inspect_many(kind, manifest):
+    """Read trusted metadata in one Docker call, never omitting validation.
+
+    Missing resources make Docker batch-inspect exit nonzero; retain the old
+    per-resource checks for that case, including safe missing detection.
+    On timeout, retry only the same read-only batch and fail closed afterward.
+    """
+    expected = NETWORKS if kind == "network" else VOLUMES if kind == "volume" else None
+    if expected is None or manifest is not expected:
+        raise ResourceError("Unexpected Docker resource batch inspection")
+    names = tuple(manifest)
+    for attempt in range(INSPECT_ATTEMPTS):
+        try:
+            raw = command(["docker", kind, "inspect", *names], timeout=INSPECT_TIMEOUT)
+            break
+        except ResourceInspectTimeout:
+            if attempt + 1 == INSPECT_ATTEMPTS:
+                raise ResourceError(f"Docker {kind} batch inspection repeatedly timed out") from None
+            time.sleep(INSPECT_RETRY_DELAY)
+        except ResourceError:
+            # In particular, an incomplete manifest. The existing single-item
+            # implementation distinguishes missing from unsafe and validates
+            # every item before the caller may continue.
+            return {name: inspect(kind, name) for name in names}
+
+    records = decode_json(raw)
+    if not isinstance(records, list) or len(records) != len(names):
+        raise ResourceError(f"Unexpected Docker {kind} batch inventory")
+    by_name = {}
+    for record in records:
+        if not isinstance(record, dict):
+            raise ResourceError(f"Invalid Docker {kind} batch record")
+        name = record.get("Name")
+        if not isinstance(name, str) or name not in expected or name in by_name:
+            raise ResourceError(f"Unexpected or repeated Docker {kind} batch identity")
+        by_name[name] = record
+    if set(by_name) != set(names):
+        raise ResourceError(f"Incomplete Docker {kind} batch inventory")
+    return by_name
+
+
 def validate_existing_volume(name, data):
     project, internal = VOLUMES[name]
     labels = data.get("Labels") or {}
@@ -199,11 +240,12 @@ def validate_existing_network(name, data):
         raise ResourceError(f"Refusing incompatible existing network: {name}")
 
 
-def scan():
+def scan(*, batch=False):
     existing = {}
     for kind, manifest in (("network", NETWORKS), ("volume", VOLUMES)):
+        snapshot = inspect_many(kind, manifest) if batch else None
         for name in manifest:
-            data = inspect(kind, name)
+            data = snapshot[name] if snapshot is not None else inspect(kind, name)
             if data is not None:
                 if kind == "network":
                     validate_existing_network(name, data)
@@ -261,7 +303,7 @@ def main():
     try:
         validate_compose_contract()
         print("=== Docker resource inventory ===", flush=True)
-        existing = scan()
+        existing = scan(batch=(args.mode == "check"))
         if args.mode == "plan":
             print("RESULT: RESOURCE PLAN COMPLETE (read-only)")
             return 0
