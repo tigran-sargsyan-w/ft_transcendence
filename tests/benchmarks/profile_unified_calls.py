@@ -38,6 +38,19 @@ def _ft_safe_kind(args, kwargs):
     if isinstance(command, (list, tuple)) and command:
         name = _os.path.basename(command[0]) if isinstance(command[0], str) else "process"
         if name == "docker" and len(command) > 1 and command[1] in _ft_allowed_subcommands:
+            # Label only two audited, read-only Vault Agent file permission
+            # probes. Inspect a fixed Python call-site, never command arguments
+            # (which can contain secrets in unrelated code paths).
+            if command[1] == "run":
+                try:
+                    parent = _sys._getframe(3)  # caller of backend_agent.run()
+                    if _os.path.basename(parent.f_code.co_filename) == "bootstrap_backend_agent.py":
+                        if parent.f_code.co_name == "credential_inventory":
+                            return "docker run/auth-probe"
+                        if parent.f_code.co_name == "verify_rendered_access":
+                            return "docker run/DSN-probe"
+                except ValueError:
+                    pass
             return "docker " + command[1]
         # Only known, static bootstrap check names; never log arbitrary argv.
         if name == "bootstrap.sh":
@@ -90,6 +103,7 @@ COMMANDS = {
     "health": ["make", "health"],
     "check-all": ["make", "check-all"],
     "postgres-roles": ["./scripts/bootstrap.sh", "--check-postgres-roles"],
+    "backend-agent": ["./scripts/bootstrap.sh", "--check-backend-agent"],
     "support-services": ["./scripts/bootstrap.sh", "--check-support-services"],
     "nginx": ["./scripts/bootstrap.sh", "--check-nginx"],
 }
