@@ -131,5 +131,56 @@ class ResourceTests(unittest.TestCase):
                 mod.validate_compose_contract()
 
 
+    def test_inspect_retries_only_timeout_then_succeeds(self):
+        import json
+        name = "transcendence-app-dev_default"
+        item = {"Name": name}
+        with patch.object(mod, "command", side_effect=[
+            mod.ResourceInspectTimeout("timeout"), json.dumps([item]).encode()
+        ]) as run, patch.object(mod.time, "sleep") as sleep:
+            self.assertEqual(mod.inspect("network", name), item)
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(run.call_args.kwargs["timeout"], mod.INSPECT_TIMEOUT)
+        self.assertEqual(run.call_args.kwargs["allow_missing"], True)
+        sleep.assert_called_once_with(mod.INSPECT_RETRY_DELAY)
+
+    def test_inspect_all_timeouts_fail_closed(self):
+        name = "transcendence-app-dev_default"
+        with patch.object(mod, "command", side_effect=mod.ResourceInspectTimeout("timeout")) as run, \
+                patch.object(mod.time, "sleep") as sleep:
+            with self.assertRaisesRegex(mod.ResourceError, "repeatedly timed out"):
+                mod.inspect("network", name)
+        self.assertEqual(run.call_count, mod.INSPECT_ATTEMPTS)
+        self.assertEqual(sleep.call_count, mod.INSPECT_ATTEMPTS - 1)
+
+    def test_inspect_permanent_docker_error_is_not_retried(self):
+        name = "transcendence-app-dev_default"
+        with patch.object(mod, "command", side_effect=mod.ResourceError("denied")) as run, \
+                patch.object(mod.time, "sleep") as sleep:
+            with self.assertRaisesRegex(mod.ResourceError, "denied"):
+                mod.inspect("network", name)
+        run.assert_called_once()
+        sleep.assert_not_called()
+
+    def test_inspect_missing_is_not_retried(self):
+        name = "transcendence-app-dev_postgres_data"
+        with patch.object(mod, "command", return_value=None) as run:
+            self.assertIsNone(mod.inspect("volume", name))
+        run.assert_called_once()
+
+    def test_inspect_rejects_unknown_kind_and_name_without_commands(self):
+        with patch.object(mod, "command") as run:
+            with self.assertRaises(mod.ResourceError):
+                mod.inspect("container", "transcendence-app-dev_default")
+            with self.assertRaises(mod.ResourceError):
+                mod.inspect("network", "untrusted_network")
+        run.assert_not_called()
+
+    def test_command_distinguishes_read_only_timeouts(self):
+        import subprocess
+        with patch.object(mod.subprocess, "run", side_effect=subprocess.TimeoutExpired("docker", 5)):
+            with self.assertRaises(mod.ResourceInspectTimeout):
+                mod.command(["docker", "network", "inspect", "safe"], timeout=5)
+
 if __name__ == "__main__":
     unittest.main()

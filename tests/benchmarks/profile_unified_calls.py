@@ -39,7 +39,18 @@ def _ft_safe_kind(args, kwargs):
         name = _os.path.basename(command[0]) if isinstance(command[0], str) else "process"
         if name == "docker" and len(command) > 1 and command[1] in _ft_allowed_subcommands:
             return "docker " + command[1]
-        if name in ("docker", "bash", "sh", "python", "python3", "curl", "openssl", "make", "psql", "git", "bootstrap.sh"):
+        # Only known, static bootstrap check names; never log arbitrary argv.
+        if name == "bootstrap.sh":
+            checks = frozenset((
+                "--check-host", "--check-resources", "--check-vault",
+                "--check-postgres", "--check-postgres-roles", "--check-migrations",
+                "--check-backend-agent", "--check-backend",
+                "--check-support-services", "--check-frontend", "--check-nginx",
+            ))
+            if len(command) > 1 and command[1] in checks:
+                return "bootstrap " + command[1]
+            return "bootstrap.sh"
+        if name in ("docker", "bash", "sh", "python", "python3", "curl", "openssl", "make", "psql", "git"):
             return name
         return "other process"
     return "shell/process"

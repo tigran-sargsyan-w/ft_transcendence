@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -43,13 +44,26 @@ class ResourceError(Exception):
     """A failure safe to report without exposing secret-bearing output."""
 
 
+class ResourceInspectTimeout(ResourceError):
+    """Only a read-only Docker inspection timeout is eligible for retry."""
+
+
+# Strictly bounded retries for idempotent Docker metadata reads; default
+# provisioning/Compose operations keep their original 40s timeout.
+INSPECT_TIMEOUT = 5
+INSPECT_ATTEMPTS = 3
+INSPECT_RETRY_DELAY = 0.25
+
+
 def command(args, *, env=None, timeout=40, allow_missing=False):
     try:
         result = subprocess.run(
             args, env=env, capture_output=True, timeout=timeout, check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ResourceError(f"Command unavailable or timed out: {args[0]}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ResourceInspectTimeout(f"Command timed out: {args[0]}") from exc
+    except OSError as exc:
+        raise ResourceError(f"Command unavailable: {args[0]}") from exc
     if result.returncode:
         if allow_missing and result.returncode == 1:
             return None
@@ -144,7 +158,20 @@ def validate_compose_contract():
 
 
 def inspect(kind, name):
-    raw = command(["docker", kind, "inspect", name], allow_missing=True)
+    # The only retried calls are read-only inspections of our exact manifest.
+    if not (kind == "network" and name in NETWORKS or
+            kind == "volume" and name in VOLUMES):
+        raise ResourceError("Unexpected Docker resource inspection")
+    raw = None
+    for attempt in range(INSPECT_ATTEMPTS):
+        try:
+            raw = command(["docker", kind, "inspect", name],
+                          allow_missing=True, timeout=INSPECT_TIMEOUT)
+            break
+        except ResourceInspectTimeout:
+            if attempt + 1 == INSPECT_ATTEMPTS:
+                raise ResourceError(f"Docker {kind} inspection repeatedly timed out") from None
+            time.sleep(INSPECT_RETRY_DELAY)
     if raw is None:
         return None
     result = decode_json(raw)
