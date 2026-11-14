@@ -17,6 +17,13 @@ fail() {
 
 is_check() { [ "$MODE" = check ]; }
 
+# Local development AppRoles. The only supported existing-role migration is
+# from the exact prior 20-use / 168-hour policy, including partial retries.
+SECRET_ID_USES=0
+SECRET_ID_TTL=2160h
+PREVIOUS_SECRET_ID_USES=20
+PREVIOUS_SECRET_ID_TTL=168h
+
 echo "Checking Vault authentication..."
 vault token lookup >/dev/null 2>&1 ||
   fail "Vault authentication failed"
@@ -84,20 +91,65 @@ assert_field() {
     fail "AppRole $role: unexpected $1 (manual review required)"
 }
 
+assert_role_invariants() {
+  # Verify every security-critical setting before updating an existing role.
+  # AppRole policies, SecretID binding and token TTL are NEVER migrated here.
+  assert_field token_policies "[$role_policy]"
+  assert_field bind_secret_id true
+  assert_field token_no_default_policy true
+  assert_field token_ttl 1h
+  assert_field token_max_ttl 4h
+}
+
+assert_new_limits() {
+  assert_field secret_id_ttl "$SECRET_ID_TTL"
+  assert_field secret_id_num_uses "$SECRET_ID_USES"
+}
+
 ensure_role() {
   role="$1"
   role_policy="$2"
 
   echo "Checking AppRole: $role"
   if role_state="$(vault read "auth/approle/role/$role" 2>&1)"; then
-    assert_field token_policies "[$role_policy]"
-    assert_field bind_secret_id true
-    assert_field token_no_default_policy true
-    assert_field secret_id_ttl 168h
-    assert_field secret_id_num_uses 20
-    assert_field token_ttl 1h
-    assert_field token_max_ttl 4h
-    echo "PASS: AppRole $role"
+    assert_role_invariants
+    uses="$(read_field secret_id_num_uses)"
+    ttl="$(read_field secret_id_ttl)"
+
+    if [ "$uses" != "$SECRET_ID_USES" ] || [ "$ttl" != "$SECRET_ID_TTL" ]; then
+      # A routine --check must never mutate a live Vault role.
+      is_check && fail "AppRole $role: SecretID limits differ; explicit provisioning required"
+
+      # Refuse arbitrary drift. A partial migration is allowed because each
+      # Vault property write is separate and a previous apply may have failed.
+      case "$uses" in
+        "$PREVIOUS_SECRET_ID_USES"|"$SECRET_ID_USES") ;;
+        *) fail "AppRole $role: unexpected secret_id_num_uses (manual review required)" ;;
+      esac
+      case "$ttl" in
+        "$PREVIOUS_SECRET_ID_TTL"|"$SECRET_ID_TTL") ;;
+        *) fail "AppRole $role: unexpected secret_id_ttl (manual review required)" ;;
+      esac
+
+      if [ "$uses" = "$PREVIOUS_SECRET_ID_USES" ]; then
+        vault write "auth/approle/role/$role/secret-id-num-uses" \
+          secret_id_num_uses="$SECRET_ID_USES" >/dev/null 2>&1 ||
+          fail "AppRole $role: cannot update SecretID usage limit"
+      fi
+      if [ "$ttl" = "$PREVIOUS_SECRET_ID_TTL" ]; then
+        vault write "auth/approle/role/$role/secret-id-ttl" \
+          secret_id_ttl="$SECRET_ID_TTL" >/dev/null 2>&1 ||
+          fail "AppRole $role: cannot update SecretID lifetime"
+      fi
+      role_state="$(vault read "auth/approle/role/$role")" ||
+        fail "Cannot verify migrated AppRole: $role"
+      assert_role_invariants
+      assert_new_limits
+      echo "UPDATED: AppRole $role SecretID limits (existing SecretIDs not rotated)"
+    else
+      assert_new_limits
+      echo "PASS: AppRole $role"
+    fi
     return
   fi
 
@@ -112,24 +164,48 @@ ensure_role() {
     token_policies="$role_policy" \
     token_no_default_policy=true \
     bind_secret_id=true \
-    secret_id_ttl=168h \
-    secret_id_num_uses=20 \
+    secret_id_ttl="$SECRET_ID_TTL" \
+    secret_id_num_uses="$SECRET_ID_USES" \
     token_ttl=1h \
-    token_max_ttl=4h >/dev/null
+    token_max_ttl=4h >/dev/null ||
+    fail "Cannot create AppRole: $role"
   echo "CREATED: AppRole $role"
   role_state="$(vault read "auth/approle/role/$role")" ||
     fail "Cannot verify newly created AppRole: $role"
-  assert_field token_policies "[$role_policy]"
-  assert_field bind_secret_id true
-  assert_field token_no_default_policy true
-  assert_field secret_id_ttl 168h
-  assert_field secret_id_num_uses 20
-  assert_field token_ttl 1h
-  assert_field token_max_ttl 4h
+  assert_role_invariants
+  assert_new_limits
+}
+
+ensure_approle_mount_limit() {
+  # By default Vault caps AppRole SecretIDs at the auth mount's max TTL
+  # (normally 768h), even when a role requests 2160h. Only an explicitly
+  # authorized apply may extend this DEV mount's cap to 90 days.
+  tune_state="$(vault read sys/auth/approle/tune)" ||
+    fail "Cannot inspect AppRole auth mount TTL"
+  mount_max="$(printf '%s\n' "$tune_state" |
+    awk '$1 == "max_lease_ttl" { print $2; exit }')"
+  if [ "$mount_max" != "$SECRET_ID_TTL" ]; then
+    is_check && fail "AppRole auth mount max TTL differs; explicit provisioning required"
+    [ "$mount_max" = 768h ] ||
+      fail "Unexpected AppRole auth mount max TTL (manual review required)"
+    vault auth tune -max-lease-ttl="$SECRET_ID_TTL" approle/ >/dev/null 2>&1 ||
+      fail "Cannot update AppRole auth mount max TTL"
+    tune_state="$(vault read sys/auth/approle/tune)" ||
+      fail "Cannot verify AppRole auth mount max TTL"
+    mount_max="$(printf '%s\n' "$tune_state" |
+      awk '$1 == "max_lease_ttl" { print $2; exit }')"
+    [ "$mount_max" = "$SECRET_ID_TTL" ] ||
+      fail "AppRole auth mount TTL update not confirmed"
+    echo "UPDATED: DEV AppRole auth mount max TTL ($SECRET_ID_TTL)"
+  else
+    echo "PASS: DEV AppRole auth mount max TTL"
+  fi
 }
 
 ensure_role backend-reader backend-readonly
 ensure_role migrator-reader migrator-readonly
 ensure_role postgres-provisioner-reader postgres-provisioner-readonly
+
+ensure_approle_mount_limit
 
 echo "RESULT: VAULT CONFIG READY ($MODE)"
