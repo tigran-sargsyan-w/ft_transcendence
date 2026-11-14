@@ -69,6 +69,27 @@ and must not be added to calculate total runtime. A slow composite check is
 not necessarily a slow named service. The profiler may not observe a child
 which intentionally strips `PYTHONPATH` or executes without Python.
 
+## Opt-in orchestration timing (P6)
+
+The unified orchestrator supports **non-secret per-stage timings** when explicitly
+requested. This does not change health decisions, retries, Docker resources,
+credentials, or the application runtime:
+
+```sh
+FT_DEV_STAGE_TIMING=1 make health
+FT_DEV_STAGE_TIMING=1 make check-all
+```
+
+Each line reports an **allowlisted stage name**, attempt number, elapsed
+wall-clock time and PASS/FAIL status. No subprocess arguments, output, tokens,
+or secret file paths are displayed. A slow `nginx` stage includes all of its
+transitive checks; the instrumented duration cannot identify its internal
+Docker operation by itself. Use `profile_unified_calls.py` for that detail.
+
+**Note:** stage timing is measured inside `bootstrap_unified.py`. The outer
+`bootstrap.sh` dependency preflight is not included in these stage timings.
+Do not assume a PASS on a later attempt means the first attempt succeeded.
+
 ## Interpretation and reporting
 
 - Compare the **same workload** on the **same VM** before/after an optimization.

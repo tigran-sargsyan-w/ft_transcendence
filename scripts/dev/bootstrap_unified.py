@@ -68,9 +68,22 @@ def command(flag, *, quiet=False):
 
 
 def checked(name):
-    """Retry only read-only probes; never retry provisioning or mutation."""
+    """Retry read-only probes; optionally trace safe stage names and durations.
+
+    FT_DEV_STAGE_TIMING=1 is diagnostic-only: it changes neither the number of
+    checks nor any trust/identity decision. No commands, arguments or secrets
+    are included in the optional report.
+    """
+    trace = os.environ.get("FT_DEV_STAGE_TIMING") == "1"
     for attempt in range(READ_ONLY_ATTEMPTS):
-        if command(STAGE_BY_NAME[name][0], quiet=True):
+        started = time.monotonic() if trace else None
+        result = command(STAGE_BY_NAME[name][0], quiet=True)
+        if trace:
+            elapsed = max(0.0, time.monotonic() - started)
+            outcome = "PASS" if result else "FAIL"
+            print(f"TIMING: stage={name} attempt={attempt + 1}/{READ_ONLY_ATTEMPTS} "
+                  f"result={outcome} elapsed={elapsed:.2f}s", flush=True)
+        if result:
             return True
         if attempt + 1 < READ_ONLY_ATTEMPTS:
             time.sleep(READ_ONLY_RETRY_DELAY)
