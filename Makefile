@@ -2,30 +2,55 @@
 
 PYTHON ?= python3
 COMPOSE := docker compose -f compose.yml
+BOOTSTRAP := ./scripts/bootstrap.sh
 
-.PHONY: up setup check down clean domain-cleanup cert-cleanup trust-uninstall
+.PHONY: up start initialize recover health check-all plan acceptance \
+        setup check down clean domain-cleanup cert-cleanup trust-uninstall
 
-# Prepare the local environment and start containers
-up: setup
-	$(COMPOSE) up -d --build
+# Default entry point: use the guarded Vault-only startup, never raw Compose up.
+up start:
+	$(BOOTSTRAP) --start
 
-# Configure domain, TLS certificates and CA trust
+# First-time operator-approved provisioning (interactive; not for routine use).
+initialize:
+	$(BOOTSTRAP) --initialize
+
+# Trusted restoration after reboot; prompts for Shamir shares when Vault is sealed.
+recover:
+	$(BOOTSTRAP) --recover
+
+# Read-only end-to-end readiness and failure localization.
+health:
+	$(BOOTSTRAP) --health-report
+
+check-all:
+	$(BOOTSTRAP) --check-all
+
+plan:
+	$(BOOTSTRAP) --plan
+
+# Operator-initiated, non-destructive repeated-start acceptance on a healthy VM.
+acceptance:
+	$(PYTHON) scripts/dev/verify_startup_idempotency.py --runs 3
+
+# Legacy host-only helpers (not a substitute for --initialize).
 setup:
 	$(PYTHON) -m scripts.dev.domains setup
 	$(PYTHON) -m scripts.dev.certificates setup
 	$(PYTHON) -m scripts.dev.ca_trust setup
 
-# Verify the local environment
+# Host-only checks. Use `make health` to validate the whole application.
 check:
 	$(PYTHON) -m scripts.dev.domains check
 	$(PYTHON) -m scripts.dev.certificates check
 	$(PYTHON) -m scripts.dev.ca_trust check
 
-# Stop containers without removing them
+# Legacy raw-Compose maintenance operations: NOT part of trusted recovery.
+# These may leave an initialized runtime unable to resume via --start.
 down:
 	$(COMPOSE) stop
 
-# Remove project containers and networks, preserve volumes
+# Removes application containers/networks (volumes preserved). Never use as recovery.
 clean:
 	$(COMPOSE) down --remove-orphans
 
