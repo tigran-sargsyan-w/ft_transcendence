@@ -1,5 +1,11 @@
 # Operator-controlled AppRole SecretID rotation (#105, phase A)
 
+> **#115 transition:** The commands below use the consolidated single-file
+> application model. Set `FT_DEV_TLS_DIR` to the existing trusted TLS directory
+> (a non-secret path). Do not start or recreate legacy development containers
+> through Compose until the reviewed unified cutover; rotation remains an
+> operator-initiated maintenance procedure, not routine startup.
+
 This initial implementation is **manual**, not a timer or a privileged long-lived issuer. It supports all three AppRoles and intentionally separates installation from revocation so a real Agent can be checked before old credentials are invalidated.
 
 ## Security boundaries
@@ -16,21 +22,21 @@ This initial implementation is **manual**, not a timer or a privileged long-live
 Backend:
 
 ~~~sh
-docker compose -f infra/vault/server/compose.yml \
+docker compose -p transcendence-vault-dev -f infra/vault/server/compose.yml \
   --profile maintenance run --rm --no-deps vault-backend-rotate rotate
 ~~~
 
 Prisma migrator:
 
 ~~~sh
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -p transcendence-app-dev -f compose.yml \
   --profile vault-maintenance run --rm --no-deps vault-migrator-rotate rotate
 ~~~
 
 PostgreSQL provisioner:
 
 ~~~sh
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -p transcendence-app-dev -f compose.yml \
   --profile vault-maintenance run --rm --no-deps vault-postgres-provisioner-rotate rotate
 ~~~
 
@@ -43,9 +49,9 @@ These commands also work for initial provisioning when there is no previous Secr
 **Backend:** in a maintenance window, force the runtime Agent to read its new credentials and check health:
 
 ~~~sh
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -p transcendence-app-dev -f compose.yml \
   up -d --no-deps --force-recreate vault-backend-agent
-docker compose -f compose.yml -f compose.vault.yml ps vault-backend-agent
+docker compose -p transcendence-app-dev -f compose.yml ps vault-backend-agent
 ~~~
 
 Also verify the application's /api/v1/health endpoint.
@@ -53,18 +59,18 @@ Also verify the application's /api/v1/health endpoint.
 **Migrator:** run its existing one-shot Agent (does not apply Prisma migrations), then remove the rendered secret:
 
 ~~~sh
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -p transcendence-app-dev -f compose.yml \
   --profile vault-migration run --rm --no-deps vault-migrator-agent
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -p transcendence-app-dev -f compose.yml \
   --profile vault-maintenance run --rm --no-deps vault-migrator-cleanup
 ~~~
 
 **Provisioner:** run its existing one-shot Agent and clean up rendered credentials:
 
 ~~~sh
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -p transcendence-app-dev -f compose.yml \
   --profile vault-setup run --rm --no-deps vault-postgres-provisioner-agent
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -p transcendence-app-dev -f compose.yml \
   --profile vault-maintenance run --rm --no-deps vault-postgres-provisioner-cleanup
 ~~~
 

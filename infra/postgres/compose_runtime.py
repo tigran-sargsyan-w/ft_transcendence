@@ -17,7 +17,6 @@ def compose_command() -> list[str]:
 
     command.extend([
         "-f", str(ROOT_DIR / "compose.yml"),
-        "-f", str(ROOT_DIR / "compose.vault.yml"),
     ])
 
     override = os.environ.get("FT_APP_COMPOSE_OVERRIDE")
