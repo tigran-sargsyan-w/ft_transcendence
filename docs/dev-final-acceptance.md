@@ -36,13 +36,29 @@ Do not run `make initialize` on an existing VM. Do not reboot or seal Vault just
 | HTTPS / actual product | Backend API/DB response, trusted TLS and Nginx redirect are checked. **Browser UI and login/WebSocket user flows require a separate manual/functional verification.** |
 | Documentation / team usability | Follow [developer onboarding](dev-getting-started.md), [reboot recovery](dev-reboot-recovery.md), [health report](dev-health-report.md) and [idempotency validation](dev-startup-idempotency.md). |
 
-## Sign-off record (fill using non-secret evidence)
+## Sign-off record — 2026-11-15
 
-- Reviewed branch and commit SHA: `______________________________`
-- WSL and VM offline tests: `______________________________`
-- VM `make up`, `make health`, `make check-all`: `______________________________`
-- VM repeated-start acceptance: `______________________________`
-- Manual browser/UI verification (if performed): `______________________________`
-- Outstanding limitations or follow-up issues: `______________________________`
+- Branch: `feat/vault-unified-startup`
+- Integration: latest `main` merged successfully, without Git conflicts.
+- Offline tests (after integration):
+  - Bootstrap/regression: 426/426 PASS
+  - Diagnostic/benchmark: 36/36 PASS
+- Vault and PostgreSQL: healthy; container identities preserved during backend update.
+- Prisma: latest user-profile migration applied successfully; grants verified.
+- Backend: rebuilt and updated successfully; health check PASS.
+- Startup acceptance: 3/3 PASS; no unexpected recreation, restart, or migration drift.
+- Final infrastructure health:
+  - `make health` — DEVELOPMENT HEALTHY
+  - `make check-all` — UNIFIED STACK READY
+- Browser: application opens successfully in Ubuntu VM; HTTPS endpoint returns HTTP 200.
+
+### Known limitations
+
+- Initial provisioning on a completely fresh VM was not repeated in this final acceptance.
+- Full authentication, WebSocket and user-flow E2E testing is outside this acceptance.
+- Graph Engine was not rebuilt after the latest `main` integration.
+- Recovery remains operator-assisted (manual Shamir unseal).
+- Development recovery material requires secure, independent off-VM backup.
+- Application image upgrades and Prisma migrations require explicit maintenance; routine `make up` intentionally does not perform them.
 
 **Security note:** do not paste `vault-init.json`, root tokens, Shamir shares, DSNs, SecretIDs, secrets from `docker inspect`, or database rows into acceptance logs, pull requests or chat. The acceptance commands do not prove user-data immutability or backup recovery.
