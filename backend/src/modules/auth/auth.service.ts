@@ -4,7 +4,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { type Observable, Subject } from 'rxjs';
 import { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../shared/prisma/prisma.service.js';
@@ -13,9 +13,11 @@ import { RegisterDto } from './dto/register.dto.js';
 import { SESSION_TTL_MS } from './session-cookie.js';
 
 // The user fields safe to send to a client (never the password hash).
-const PUBLIC_USER = {
+export const PUBLIC_USER = {
   id: true,
   email: true,
+  displayName: true,
+  avatarUrl: true,
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -45,11 +47,15 @@ export class AuthService {
       type: argon2.argon2id,
     });
 
+    const id = randomUUID();
+
     try {
       return await this.prisma.user.create({
         data: {
+          id,
           email: dto.email,
           passwordHash,
+          displayName: dto.displayName ?? `User ${id.slice(0, 8)}`,
         },
         select: PUBLIC_USER,
       });
@@ -95,15 +101,16 @@ export class AuthService {
       },
     });
 
-    return {
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-      },
+    const publicUser: PublicUser = {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      avatarUrl: user.avatarUrl,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
     };
+
+    return { token, user: publicUser };
   }
 
   async logout(token: string) {
