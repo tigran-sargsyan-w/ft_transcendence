@@ -1,0 +1,4 @@
+
+
+# DEV ONLY: Vault recovery shares and root token — never commit
+/vault-init.json
