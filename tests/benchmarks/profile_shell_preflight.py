@@ -29,18 +29,68 @@ COMMANDS = {
 }
 # All names must be fixed. Never classify by untrusted argument content.
 WATCH = ("make", "python3", "docker", "dpkg-query", "git", "openssl", "curl", "id")
+# Fixed, non-sensitive classifications; never store or print argument values.
+DOCKER_CLASSES = frozenset((
+    "docker.compose.vault-config", "docker.compose.other",
+    "docker.run.vault-secrets", "docker.run.other",
+    "docker.exec.vault", "docker.exec.postgres", "docker.exec.backend",
+    "docker.exec.nginx", "docker.exec.other", "docker.container",
+    "docker.volume", "docker.network", "docker.ps", "docker.info",
+    "docker.buildx", "docker.other",
+))
+SAFE_LABELS = frozenset(WATCH) | DOCKER_CLASSES
+
+# Only the exact known container or script names influence a fixed category.
+# The original command and every argument are passed through unchanged.
+DOCKER_CLASSIFIER = r'''if [ "$category" = docker ]; then
+    case "${1:-}" in
+        compose)
+            category=docker.compose.other
+            for ft_arg do
+                case "$ft_arg" in
+                    vault-bootstrap) category=docker.compose.vault-config; break ;;
+                esac
+            done
+            ;;
+        run)
+            category=docker.run.other
+            for ft_arg do
+                case "$ft_arg" in
+                    /bootstrap/helper.py) category=docker.run.vault-secrets; break ;;
+                esac
+            done
+            ;;
+        exec)
+            category=docker.exec.other
+            for ft_arg do
+                case "$ft_arg" in
+                    transcendence-vault-dev-vault-1) category=docker.exec.vault; break ;;
+                    transcendence-app-dev-postgres-1) category=docker.exec.postgres; break ;;
+                    transcendence-app-dev-backend-1) category=docker.exec.backend; break ;;
+                    transcendence-app-dev-nginx-1) category=docker.exec.nginx; break ;;
+                esac
+            done
+            ;;
+        container|volume|network|ps|info|buildx)
+            category="docker.$1" ;;
+        *) category=docker.other ;;
+    esac
+fi
+'''
 
 
 def wrapper_source(label, binary, log):
-    # Static paths and identifiers are shell-quoted. The executable receives
-    # the unmodified argument vector and all inherited standard streams.
+    # The child receives the original command and unchanged argv/stdin/stdout.
+    # Never write arbitrary arguments, Docker details, or subprocess output.
     return ("#!/bin/sh\n"
-            "start=$(/usr/bin/date +%s%N)\n"
-            f"printf 'B\\t%s\\t%s\\t%s\\n' {shlex.quote(label)} \"$$\" \"$start\" >> {shlex.quote(str(log))}\n"
+            f"category={shlex.quote(label)}\n"
+            + DOCKER_CLASSIFIER
+            + "start=$(/usr/bin/date +%s%N)\n"
+            f"printf 'B\\t%s\\t%s\\t%s\\n' \"$category\" \"$$\" \"$start\" >> {shlex.quote(str(log))}\n"
             f"{shlex.quote(str(binary))} \"$@\"\n"
             "status=$?\n"
             "end=$(/usr/bin/date +%s%N)\n"
-            f"printf 'E\\t%s\\t%s\\t%s\\t%s\\n' {shlex.quote(label)} \"$$\" \"$end\" \"$status\" >> {shlex.quote(str(log))}\n"
+            f"printf 'E\\t%s\\t%s\\t%s\\t%s\\n' \"$category\" \"$$\" \"$end\" \"$status\" >> {shlex.quote(str(log))}\n"
             "exit \"$status\"\n")
 
 
@@ -55,11 +105,11 @@ def parse_records(contents):
         try:
             if parts[0] == "B" and len(parts) == 4:
                 _, name, pid, stamp = parts
-                if name in WATCH:
+                if name in SAFE_LABELS:
                     started[(name, int(pid))].append(int(stamp))
             elif parts[0] == "E" and len(parts) == 5:
                 _, name, pid, stamp, status = parts
-                if name not in WATCH:
+                if name not in SAFE_LABELS:
                     continue
                 key = (name, int(pid))
                 if started[key]:
