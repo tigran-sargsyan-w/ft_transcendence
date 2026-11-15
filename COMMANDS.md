@@ -1,295 +1,171 @@
-# Developer Commands & Onboarding
+# Developer commands & onboarding
 
 > **ft_transcendence — team command reference**  
-> Platform: Linux or WSL2, Docker Engine + Docker Compose v2.  
-> Run repository commands from the **repository root**, unless otherwise stated.
+> Run repository commands from the **repository root**, unless noted otherwise. The guarded Vault-backed workflow in Issue #115 targets **Ubuntu 26.04 (amd64)** development hosts.
 
-This file is the team's **single entry point for commands**: checkout, local browser setup, normal startup, migrations, development checks, and troubleshooting. Detailed security and infrastructure procedures remain in their dedicated runbooks.
-
-> [!IMPORTANT]
-> **There are two different starting points.** The current `./scripts/dev-start.sh` starts an **already provisioned development installation**. It is **not** a fresh-machine installer. A new clone on a machine with no Vault, PostgreSQL data, AppRole credentials, or Docker networks **cannot yet be brought up using one command**. Follow the first-time provisioning handoff in [Section 3](#3-first-time-infrastructure-provisioning-operator-only) before continuing.
+**First time with the new Vault workflow?** Read the short [team quick start](docs/dev-team-quickstart.md). For the full first-time setup and security contract, see [developer onboarding](docs/dev-getting-started.md).
 
 ## Quick command reference
 
-| Command | What it does | Changes running infrastructure? |
+| Command | What it does | Changes the environment? |
 | --- | --- | --- |
-| `git clone https://github.com/tigran-sargsyan-w/ft_transcendence.git` | Download the repository | No |
-| `make setup` | Set up local `.test` hostname, Nginx TLS certificate and CA trust (may require OS permissions) | Changes **host** configuration; not Docker |
-| `make check` | Check local hostname, Nginx certificate and CA trust | No |
-| `./scripts/dev-start.sh --check` | Validate existing Docker/TLS/volume/network/Compose configuration | No |
-| `./scripts/dev-start.sh --plan` | Report runtime readiness, pending migrations, Vault state, Vite and HTTPS health | No |
-| `./scripts/dev-start.sh` | Resume stopped containers of the existing stack and verify readiness | **Yes**: starts stopped containers; may request Shamir shares |
-| `./scripts/dev-start.sh --migrate` | Explicitly authorize controlled pending Prisma migrations before Backend startup | **Yes**: can stop Backend and modify PostgreSQL schema |
-| `docker ps --filter 'label=com.docker.compose.project=transcendence-app-dev'` | List application containers | No |
-| `docker exec transcendence-vault-dev-vault-1 vault status` | Inspect Vault initialization/seal status | No |
-| `python3 -m unittest discover -s infra/vault/scripts -p 'test_*.py' -q` | Run infrastructure Python unit tests | No live Docker changes expected; tests use mocks |
+| `./scripts/install-deps.sh --check` | Verify development prerequisites | No |
+| `./scripts/install-deps.sh` | Install prerequisites (interactive) | Yes: host packages/configuration |
+| `make initialize` | **First-time only** trusted bootstrap of a fresh VM | **Yes**: host, Vault, database, app; confirmations required |
+| `make up` / `make start` | Start/check **existing** trusted containers | Starts stopped containers only |
+| `make recover` | Resume existing sealed Vault using **manual** unseal prompts | Unseals Vault; resumes existing containers |
+| `make health` | Read-only health report, with failing dependency | No |
+| `make check-all` | Read-only application readiness | No |
+| `make plan` | Read-only inventory and pending setup | No |
+| `make check` | Check **host-side** hostname/Nginx TLS/CA only | No |
+| `make setup` | Configure host-side hostname/Nginx TLS/CA only | Yes: host; **not** a Vault initializer |
+| `make acceptance` | Three guarded, non-destructive startup/idempotency runs | May start existing stopped containers; use only on an already healthy VM |
+| `./scripts/bootstrap.sh --help` | Show guarded per-stage checks and maintenance | No |
 
-**Do not use `make up` as the routine startup command.** The current `Makefile` still runs `docker compose up -d --build` directly; it does not enforce the unified startup safety checks. Also avoid `make clean`, `docker compose down`, `--force-recreate`, and `down -v` on an existing environment unless an operator has reviewed the consequences.
+**Important:** Unlike the old documentation, **`make up` is now the recommended daily command**. It does **not** run unrestricted `docker compose up -d --build`. The former `./scripts/dev-start.sh` and raw Compose procedures are not the Issue #115 daily entry point.
 
-## 1. Clone and select your branch
+## A. Clone / update
 
 ```bash
+# Fresh checkout (then follow first-time setup below)
 git clone https://github.com/tigran-sargsyan-w/ft_transcendence.git
 cd ft_transcendence
+
+# Existing checkout: update the intended team branch
 git status -sb
-```
-
-Normally work from `main` once the unified startup changes have been merged. **Until Issue #115 is merged**, `scripts/dev-start.sh` is available on the feature branch:
-
-```bash
 git fetch origin
-git switch --track origin/feat/vault-unified-startup
+# Integrate/rebase only according to the team's Git workflow.
 ```
 
-The feature branch may differ from `main`. Coordinate with the team before changing branches on a prepared Docker host or applying new migrations.
+While Issue #115 is under review, its unified bootstrap lives on `feat/vault-unified-startup`; after the PR merges, follow the reviewed `main` branch. A Git update by itself never upgrades running Docker images or applies migrations. **Do not move an initialized project's directory casually:** Docker Compose provenance checks include absolute configuration paths.
 
-**Repository location matters:** the existing-container preflight validates the absolute Compose file paths recorded in Docker labels. Cloning the same repository into a different directory does **not** automatically adopt an already-running stack.
-
-## 2. Install prerequisites and configure browser access
-
-### Tools
-
-- Git, Bash, Python 3, OpenSSL and `flock` (`util-linux`).
-- Docker Engine with the Docker Compose v2 plugin, and permission to access the Docker daemon.
-- `mkcert` for the repository's browser-facing Nginx certificate setup.
-- Node.js **22** and npm for local JavaScript/TypeScript development or tests. Docker builds manage their own dependencies.
-- Linux/WSL2 environment. Under WSL2, the domain and CA-trust helpers may also update the Windows host and trust store.
-
-Check installed tools:
+## B. First-time setup — NEW Ubuntu VM only
 
 ```bash
-git --version
-docker --version
-docker compose version
-docker info >/dev/null
-python3 --version
-openssl version
-command -v flock
-command -v mkcert
-node --version
-npm --version
+./scripts/install-deps.sh --check
+./scripts/install-deps.sh         # If packages/configuration are missing
+make initialize                   # Interactive operator-approved first setup
+make health
+make check-all
 ```
 
-Install missing tools using your operating system's official installation instructions before proceeding. `docker info` must work for your user.
+The complete initial flow creates/validates Vault Raft with Shamir 2-of-3, TLS, AppRoles, PostgreSQL, restricted roles and Prisma migrations, and the application. It stores initial recovery material under `~/.local/state/transcendence/dev/private/` and requires secure **off-VM** custody of the necessary shares. The combined first-install path still needs independent acceptance on a separate clean VM: stop on unexpected errors and contact the infrastructure owner.
 
-### Local domain and HTTPS certificates
+**Existing legacy Docker installation?** Do not run `make initialize` or raw Compose to “migrate” it. Use an operator-reviewed cutover, or a separate clean VM; `git pull` does not change existing Docker identities, volumes or images.
 
-The frontend is served through Nginx at **`https://transcendence.test:8443`**. The repository includes helpers for the local domain, **Nginx** certificate, and host CA trust:
+## C. Daily startup and reboot recovery
 
 ```bash
-make setup       # modifies local hostname/certificates/trust; may ask for privileges
-make check       # verifies the local browser setup
+make up                  # VM has already been initialized AND Vault is unsealed
+make health              # Full read-only health and dependency report
+make check-all           # Full read-only readiness
 ```
 
-These commands configure **browser-facing Nginx TLS**. They are **not** substitutes for the separate Vault TLS, initial Vault setup, or database provisioning.
-
-> [!NOTE]
-> `.env.example` documents some application settings, but copying it into `.env` **does not provision Vault or PostgreSQL**. In the unified runtime, Backend gets its database connection via a Vault-rendered **secret file**, not `DATABASE_URL`.
-
-## 3. First-time infrastructure provisioning (operator only)
-
-**Stop here if this is a fresh Docker host.** The current repository has no reviewed, single-command end-to-end fresh bootstrap. `dev-start.sh --check` intentionally fails when trusted containers and volumes do not already exist.
-
-A trusted operator must establish and verify the following **once per independent environment**, in this order:
-
-| Stage | Required result | Detailed reference |
-| --- | --- | --- |
-| Vault TLS | Separate Vault CA, `vault.crt` / `vault.key`, private key custody | [Vault server runbook](infra/vault/server/vault-server-README.md) |
-| Docker isolation | Correct project names, private Vault network, app/default and Collector control networks, owned volumes | [Unified runtime contract](infra/vault/runtime/README.md) |
-| Vault Raft | Existing or newly initialized **separate** Raft volume; Shamir **2-of-3** shares securely held outside Git | [Vault server runbook](infra/vault/server/vault-server-README.md) |
-| Vault authorization | KV v2 mount, ACL policies, three AppRoles, initial SecretIDs | [Vault server runbook](infra/vault/server/vault-server-README.md) and [AppRole runbook](infra/vault/scripts/APPROLE-ROTATION.md) |
-| PostgreSQL | Distinct application and migrator credentials stored in Vault and matched with PostgreSQL roles | [Vault server runbook](infra/vault/server/vault-server-README.md) |
-| First migration | Reviewed Prisma migrations applied, restricted grants reconciled | [Unified runtime contract](infra/vault/runtime/README.md) |
-| Application | Existing nine containers created with approved unified Compose provenance, correct TLS and volumes | [Unified runtime contract](infra/vault/runtime/README.md) |
-
-Some commands in the long-form Vault server runbook are explicitly marked **historical**. Do not copy its old `compose up`, `start-backend.sh`, or repeated Compose-file examples onto an already prepared stack. First-time provisioning requires a reviewed procedure that matches the current two-file architecture.
-
-**This is the remaining onboarding gap:** to make a fresh `git clone` → `make setup` → `./scripts/dev-start.sh` self-service on a new machine, the project needs a separately implemented and tested **first-time bootstrap workflow**. This documentation does not pretend that workflow exists.
-
-## 4. Daily startup on an already provisioned machine
-
-Run these commands from the same repository path used to provision the existing stack:
+If Vault is sealed after a VM reboot:
 
 ```bash
-./scripts/dev-start.sh --check   # validate configuration; no changes
-./scripts/dev-start.sh --plan    # inspect readiness; no changes
-./scripts/dev-start.sh           # resume existing stopped containers
-./scripts/dev-start.sh --plan    # confirm everything is ready
+make recover             # Interactive: two DIFFERENT shares at hidden Vault prompts
+make health
 ```
 
-What `./scripts/dev-start.sh` does:
+**Never** paste keys into shell command arguments, environment variables, tickets or chat; do not attempt `vault operator init` on an initialized volume. Recovery never silently recreates missing Docker resources or runs migrations.
 
-1. Acquires the shared startup/migration lock.
-2. Verifies Docker identities, Compose provenance, networks, volumes and TLS.
-3. Starts **existing stopped containers**, preserving already-running containers.
-4. Verifies Vault Raft, Shamir 2-of-3 and the unsealed state. If sealed, requests **two original shares interactively**, with hidden input.
-5. Waits for PostgreSQL and required service healthchecks.
-6. Checks Prisma migration names and checksums. Normal startup **refuses pending or failed migrations**.
-7. Verifies Vault Agent secret delivery and the application routes.
-8. Checks Vite, Nginx HTTPS, Backend API and Docker Collector proxy readiness.
-
-If the existing containers or trusted volumes are missing, **stop and consult the operator**. Do not try `docker compose up` to work around an identity or preflight failure.
-
-### Open the application
-
-After successful startup, open:
-
-- **Web UI:** <https://transcendence.test:8443/>
-- **Backend health:** <https://transcendence.test:8443/api/v1/health>
-
-For a terminal-only check that does not require editing `/etc/hosts`, use:
+Open the UI: **https://transcendence.test:8443** (on the configured VM/browser). Backend health: **https://transcendence.test:8443/api/v1/health**. For a local terminal-only check:
 
 ```bash
-curl --silent --show-error --insecure --noproxy '*' \
-  --resolve transcendence.test:8443:127.0.0.1 \
-  --output /dev/null --write-out 'HTTP %{http_code}\n' \
-  https://transcendence.test:8443/api/v1/health
+curl -k -I https://127.0.0.1:8443
 ```
 
-Expect `HTTP 200` when the service is ready. `--insecure` is only a fallback for **local development**; in a browser, `make setup`/`make check` are intended to configure certificate trust.
+`-k` disables TLS verification and is only a local diagnostic fallback; it is not proof that the application's login/WebSocket flow works. The localhost gateway is bound to the VM loopback interface.
 
-## 5. Database migration workflow
+## D. After pulling changes / migrations
+
+**`make up` intentionally does not:** rebuild existing backend/frontend/Graph Engine images, recreate containers, apply new Prisma migrations or rotate credentials. If the incoming code changes the database schema, coordinate with Backend/DevOps. A green health result can still describe a previously built image.
+
+A **reviewed, operator-approved** Prisma migration is performed separately, after a verified database backup:
 
 ```bash
-./scripts/dev-start.sh --plan
+python3 scripts/dev/bootstrap_migrations.py plan  # Read-only: detect pending migrations
+./scripts/bootstrap.sh --prepare-migrations     # Changes DB schema/grants; asks y/N
+./scripts/bootstrap.sh --check-migrations        # Read-only verification
 ```
 
-If a reviewed Prisma migration is reported as pending, coordinate with Backend/DevOps before executing:
+The migration workflow uses the Vault-backed migrator and reconciles restricted database grants. It refuses unexpected checksums/history. **Do not auto-retry a failed migration.** Image upgrades for already running containers also require a separately reviewed maintenance procedure; `--prepare-backend` is not an automatic in-place upgrade mechanism.
+
+## E. Inspect and troubleshoot safely
 
 ```bash
-./scripts/dev-start.sh --migrate
-```
+make plan
+make health
+./scripts/bootstrap.sh --check-vault
+./scripts/bootstrap.sh --check-migrations
+./scripts/bootstrap.sh --check-backend
+./scripts/bootstrap.sh --check-nginx
 
-The controlled workflow stops Backend when necessary, reconciles database credentials, runs the one-shot Vault migration Agent and `prisma migrate deploy`, reapplies restricted grants, audits the resulting migration history, and resumes Backend **only if the workflow succeeds**. When no migrations are pending, this mode does not run the migration workflow.
-
-**Never treat a failed migration as an instruction to rerun it repeatedly.** Use a reviewed recovery procedure and verify `_prisma_migrations`. Do not manually delete migration records, edit already applied migrations, or point the application to the PostgreSQL superuser.
-
-## 6. Read-only status and diagnostics
-
-```bash
-# See both Compose projects' containers without triggering a Compose operation.
 docker ps -a --filter 'label=com.docker.compose.project=transcendence-app-dev'
 docker ps -a --filter 'label=com.docker.compose.project=transcendence-vault-dev'
-
-# Inspect Vault status (exit code 2 can mean "sealed").
-docker exec transcendence-vault-dev-vault-1 vault status
-
-# Inspect a specific container health status.
-docker inspect --format '{{.State.Health.Status}}' \
-  transcendence-app-dev-postgres-1
-
-# Full read-only readiness check.
-./scripts/dev-start.sh --plan
+docker inspect --format '{{.State.Health.Status}}' transcendence-app-dev-backend-1
 ```
 
-If you need logs, start with a short tail of the **relevant** service and review locally:
+If `make health` reports a failing stage, run its corresponding `--check-*` command first. Inspect logs locally and redact sensitive data; never print or share Vault tokens, Shamir shares, AppRole SecretIDs, rendered PostgreSQL DSNs or private key files.
+
+## F. Development & tests
+
+Commands inside a package use that package's directory:
 
 ```bash
-docker logs --tail 50 transcendence-app-dev-backend-1
-```
+# Frontend (React/Vite)
+(cd frontend && npm ci && npm run lint && npm run build)
 
-Logs can contain sensitive operational data. **Never paste tokens, SecretIDs, passwords, rendered DSNs, recovery shares, or unredacted sensitive logs into issues/Discord.** Do not use `docker exec cat` on Vault-rendered secret files for troubleshooting.
+# Backend (NestJS/Prisma)
+(cd backend && npm ci && npm run lint && npm run test && npm run build)
 
-## 7. Local development and tests
+# Collector
+(cd services/collector && npm ci && npm run typecheck && npm run test:cov && npm run build)
 
-`npm` commands are executed **inside each package directory**, not from the repository root.
+# Graph Engine
+(cd services/graph-engine && python3 -m pytest -q)
 
-### Frontend (React + Vite)
+# Startup offline regressions
+python3 -m unittest discover -s scripts/dev -p 'test_*.py' -q
+python3 -m unittest discover -s tests/benchmarks -p 'test_*.py' -q
 
-```bash
-cd frontend
-npm ci
-npm run lint
-npm run build
-cd ..
-```
-
-### Backend (NestJS + Prisma)
-
-```bash
-cd backend
-npm ci
-npm run lint
-npm run test
-npm run build
-cd ..
-```
-
-The Backend also provides `npm run test:e2e`. Run it only with the required test environment configured; it may depend on database and runtime services.
-
-### Collector
-
-```bash
-cd services/collector
-npm ci
-npm run typecheck
-npm run test:cov
-npm run build
-cd ../..
-```
-
-### Graph Engine
-
-```bash
-cd services/graph-engine
-python3 -m pip install -r requirements.txt
-python3 -m pytest -q
-cd ../..
-```
-
-Prefer a virtual environment for local Python package installation where required.
-
-### Infrastructure unit tests
-
-```bash
+# Additional Vault infrastructure offline regressions
 python3 -m unittest discover -s infra/vault/scripts -p 'test_*.py' -q
 ```
 
-### Static Compose validation
+Docker builds have their own dependencies. Local Node/Python tests may require package installation or an isolated Python environment. Backend E2E tests have additional runtime prerequisites; consult their test setup before running them.
 
-After the Vault TLS path is provisioned:
-
-```bash
-export FT_DEV_TLS_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/transcendence/dev/tls"
-docker compose -f compose.yml config --quiet
-docker compose -f infra/vault/server/compose.yml config --quiet
-```
-
-These validate Compose syntax/model interpolation; they **do not** prove that the environment was provisioned correctly or that services are ready.
-
-## 8. Git collaboration commands
+## G. Git collaboration
 
 ```bash
-git status -sb            # current branch and local changes
-git fetch origin          # update remote references, without merging
-git diff --check          # whitespace/error check
-git log --oneline -5      # recent commits
+git status -sb
+git fetch origin
+git diff --check
+git log --oneline -5
 ```
 
-For a feature branch, create a short-lived branch from an **up-to-date** `main` and open a PR when ready. Follow team review rules; do not force-push or bypass repository protections. Coordinate migrations before merging changes that introduce a new Prisma migration.
+Work on feature branches and follow the team's PR/review/merge rules. Coordinate schema changes and container maintenance; do not force-push shared branches.
 
-> [!WARNING]
-> Updating Git files does **not** update existing Docker images or automatically apply a database migration. The routine startup intentionally avoids container recreation. A code upgrade requiring image rebuilds or Compose cutover needs a separate reviewed deployment procedure.
+## H. Commands not to use for routine recovery
 
-## 9. Commands not to use casually
-
-| Command / action | Why it needs operator review |
+| Command | Reason |
 | --- | --- |
-| `make up` | Uses direct `docker compose up -d --build`, bypassing unified startup checks |
-| `make clean` / `docker compose down` | Removes containers/networks and can invalidate the existing-container contract |
-| `docker compose down -v` | Can delete persistent PostgreSQL/Vault data and authentication volumes |
-| `docker compose up --force-recreate` | Recreates containers, conflicting with preservation guarantees |
-| `vault operator init` | Valid **only** for a genuinely new, empty Vault Raft store |
-| AppRole `rotate` / `recover` / `finalize` | Security-sensitive operator maintenance, not routine startup |
-| `prisma migrate resolve` | Migration-history recovery, only after reviewing actual database effects |
-| Arbitrary `docker volume rm`, `docker network rm` | May destroy or detach trusted infrastructure |
+| `make initialize` on an existing instance | First-install only, not reboot recovery |
+| `make clean`, `docker compose down` | Can remove trusted containers/networks and break safe resume |
+| `docker compose down -v`, `docker volume rm` | May delete persistent Vault/PostgreSQL data |
+| Raw `docker compose up` or `--force-recreate` | Bypasses guarded container identity/startup contract |
+| `vault operator init` | Only for a genuinely new, empty Raft volume |
+| Ad-hoc `prisma migrate resolve` / credential rotation | Security-sensitive repair requiring explicit review |
 
-## 10. Additional runbooks
+## I. Detailed operator documentation
 
-- [Unified Vault-backed startup contract](infra/vault/runtime/README.md) — authoritative behavior of `dev-start.sh` and Issue #115 limitations.
-- [Vault server and controlled first-time setup](infra/vault/server/vault-server-README.md) — architecture, Vault provisioning, TLS, recovery references; includes historical commands.
-- [AppRole rotation and recovery](infra/vault/scripts/APPROLE-ROTATION.md) — operator-maintained credential lifecycle.
-- [Vault Clean-Room tests](infra/vault/cleanroom/README.md) — isolated test fixtures; **not** a fresh-machine bootstrap.
-- [Architecture documentation](docs/architecture/README.md) — service boundaries and contracts.
+- [Team quick start](docs/dev-team-quickstart.md) — short instructions for teammates.
+- [Developer onboarding](docs/dev-getting-started.md) — first-time initialization and daily operation.
+- [Reboot recovery](docs/dev-reboot-recovery.md) — manual Shamir unseal and safe resume.
+- [Health diagnostics](docs/dev-health-report.md) — read-only checks and failure localization.
+- [Final acceptance #115](docs/dev-final-acceptance.md) — validation evidence and limitations.
+- [Vault server runbook](infra/vault/server/vault-server-README.md) — detailed operations, including historical commands; prefer this guide's guarded entry points for Issue #115.
+- [AppRole maintenance](infra/vault/scripts/APPROLE-ROTATION.md) — credential lifecycle for operators.
 
-**Rule of thumb:** `--check` and `--plan` are inspections; plain `dev-start.sh` resumes an existing environment; `--migrate` is an explicit database-changing operation. A first-time install is still a separate, operator-controlled process.
+**Rule of thumb:** `make initialize` is for a trusted first install; `make up` is daily startup; `make recover` is for a sealed existing Vault; migrations and image upgrades are separate, approved maintenance tasks.
