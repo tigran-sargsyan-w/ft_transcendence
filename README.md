@@ -24,4 +24,6 @@ After reboot, single-node Vault using Shamir 2-of-3 normally needs **manual unse
 
 Useful commands: `make health` (read-only health/diagnostics), `make check-all` (read-only readiness), `make plan` (resource inventory), `make acceptance` (three non-destructive repeated-start checks on an already healthy VM). Do not use raw `docker compose up`, `make down` or `make clean` to troubleshoot the trusted runtime.
 
-**Start here:** [Development onboarding and operational commands](docs/dev-getting-started.md). For details see [reboot recovery](docs/dev-reboot-recovery.md), [health report](docs/dev-health-report.md), [idempotency acceptance](docs/dev-startup-idempotency.md), and [final acceptance checklist](docs/dev-final-acceptance.md).
+**New to the project?** [Team quick start — Vault](docs/dev-team-quickstart.md) (short version) · [Developer commands](COMMANDS.md) (command reference).
+
+**Operator documentation:** [Development onboarding and operational commands](docs/dev-getting-started.md). For details see [reboot recovery](docs/dev-reboot-recovery.md), [health report](docs/dev-health-report.md), [idempotency acceptance](docs/dev-startup-idempotency.md), and [final acceptance checklist](docs/dev-final-acceptance.md).
