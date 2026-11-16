@@ -57,6 +57,53 @@ jobs:
       - name: Build (generates Prisma client)
         run: npm run build
 
+  backend-e2e:
+    name: Backend / E2E (HTTP + Socket.IO)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18-bookworm
+        env:
+          POSTGRES_USER: transcendence_e2e
+          POSTGRES_PASSWORD: e2e_test_only
+          POSTGRES_DB: transcendence_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U transcendence_e2e -d transcendence_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://transcendence_e2e:e2e_test_only@127.0.0.1:5432/transcendence_e2e?schema=public
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Apply Prisma migrations
+        run: ./node_modules/.bin/prisma migrate deploy
+
+      - name: Run backend HTTP and Socket.IO E2E tests
+        run: npm run test:e2e -- --no-file-parallelism
+
   collector:
     name: Collector / typecheck, test, coverage and build
     runs-on: ubuntu-latest
