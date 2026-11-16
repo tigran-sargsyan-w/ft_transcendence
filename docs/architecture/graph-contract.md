@@ -123,11 +123,15 @@ Unknown kinds/statuses should be rejected or normalized by the receiver; do not 
 
 Direction matters for blast radius and attack-path analysis (`source` → `target`).
 
-For v0 analysis direction and edge kinds:
+Per-analysis edge kinds (traversal):
 
-- `blast_radius` walks the **reversed** dependency subgraph (if `db` fails, who depends on it?). Only `depends_on` edges are traversed.
-- `attack_paths` walks **forward** from a compromised seed along the same dependency subgraph (what can it reach via `depends_on`?).
-- Other edge kinds (`connects_to`, `exposes`, `runs_on`, `mounts`) are ignored by these two analyses.
+| Analysis | Edge kinds traversed | Direction |
+|----------|----------------------|-----------|
+| `blast_radius` | `depends_on`, `mounts`, `runs_on` | **Reversed** (if `db` / volume / host fails, who is impacted?) |
+| `attack_paths` | `depends_on`, `exposes` | **Forward** (from a compromised seed, what can it reach?) |
+| `critical_nodes` | `depends_on` only (scoring; see below) | N/A (ranking, not a walk) |
+
+`connects_to` is not used by any analysis yet. Example: seed `ext:internet` + `attack_paths` follows `exposes` into a published service, then `depends_on` inward.
 
 ## Graph Engine HTTP surface (v0)
 
