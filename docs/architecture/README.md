@@ -19,6 +19,7 @@ Documents here should stay short and stable. Concrete stack and product decision
 - [Real-time conventions](./realtime-conventions.md)
 - [Realtime topology protocol](./realtime-topology.md) (Socket.IO: snapshot, deltas, revisions)
 - [Analyses API](./analysis-api.md) (HTTP: blast radius, attack paths, critical nodes on the live topology)
+- [Incidents API](./incidents-api.md) (HTTP: incidents, timeline and notes, optimistic locking)
 - [Architecture Decision Records](../adr/README.md)
 
 ## Current status
@@ -32,11 +33,11 @@ Documents here should stay short and stable. Concrete stack and product decision
 - Graph Engine (product-specific) — Python FastAPI + NetworkX, plain HTTP/JSON — [ADR 0001](../adr/0001-python-graph-engine.md), [graph contract](./graph-contract.md)
 - authentication — server-side sessions with an opaque cookie — [ADR 0002](../adr/0002-server-side-sessions.md)
 - realtime transport — Socket.IO — [realtime topology protocol](./realtime-topology.md)
+- incident events and topology history — append-only tables, optimistic locking on incidents — [ADR 0004](../adr/0004-incident-events-and-topology-history.md), [incidents API](./incidents-api.md) (issue #119)
 
 **Proposed / pending team review:**
 
 - Vault secret management — KV v2 + AppRole + Vault Agent file delivery, isolated POC first — [ADR 0003](../adr/0003-vault-secret-delivery.md) and [delivery contract v1](./vault-secret-delivery.md) (issue #92)
-- Incident events and topology history — append-only tables, optimistic locking on incidents — [ADR 0004](../adr/0004-incident-events-and-topology-history.md) (issue #119)
 
 **Still open:**
 

@@ -42,8 +42,16 @@ SELECT CASE WHEN
   (SELECT count(*) FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner
      WHERE c.oid IN (to_regclass('public.users'),
                       to_regclass('public.sessions'),
-                      to_regclass('public._prisma_migrations'))
-       AND r.rolname = 'transcendence_migrator') = 3
+                      to_regclass('public._prisma_migrations'),
+                      to_regclass('public.incidents'),
+                      to_regclass('public.incident_events'))
+       AND r.rolname = 'transcendence_migrator') = 5
+  AND EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_roles r ON r.oid = c.relowner
+    WHERE c.oid = to_regclass('public.incident_events_seq_seq')
+      AND c.relkind = 'S'
+      AND r.rolname = 'transcendence_migrator')
   AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'transcendence_app'
     AND has_schema_privilege(oid, 'public', 'USAGE')
     AND NOT has_schema_privilege(oid, 'public', 'CREATE')
@@ -67,7 +75,27 @@ SELECT CASE WHEN
     AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.users'), 'TRIGGER'), false)
     AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.sessions'), 'TRUNCATE'), false)
     AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.sessions'), 'REFERENCES'), false)
-    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.sessions'), 'TRIGGER'), false))
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.sessions'), 'TRIGGER'), false)
+
+    AND COALESCE(has_table_privilege(oid, to_regclass('public.incidents'), 'SELECT'), false)
+    AND COALESCE(has_table_privilege(oid, to_regclass('public.incidents'), 'INSERT'), false)
+    AND COALESCE(has_table_privilege(oid, to_regclass('public.incidents'), 'UPDATE'), false)
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.incidents'), 'DELETE'), false)
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.incidents'), 'TRUNCATE'), false)
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.incidents'), 'REFERENCES'), false)
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.incidents'), 'TRIGGER'), false)
+
+    AND COALESCE(has_table_privilege(oid, to_regclass('public.incident_events'), 'SELECT'), false)
+    AND COALESCE(has_table_privilege(oid, to_regclass('public.incident_events'), 'INSERT'), false)
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.incident_events'), 'UPDATE'), false)
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.incident_events'), 'DELETE'), false)
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.incident_events'), 'TRUNCATE'), false)
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.incident_events'), 'REFERENCES'), false)
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.incident_events'), 'TRIGGER'), false)
+
+    AND COALESCE(has_sequence_privilege(oid, to_regclass('public.incident_events_seq_seq'), 'USAGE'), false)
+    AND NOT COALESCE(has_sequence_privilege(oid, to_regclass('public.incident_events_seq_seq'), 'SELECT'), false)
+    AND NOT COALESCE(has_sequence_privilege(oid, to_regclass('public.incident_events_seq_seq'), 'UPDATE'), false))
   AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'transcendence_migrator'
     AND has_schema_privilege(oid, 'public', 'CREATE'))
 THEN 'ready' ELSE 'pending' END;
