@@ -212,6 +212,9 @@ jobs:
       - name: Test Prisma migration audit offline
         run: python3 -m unittest discover -s infra/vault/scripts -p 'test_dev_migration_audit.py' -v
 
+      - name: Test PostgreSQL incident ACL regression
+        run: bash tests/integration/test_incident_acl.sh
+
       - name: Validate Vault application Compose
         run: docker compose --profile "*" -f compose.yml config --quiet
 
