@@ -18,6 +18,7 @@ import bootstrap_backend_agent as agent
 import bootstrap_frontend as frontend
 import bootstrap_postgres as pg
 import bootstrap_support_services as support
+import nginx_tls_access as tls_access
 
 NAME = f"{pg.PROJECT}-nginx-1"
 SERVICE = "nginx"
@@ -192,6 +193,8 @@ def require_prerequisites():
     if frontend.main(["check"]) != 0:
         raise NginxBootstrapError("Frontend or Vault-backed services not ready")
     check_local_tls()
+    if tls_access.main(["check"]) != 0:
+        raise NginxBootstrapError("Dedicated Nginx TLS ACL not ready")
 
 
 def start_or_keep(env):

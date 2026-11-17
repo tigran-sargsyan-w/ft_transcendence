@@ -154,6 +154,12 @@ host_check() {
     say "TODO: Local CA trust"
     missing=1
   fi
+  if python3 -m scripts.dev.nginx_tls_access check >/dev/null 2>&1; then
+    say "PASS: Dedicated Nginx TLS group and ACL"
+  else
+    say "TODO: Dedicated Nginx TLS group and ACL"
+    missing=1
+  fi
   if vault_tls_status; then :; else missing=1; fi
   (( missing == 0 ))
 }
@@ -444,6 +450,7 @@ case "$MODE" in
     confirm "Prepare local domain and TLS on this VM?" || fail "Cancelled; no preparation started"
     python3 -m scripts.dev.domains setup
     python3 -m scripts.dev.certificates setup
+    python3 -m scripts.dev.nginx_tls_access apply
     python3 -m scripts.dev.ca_trust setup
     if vault_tls_status; then
       say "KEEP: Existing valid Vault TLS material"

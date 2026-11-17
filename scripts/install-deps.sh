@@ -54,7 +54,7 @@ command_exists apt-get || fail "apt-get is required"
 
 say "=== ft_transcendence prerequisites: Ubuntu $VERSION_ID ($(dpkg --print-architecture)) ==="
 
-base_packages=(git make python3 openssl curl ca-certificates util-linux mkcert libnss3-tools)
+base_packages=(git make python3 openssl curl ca-certificates util-linux acl mkcert libnss3-tools)
 missing_base=()
 for package in "${base_packages[@]}"; do
   if pkg_installed "$package"; then
