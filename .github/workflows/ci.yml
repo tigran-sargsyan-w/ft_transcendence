@@ -203,6 +203,9 @@ jobs:
       - name: Test unified Compose safety invariants
         run: python3 -m unittest discover -s infra/vault/scripts -p 'test_compose_unification.py' -v
 
+      - name: Test Clean-Room isolation safety offline
+        run: python3 -m unittest discover -s infra/vault/scripts -p 'test_cleanroom_preflight_safety.py' -v
+
       - name: Test development startup preflight offline
         run: python3 -m unittest discover -s infra/vault/scripts -p 'test_dev_preflight.py' -v
 
