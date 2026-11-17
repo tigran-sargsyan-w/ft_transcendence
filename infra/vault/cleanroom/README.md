@@ -61,3 +61,13 @@ exact Clean-Room project and intended persistent volumes.
 
 The existing local test environment must not be recreated
 or deleted merely to prepare these templates for Git.
+
+## Compatibility with the unified runtime
+
+The normal development stack now uses a single `compose.yml` plus the
+separate Vault server file. Clean-Room override examples remain test-only.
+Before building the test Compose model, `preflight.py` binds
+`FT_DEV_TLS_DIR` to the independently verified `FT_CR_TLS_DIR`.
+An inherited mismatching TLS source is rejected, preventing accidental
+reuse of the development CA. The Clean-Room project must keep its own
+project names, credentials, networks and volumes.

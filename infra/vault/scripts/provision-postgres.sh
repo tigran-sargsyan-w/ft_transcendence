@@ -60,8 +60,25 @@ echo "=== Step 1: Remove stale provisioning credentials ==="
 
 echo "=== Step 2: PostgreSQL readiness ==="
 
-"${COMPOSE[@]}" \
-  up -d --no-deps --wait postgres
+if [[ "${FT_EXISTING_RUNTIME_ONLY:-0}" == "1" ]]; then
+  if [[ "$FT_APP_COMPOSE_PROJECT" != "transcendence-app-dev" ]]; then
+    echo "ERROR: unexpected PostgreSQL project" >&2
+    exit 1
+  fi
+
+  status="$(docker inspect --format '{{.State.Health.Status}}' \
+    transcendence-app-dev-postgres-1)"
+
+  if [[ "$status" != "healthy" ]]; then
+    echo "ERROR: existing PostgreSQL is not healthy" >&2
+    exit 1
+  fi
+
+  echo "PASS: Existing PostgreSQL healthy (no Compose recreation)"
+else
+  "${COMPOSE[@]}" \
+    up -d --no-deps --wait postgres
+fi
 
 echo "=== Step 3: Ensure PostgreSQL roles ==="
 

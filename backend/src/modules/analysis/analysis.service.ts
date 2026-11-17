@@ -49,6 +49,20 @@ export type AnalysisResult = {
   results: AnalyzeData['results'];
 };
 
+// The ids that are not nodes of the topology are the user's input: they are
+// said here, under the name `seedNodeIds`. The incidents check theirs the same
+// way.
+export function checkNodeIds(snapshot: TopologySnapshot, ids: string[]) {
+  const nodes = new Set(snapshot.nodes.map((node) => node.id));
+  const unknown = ids.filter((id) => !nodes.has(id));
+
+  if (unknown.length > 0) {
+    throw validationError({
+      seedNodeIds: unknown.map((id) => `${id} is not a node of the topology`),
+    });
+  }
+}
+
 // `echoed`: the engine sent the revision back, and `run` has checked that it
 // is the one it was sent.
 // The seeds are the user's input, so what is wrong with them is said here,
@@ -71,14 +85,7 @@ function checkSeeds(
     return;
   }
 
-  const nodes = new Set(snapshot.nodes.map((node) => node.id));
-  const unknown = seedNodeIds.filter((id) => !nodes.has(id));
-
-  if (unknown.length > 0) {
-    throw validationError({
-      seedNodeIds: unknown.map((id) => `${id} is not a node of the topology`),
-    });
-  }
+  checkNodeIds(snapshot, seedNodeIds);
 }
 
 // The result of an analysis, if the engine sent one.

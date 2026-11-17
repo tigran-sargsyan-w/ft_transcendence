@@ -4,7 +4,7 @@ import { PrismaService } from '../../shared/prisma/prisma.service.js';
 import { UpdateProfileDto } from './dto/update-profile.dto.js';
 
 // What any logged-in user may read about another one: never the email.
-const PUBLIC_PROFILE = {
+export const PUBLIC_PROFILE = {
   id: true,
   displayName: true,
   avatarUrl: true,

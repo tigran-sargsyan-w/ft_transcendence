@@ -17,7 +17,11 @@ export function UserMenu() {
   let navigate = useNavigate();
 
   const { auth } = useAuth();
-  const userName = auth.user.console.log(auth.user);
+
+  if (auth.status !== "authenticated") return null;
+
+  const initial = getInitial(auth.user);
+
   async function handleLogout() {
     try {
       await logoutUser();
@@ -32,7 +36,7 @@ export function UserMenu() {
       <DropdownMenuTrigger>
         <Avatar>
           <AvatarImage src="https://github.com/shadcn.png" />
-          <AvatarFallback>CN</AvatarFallback>
+          <AvatarFallback>{initial}</AvatarFallback>
         </Avatar>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

@@ -1,6 +1,11 @@
+import json
+from pathlib import Path
+
 from app.attack_paths import compute_attack_paths
 from app.blast_radius import build_digraph
 from app.schemas import GraphEdge, GraphNode, TopologySnapshot
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 
 def _sample_topology():
@@ -89,3 +94,43 @@ def test_attack_paths_ignores_non_dependency_edges():
     path_node_ids = [tuple(path["nodeIds"]) for path in result["paths"]]
     assert path_node_ids == [("svc_api", "svc_db")]
     assert all(path["edgeIds"] == ["edge_api_db"] for path in result["paths"])
+
+
+def _mixed_kind_topology():
+    return TopologySnapshot(
+        **json.loads((FIXTURES / "mixed_kind_topology.json").read_text())
+    )
+
+
+def test_attack_paths_from_internet_follow_exposes_then_depends_on():
+    result = compute_attack_paths(
+        build_digraph(_mixed_kind_topology()),
+        ["ext:internet"],
+    )
+    path_node_ids = [tuple(path["nodeIds"]) for path in result["paths"]]
+    assert ("ext:internet", "svc:demo:web") in path_node_ids
+    assert ("ext:internet", "svc:demo:web", "svc:demo:api") in path_node_ids
+    assert (
+        "ext:internet",
+        "svc:demo:web",
+        "svc:demo:api",
+        "svc:demo:db",
+    ) in path_node_ids
+
+
+def test_attack_paths_ignore_mounts_runs_on_and_connects_to():
+    result = compute_attack_paths(
+        build_digraph(_mixed_kind_topology()),
+        ["svc:demo:web"],
+    )
+    path_node_ids = [tuple(path["nodeIds"]) for path in result["paths"]]
+    assert path_node_ids == [
+        ("svc:demo:web", "svc:demo:api"),
+        ("svc:demo:web", "svc:demo:api", "svc:demo:db"),
+    ]
+    assert all(
+        "host:env_local_compose" not in path["nodeIds"]
+        and "net:demo_default" not in path["nodeIds"]
+        and "vol:demo_db_data" not in path["nodeIds"]
+        for path in result["paths"]
+    )

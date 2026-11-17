@@ -51,9 +51,9 @@ Expected shape:
 
 `POST /api/v1/analyze` validates the graph-contract request.
 
-- `blast_radius` — implemented (who depends on the seed, via reversed `depends_on` edges only)
-- `attack_paths` — implemented (forward paths from a compromised seed along `depends_on` only)
-- `critical_nodes` — implemented (v1 risk-map score: `0.6` betweenness on `depends_on` only + `0.4` transitive dependents; reasons may include `exposed_to_internet`; no seeds required — see `docs/architecture/graph-contract.md`)
+- `blast_radius` — implemented (reversed walk on `depends_on` + `mounts` + `runs_on`)
+- `attack_paths` — implemented (forward walk on `depends_on` + `exposes`)
+- `critical_nodes` — implemented (v1 risk-map score: `0.6` betweenness on linked `depends_on` + `0.4` transitive dependents; reasons may include `exposed_to_internet`; no seeds required — see `docs/architecture/graph-contract.md`)
 
 ## Fixtures (Nest integration)
 
@@ -71,7 +71,8 @@ Topology snapshots live under `fixtures/`. Golden `/analyze` envelopes (stable e
 
 `analyzedAt` in goldens is fixed (`2026-09-14T10:00:01Z`). Live responses use the current UTC time; compare `results` (and ignore or normalize `analyzedAt`).
 
-Edge directions in `mixed_kind_topology.json` follow `docs/architecture/topology-mapping.md`.
+Edge directions in `mixed_kind_topology.json` follow `docs/architecture/topology-mapping.md`.  
+Useful seeds on that fixture: blast `host:env_local_compose` or `vol:demo_db_data`; attack `ext:internet`.
 
 ### Curl against a fixture
 

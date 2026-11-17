@@ -16,6 +16,5 @@ __pycache__/
 # Local development TLS certificates
 infra/nginx/certs/
 
-# Personal documents
-INCIDENT-ROOM-ROLE.md
-ONBOARDING-FRONTEND.md
+# DEV ONLY: Vault recovery shares and root token — never commit
+/vault-init.json
