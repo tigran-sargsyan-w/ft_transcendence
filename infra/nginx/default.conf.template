@@ -47,6 +47,14 @@ server {
 
     # Socket.IO / WebSocket
     location ^~ /socket.io/ {
+        # CRS 920420: allow Socket.IO Engine.IO polling POST
+        # with text/plain, without disabling other CRS protections.
+        modsecurity_rules '
+            SecRule REQUEST_METHOD "@streq POST" "id:1000043,phase:1,pass,nolog,t:none,chain"
+                SecRule ARGS_GET:transport "@streq polling" "t:none,chain"
+                    SecRule REQUEST_HEADERS:Content-Type "@rx (?i)^text/plain([[:space:]]*;[[:space:]]*charset[[:space:]]*=[[:space:]]*utf-8)?[[:space:]]*$" "t:none,ctl:ruleRemoveById=920420"
+        ';
+
         proxy_pass http://backend_upstream;
         proxy_http_version 1.1;
 
