@@ -1,126 +1,292 @@
-# Vault secret delivery contract — v1 (proposal)
+# Vault secret delivery architecture — local development
 
-> **Status:** Architecture proposal only. No Vault service or application integration is implemented by this document. Team review is required before runtime changes.
+> **Status:** Implemented for the existing local development environment.
+> Not a production-ready or fresh-machine deployment.
 
-- Owner: Tigran (Vault/Agent, TLS, ACL and Compose security boundaries)
-- Application interface: Nathan (NestJS/Prisma credential loading and startup)
+- Owner: Tigran (Vault, TLS, ACL and infrastructure security)
+- Application integration: Nathan (NestJS and Prisma)
+- Decision: [ADR 0003](../adr/0003-vault-secret-delivery.md)
 - Tracking: [Issue #92](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/92)
-- Decision record: [ADR 0003](../adr/0003-vault-secret-delivery.md)
+- Hardening: [Issue #103](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/103)
 
-## Current state (before Vault)
+## Architecture overview
 
-- `compose.yml` passes `POSTGRES_PASSWORD` from a Git-ignored `.env` into `postgres` and constructs a backend `DATABASE_URL` from it.
-- The backend Dockerfile uses `npx prisma migrate deploy && exec npm run start`. The backend expects a `DATABASE_URL` environment variable at startup.
-- `GRAPH_ENGINE_URL` is a nonsecret internal service address; session cookies use randomly generated opaque tokens, not a shared JWT signing secret.
-- No Vault, Vault Agent, KV mount or secret-delivery volume exists in the current `main` runtime. The existing development stack must remain runnable while the isolated POC is prepared.
+The application uses HashiCorp Vault to deliver PostgreSQL
+credentials through dedicated Vault Agents.
 
-## Trust boundaries
+~~~text
+                 Trusted operator
+             Bootstrap / Provisioning
+                        |
+                        v
+                 Vault Server
+              TLS + KV v2 + AppRole
+              Persistent Raft storage
+                        |
+                 Private network
+                        |
+          +-------------+-------------+
+          |             |             |
+          v             v             v
+       Backend       Migrator      PostgreSQL
+        Agent         Agent        Provisioner
+          |             |             |
+          v             v             v
+       Backend DSN   Migration DSN   Temporary DSNs
+          |             |             |
+          v             v             v
+        NestJS        Prisma        PostgreSQL
+                      Migrate       provisioning
+~~~
 
-```text
-Trusted operator (bootstrap / unseal / provision roles)
-                     |
-            Vault server (TLS)
-        KV v2 + policies + Raft
-                     |
-        machine AppRole auth
-                     |
-         dedicated Vault Agent
-                     |
-     restricted private secret file
-                     |
-        specific service consumer
-   (NestJS / Prisma; later PostgreSQL bootstrap)
-```
+Application services do not directly authenticate to Vault.
+Dedicated Vault Agents use restricted AppRoles and deliver
+credentials through private runtime files.
 
-Only Vault Agents receive AppRole credentials. Backend does **not** get a Vault root token or unseal keys, and agents for different consumers do not share the same policy or delivered file volume. For a local POC a single Agent + fake consumer is sufficient; separate real-consumer agents are a later phase.
+Two Compose configurations are used:
 
-## Proposed KV v2 paths and consumers
+- `infra/vault/server/compose.yml` — Vault and operator tools.
+- `compose.yml` — application, agents and maintenance services.
 
-| Logical CLI path | Intended consumer | Example key (placeholder only) | Access |
-| --- | --- | --- | --- |
-| `kv/ft-transcendence/dev/poc-demo` | isolated POC agent | `demo_value` (fake string) | POC AppRole: read only |
-| `kv/ft-transcendence/dev/backend` | NestJS/Prisma backend | `database_url` (future app-user DSN) | backend AppRole: read only |
-| `kv/ft-transcendence/dev/postgres-bootstrap` | DB initialization only | `postgres_password` (future bootstrap secret) | DB bootstrap AppRole: read only |
+Docker project names:
 
-KV v2 is mounted at `kv/`; the actual API/ACL path for the backend secret is `kv/data/ft-transcendence/dev/backend`. Secret path names and example keys are a **proposed contract**, not claims that they have already been provisioned. Do not put example real passwords, real app secrets or initialization keys in documentation.
+- `transcendence-vault-dev`
+- `transcendence-app-dev`
 
-### Example minimal ACL (illustrative; not deployed)
+## Vault server and transport
 
-```hcl
-path "kv/data/ft-transcendence/dev/poc-demo" {
-  capabilities = ["read"]
-}
-```
+Vault runs in normal server mode using:
 
-No wildcard access, no `list`, no `create`, no `update`, no `delete`, no `sudo` on the POC policy. AppRoles for backend and database bootstrap must be similarly restricted to their own exact paths. SecretID and privileged operator actions are excluded from these roles.
+- HashiCorp Vault 2.2.1.
+- Persistent single-node Integrated Storage (Raft).
+- Verified TLS with a trusted CA.
+- Private Docker network `transcendence-vault-dev_vault_private`.
+- No Vault API port published on the host.
+- Shamir 2-of-3 initialization and manual unseal.
 
-## Agent file interface (not implemented yet)
+Persistent Raft storage does not provide automatic unseal,
+high availability or protected external backups.
 
-- Vault Agent authenticates with a role-specific AppRole and reads only the explicitly authorized KV value.
-- Agent renders the result to an **untracked, access-restricted runtime file**, not a repository file or a plaintext Compose variable.
-- Proposed contract for a future backend consumer: `/run/secrets/backend/database_url` contains **only the connection URL** (not JSON or a shell fragment). A backend-controlled startup wrapper or file-aware configuration must load it *before* `prisma migrate deploy` and NestJS initialize. Validate URI encoding and keep its value out of logs.
-- Proposed contract for PostgreSQL initialization: `/run/secrets/postgres/bootstrap_password`, consumed only by the PostgreSQL bootstrap process if the image supports an appropriate file-based input. Check exact image entrypoint behavior before implementation.
-- Permissions: file readable by only the intended service UID/GID; parent directory private; use a dedicated runtime mount per consumer, ideally memory-backed when possible, and no broad host bind mount. Validate permissions inside each actual container.
-- A Vault Agent **may refresh a rendered file** after a KV v2 change, but applications must explicitly reload or restart when their credentials change. This contract does not promise live rotation.
+## KV v2 secrets
 
-**Important:** if a wrapper exports `DATABASE_URL` to launch Prisma/Node, the credential can still exist in that process's environment. The initial goal is to avoid committing or embedding it in static Compose/container metadata and to control access, **not** to claim the runtime environment can never expose a credential. Investigate file-aware application/migration clients if stronger isolation becomes necessary.
+The KV v2 secrets engine is mounted at `kv/`.
 
-## Authentication and bootstrap lifecycle
+| Logical secret path | Secret key | Consumers |
+| --- | --- | --- |
+| `kv/ft-transcendence/dev/backend` | `database_url` | Backend Agent, PostgreSQL Provisioner |
+| `kv/ft-transcendence/dev/migrator` | `database_url` | Migrator Agent, PostgreSQL Provisioner |
 
-1. Operator starts a Vault server in **normal** mode with a persistent Raft data volume and configured TLS. Avoid a publicly reachable listener; administrative access is a temporary, controlled local operation.
-2. First-time operator initializes Vault and securely stores unseal shares/root bootstrap token outside the repository and container logs. An initialized but **sealed** server cannot serve secrets; after a restart, manual unseal is necessary with the proposed local Shamir design.
-3. Operator enables KV v2, configures a narrow POC policy and AppRole, writes a clearly fake POC value, and delivers AppRole credentials through a secure out-of-band mechanism. Treat `SecretID` as sensitive; response wrapping is a later POC check.
-4. Agent uses verified TLS and AppRole, creates the private test file and exposes **only the file** to the fake consumer. Root token and unseal shares are never passed to the agent or app.
-5. The POC tests missing credentials, forbidden path and sealed Vault. No existing application container requires Vault during this first phase.
-6. For future app integration, define an explicit readiness gate: required secret file must exist and pass validity/permissions checks **before** Prisma migration and NestJS process start. Do not silently fall back to a hard-coded password.
+The corresponding Vault ACL paths are:
 
-### Recovery and restart semantics
+- `kv/data/ft-transcendence/dev/backend`
+- `kv/data/ft-transcendence/dev/migrator`
 
-- Persistent Raft volume survives restarts but does not remove unseal requirements. A recovered POC must intentionally unseal and prove its fake value remains available.
-- A fresh start with no valid secret file must fail closed and produce a **nonsecret** diagnostic message.
-- An already-running application may keep a previously loaded password during a Vault outage; define behavior explicitly during backend integration rather than claiming automatic shutdown.
-- Do not initialize Vault repeatedly on every `docker compose up`. Never automate unseal by storing its shares or root token in tracked Compose or startup scripts.
-- Keep the project's single-command application startup requirement visible: a first-time Vault initialization/unseal is a separate documented prerequisite until a secure bootstrap/auto-unseal strategy is approved.
+Database connection URLs are sensitive and must not be
+printed, logged, committed or included in test evidence.
 
-## Phased implementation / validation
+## AppRole identities and ACLs
 
-### Phase 0 — Docs only
+| AppRole | Policy | KV access |
+| --- | --- | --- |
+| `backend-reader` | `backend-readonly` | Backend only |
+| `migrator-reader` | `migrator-readonly` | Migrator only |
+| `postgres-provisioner-reader` | `postgres-provisioner-readonly` | Backend and migrator |
 
-- Review this contract and [ADR 0003](../adr/0003-vault-secret-delivery.md).
-- Confirm exactly which interface changes are needed with Nathan before touching his application startup.
+The Backend Agent also has permission for token
+self-lookup and self-renewal.
 
-### Phase 1 — isolated fake-secret POC
+Application AppRoles do not receive Vault administrative
+permissions, root tokens or Shamir unseal shares.
 
-- Normal-mode Vault starts from a pinned image; Raft persistent data and TLS trust are configured.
-- Test KV v2 fake value, narrow read policy and forbidden-path denial.
-- Vault Agent renders to a private file without writing credentials to tracked files, Compose variables or logs.
-- Test restart -> sealed -> controlled unseal -> same fake value.
-- Test missing/expired AppRole SecretID and failed template rendering.
+Current bootstrap configuration:
 
-### Phase 2 — controlled application integration
+- SecretID TTL: `2160h` (90 days).
+- SecretID maximum uses: `0` (unlimited).
+- Token TTL: `1h`.
+- Token maximum TTL: `4h`.
+- Default token policy: disabled.
+- SecretID binding: required.
 
-- Agree application DB user vs migrations/bootstrap role; avoid giving backend the PostgreSQL administrator's credentials.
-- Prove startup with a file-delivered DSN and check Prisma migrations against an empty database.
-- Verify existing PostgreSQL data/volumes are not modified unexpectedly. `POSTGRES_PASSWORD_FILE` should be verified against the selected official image; changing an initialization password setting does not itself rotate an already-initialized database account.
-- Add separate Agent identity and runtime mount for PostgreSQL bootstrap only if justified.
+These are the configured bootstrap targets. Previously
+issued credentials may retain earlier restrictions.
+Live AppRole settings require separate verification.
 
-### Phase 3 — security evidence
+SecretID rotation and recovery are operator-controlled.
 
-- Verify Docker/host exposure, Vault policy denials, TLS certificate verification and file access by unexpected containers.
-- Redact credentials from CI, shell history, logs, screenshots, `docker inspect` checks and test output.
-- Document limitations: local single-node, manual unseal, no automatic application reload and no dynamic database leases in v1.
+## Backend credential delivery
 
-## Explicitly outside scope
+Configuration:
 
-- ModSecurity, OWASP CRS, Socket.IO gateway or issue #43 implementation.
-- Production HA cluster, auto-unseal without a trusted external key source, production backups, PKI engine.
-- Dynamic PostgreSQL credentials, automatic rotation, auth/session feature changes.
+`infra/vault/agent/backend.hcl`
 
-## Official references
+The persistent Backend Agent reads the backend KV path
+and renders the database connection URL to:
 
-- [Vault Integrated Storage (Raft)](https://developer.hashicorp.com/vault/docs/configuration/storage/raft)
-- [Vault KV v2](https://developer.hashicorp.com/vault/docs/secrets/kv/kv-v2)
-- [Vault AppRole](https://developer.hashicorp.com/vault/docs/auth/approle)
-- [Vault Agent AppRole auto-auth](https://developer.hashicorp.com/vault/docs/agent-and-proxy/autoauth/methods/approle)
-- [Vault Agent templates](https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent/template)
-- [Vault seal/unseal](https://developer.hashicorp.com/vault/docs/concepts/seal)
+`/vault/rendered/database_url`
+
+The rendered file uses permissions `0440`.
+
+The Backend mounts the same dedicated secret volume
+read-only at:
+
+`/run/secrets/backend/database_url`
+
+The Backend receives its file location through:
+
+`DATABASE_URL_FILE=/run/secrets/backend/database_url`
+
+Backend runtime identity:
+
+- UID: `10001`
+- GID: `20000`
+
+The Backend container has:
+
+- Read-only root filesystem.
+- All Linux capabilities dropped.
+- `no-new-privileges`.
+- No AppRole authentication volume.
+- No Vault administrative credentials.
+
+The application may load the connection URL into process
+memory or its runtime environment. File delivery does not
+guarantee that credentials never exist in process memory.
+
+## Prisma migration credential delivery
+
+Configuration:
+
+`infra/vault/agent/migrator.hcl`
+
+The one-shot Migrator Agent renders its dedicated
+database URL to:
+
+`/vault/rendered/database_url`
+
+The `backend-migrate` container receives the file at:
+
+`/run/secrets/migrator/database_url`
+
+Migrator runtime identity:
+
+- UID: `10011`
+- GID: `20010`
+
+The migration service executes `prisma migrate deploy`.
+
+The workflow is coordinated by:
+
+`infra/vault/scripts/run-migrations.sh`
+
+It includes:
+
+1. PostgreSQL readiness.
+2. Controlled credential provisioning.
+3. Fresh migration secret delivery.
+4. Prisma migration execution.
+5. PostgreSQL grant reconciliation.
+6. Temporary migration secret cleanup.
+
+Migration cleanup is attempted on normal exit and
+handled interruptions. Cleanup and failure scenarios
+require reproducible validation.
+
+## PostgreSQL provisioning
+
+Configuration:
+
+`infra/vault/agent/postgres-provisioner.hcl`
+
+The dedicated Provisioner Agent temporarily renders:
+
+- `/vault/rendered/backend_database_url`
+- `/vault/rendered/migrator_database_url`
+
+The provisioning workflow uses separate application
+and migration identities.
+
+The PostgreSQL application role must not receive
+superuser privileges, role creation permissions
+or schema creation privileges.
+
+Provisioning secrets are removed by the dedicated
+cleanup workflow.
+
+## Application startup
+
+For an already provisioned development installation:
+
+~~~sh
+./scripts/dev-start.sh
+~~~
+
+Read-only verification:
+
+~~~sh
+./scripts/dev-start.sh --check
+./scripts/dev-start.sh --plan
+~~~
+
+Explicit migration authorization:
+
+~~~sh
+./scripts/dev-start.sh --migrate
+~~~
+
+Normal startup validates:
+
+- Existing container and volume identities.
+- Vault initialization and unseal state.
+- TLS trust and private networking.
+- PostgreSQL and service health.
+- Current Prisma migration state.
+- Vault Agent secret delivery.
+- HTTPS frontend and backend readiness.
+
+Pending migrations require explicit authorization.
+
+Normal startup does not automatically initialize
+Vault, provision AppRoles or rotate credentials.
+
+## Security boundaries
+
+- SecretID files are private to their corresponding agents.
+- Rendered secret volumes are restricted by consumer.
+- Backend and migrator receive different database credentials.
+- Administrative Vault tokens are not distributed to applications.
+- Vault communication requires certificate verification.
+- Docker host administrators can access persistent volumes.
+- Sensitive values must not appear in Git, logs or evidence.
+- Temporary credentials require explicit lifecycle cleanup.
+- KV updates do not guarantee application hot-reloading.
+
+## Operational limitations
+
+This is a local development implementation.
+
+It does not provide:
+
+- Production high availability.
+- Production-grade external backups.
+- Automatic unseal through trusted external KMS/HSM.
+- Automatic end-to-end PostgreSQL password rotation.
+- Dynamic leased PostgreSQL credentials.
+- Guaranteed automatic application credential reload.
+- Fully unattended first-time provisioning.
+
+A sealed Vault requires operator-assisted unseal.
+A fresh machine requires separate trusted bootstrap.
+
+The existing single-command workflow applies only
+after these infrastructure prerequisites are satisfied.
+
+## Implementation references
+
+- [Original ADR](../adr/0003-vault-secret-delivery.md)
+- [Runtime operations](../../infra/vault/runtime/README.md)
+- [Vault server operations](../../infra/vault/server/vault-server-README.md)
+- [AppRole rotation](../../infra/vault/scripts/APPROLE-ROTATION.md)
+- [Vault ACL policies](../../infra/vault/policies/)
+- [Vault Agent configurations](../../infra/vault/agent/)
+
+See Issue #103 for reproducible hardening evidence.
