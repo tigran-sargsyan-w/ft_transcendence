@@ -140,14 +140,14 @@ Backend AppRole parameters:
 
 - Token TTL: 1 hour.
 - Maximum token TTL: 4 hours.
-- SecretID TTL: 168 hours.
-- SecretID maximum uses: 20.
+- SecretID TTL: 2160 hours (90 days).
+- SecretID maximum uses: unlimited (0).
 - Default token policy: disabled.
 
 The Backend ACL permits its specific KV read and token
 self-lookup/self-renewal operations.
 
-Expired or exhausted SecretIDs require operator-controlled
+Expired or revoked SecretIDs require operator-controlled
 recovery. Credential rotation is not part of routine startup.
 
 Follow `infra/vault/scripts/APPROLE-ROTATION.md` for the
