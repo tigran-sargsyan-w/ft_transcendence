@@ -20,6 +20,7 @@ export function UserMenu() {
 
   if (auth.status !== "authenticated") return null;
 
+  const avatar = auth.user.avatarUrl ?? undefined;
   const initial = getInitial(auth.user);
 
   async function handleLogout() {
@@ -35,7 +36,7 @@ export function UserMenu() {
     <DropdownMenu>
       <DropdownMenuTrigger>
         <Avatar>
-          <AvatarImage src="https://github.com/shadcn.png" />
+          <AvatarImage src={avatar} />
           <AvatarFallback>{initial}</AvatarFallback>
         </Avatar>
       </DropdownMenuTrigger>
@@ -46,6 +47,7 @@ export function UserMenu() {
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <Link to="/organization">Organization</Link>
+          https://ui.shadcn.com/docs/components/base/badge
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={handleLogout}>Log out</DropdownMenuItem>
