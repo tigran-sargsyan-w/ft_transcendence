@@ -130,6 +130,50 @@ Fresh-VM bootstrap implementation has been tested through
 unit tests and on an existing VM. An independent first-install
 test on a clean VM remains to be performed.
 
+## Team migration: legacy Nginx to WAF
+
+After the PR merges into `main`, teammates with an already initialized VM
+running `nginx:1.28-alpine` must migrate the existing gateway. **Do not use
+`make up` to replace an old Nginx**; normal startup rejects an unknown image
+or permissions configuration by design.
+
+From the project root, after updating `main`:
+
+```sh
+./scripts/bootstrap.sh --plan-waf-upgrade
+./scripts/bootstrap.sh --upgrade-waf
+make health
+```
+
+`--plan-waf-upgrade` is read-only. `--upgrade-waf` installs missing host
+prerequisites with explicit confirmation, then validates the exact old
+Compose Nginx identity, checks TLS and application readiness, and asks for
+the confirmation phrase `UPGRADE-WAF` before creating the dedicated TLS
+group/ACL and recreating only the `nginx` service. It waits for Docker health,
+checks API and OWASP CRS blocking, and compares all other application/Vault
+container identities. **No PostgreSQL, Vault, other services, or named
+volumes are recreated.**
+
+If the WAF is already correctly installed, the command verifies it and
+returns without recreating any containers. Unexpected existing containers
+are refused instead of overwritten.
+
+On failure after gateway recreation begins, the upgrade attempts to restore
+the verified legacy Nginx configuration (only the gateway), checks HTTPS/API,
+and restores the tracked target Compose file. Inspect the outcome before
+running any other startup operation; a rolled-back legacy container will not
+satisfy the new WAF-only `make up` guard until migration is retried. The
+host's newly created TLS group/ACL may remain after a failed upgrade, which
+is safe and idempotent. Rollback is best-effort and must be verified.
+
+This upgrade is exclusively for a trusted existing `nginx:1.28-alpine` gateway.
+Fresh machines use the usual `make initialize` bootstrap. No existing
+Vault/PostgreSQL volume or container should be deleted to perform the upgrade.
+
+On WSL2 with a Windows browser, VS Code may lose its forwarded `8443` port
+after Nginx recreation. If `make health` succeeds but the browser cannot
+connect, inspect the VS Code **Ports** tab and restore forwarding for `8443`.
+
 ## Operations and rollback
 
 Do not use `docker compose down -v`, broad recreation or
