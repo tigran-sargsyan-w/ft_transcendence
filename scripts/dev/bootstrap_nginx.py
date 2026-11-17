@@ -18,17 +18,19 @@ import bootstrap_backend_agent as agent
 import bootstrap_frontend as frontend
 import bootstrap_postgres as pg
 import bootstrap_support_services as support
+import nginx_tls_access as tls_access
 
 NAME = f"{pg.PROJECT}-nginx-1"
 SERVICE = "nginx"
-IMAGE = "nginx:1.28-alpine"
+IMAGE = "owasp/modsecurity-crs:4.30.0-nginx-202611090911"
 DEFAULT_NETWORK = f"{pg.PROJECT}_default"
 DOMAIN = "transcendence.test"
 CERTS = pg.ROOT / "infra/nginx/certs"
-CONFIG = pg.ROOT / "infra/nginx/default.conf"
+CONFIG = pg.ROOT / "infra/nginx/default.conf.template"
+TLS_GROUP_GID = "43043"
 PORTS = {
-    "80/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8080"}],
-    "443/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8443"}],
+    "8080/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8080"}],
+    "8443/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8443"}],
 }
 FORBIDDEN_ENV = (
     "DATABASE_URL=", "DATABASE_URL_FILE=", "VAULT_TOKEN=",
@@ -80,12 +82,13 @@ def verify_identity(item):
     if (set(networks) != {DEFAULT_NETWORK}
             or host.get("Privileged") is not False
             or host.get("PortBindings") != PORTS
+            or host.get("GroupAdd") != [TLS_GROUP_GID]
             or (host.get("RestartPolicy") or {}).get("Name") != "unless-stopped"):
         raise NginxBootstrapError("Unexpected Nginx network, ports or privileges")
 
     mounts = item.get("Mounts") or []
     if (len(mounts) != 2 or not support.backend.required_mount(
-            item, "/etc/nginx/conf.d/default.conf", kind="bind",
+            item, "/etc/nginx/templates/conf.d/default.conf.template", kind="bind",
             source=CONFIG, readonly=True)
             or not support.backend.required_mount(
             item, "/etc/nginx/certs", kind="bind",
@@ -190,6 +193,8 @@ def require_prerequisites():
     if frontend.main(["check"]) != 0:
         raise NginxBootstrapError("Frontend or Vault-backed services not ready")
     check_local_tls()
+    if tls_access.main(["check"]) != 0:
+        raise NginxBootstrapError("Dedicated Nginx TLS ACL not ready")
 
 
 def start_or_keep(env):

@@ -20,7 +20,7 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'HELP'
-Usage: ./scripts/bootstrap.sh [--initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--help]
+Usage: ./scripts/bootstrap.sh [--initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--plan-waf-upgrade|--upgrade-waf|--help]
 
   --initialize    Trusted first install: sequential stages with per-step confirmation.
   --start         Resume only existing verified containers (Vault must be unsealed).
@@ -57,6 +57,8 @@ Usage: ./scripts/bootstrap.sh [--initialize|--start|--recover|--check-all|--heal
   --check-frontend         Verify frontend Compose identity and local HTTP/API proxy.
   --prepare-nginx          Start only trusted Nginx on loopback 8080/8443 (HTTPS).
   --check-nginx            Verify Nginx identity, TLS, redirect and HTTPS routes.
+  --plan-waf-upgrade       Read-only preflight for migrating legacy Nginx to WAF.
+  --upgrade-waf            One-time confirmed upgrade of ONLY legacy Nginx to WAF.
   --help          Show this message.
 
 Phase 6A: --initialize is the confirmed first-time entry point; --start
@@ -69,7 +71,7 @@ HELP
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx) ;;
+  --initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--plan-waf-upgrade|--upgrade-waf) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -154,6 +156,12 @@ host_check() {
     say "TODO: Local CA trust"
     missing=1
   fi
+  if python3 -m scripts.dev.nginx_tls_access check >/dev/null 2>&1; then
+    say "PASS: Dedicated Nginx TLS group and ACL"
+  else
+    say "TODO: Dedicated Nginx TLS group and ACL"
+    missing=1
+  fi
   if vault_tls_status; then :; else missing=1; fi
   (( missing == 0 ))
 }
@@ -199,7 +207,13 @@ inventory_docker() {
 }
 
 say "=== Fresh Ubuntu bootstrap: host + Docker resources ==="
-./scripts/install-deps.sh --check || fail "Dependencies not ready; run ./scripts/install-deps.sh first"
+if [[ "$MODE" == --upgrade-waf ]]; then
+  # Operator-approved workflow: install any missing prerequisites (e.g. acl)
+  # using the existing interactive installer before attempting migration.
+  ./scripts/install-deps.sh || fail "Prerequisites not ready for WAF upgrade"
+else
+  ./scripts/install-deps.sh --check || fail "Dependencies not ready; run ./scripts/install-deps.sh first"
+fi
 
 case "$MODE" in
   --initialize)
@@ -283,6 +297,12 @@ case "$MODE" in
     ;;
   --check-migrations)
     python3 scripts/dev/bootstrap_migrations.py check
+    ;;
+  --plan-waf-upgrade)
+    python3 scripts/dev/upgrade_waf.py plan
+    ;;
+  --upgrade-waf)
+    python3 scripts/dev/upgrade_waf.py apply
     ;;
   --check-nginx)
     python3 scripts/dev/bootstrap_nginx.py check
@@ -444,6 +464,7 @@ case "$MODE" in
     confirm "Prepare local domain and TLS on this VM?" || fail "Cancelled; no preparation started"
     python3 -m scripts.dev.domains setup
     python3 -m scripts.dev.certificates setup
+    python3 -m scripts.dev.nginx_tls_access apply
     python3 -m scripts.dev.ca_trust setup
     if vault_tls_status; then
       say "KEEP: Existing valid Vault TLS material"
