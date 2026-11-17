@@ -12,9 +12,7 @@ export const ServicesHealth = () => {
   const counts = countByStatus(services);
 
   const selectStatus = (status: NodeStatus) => {
-    selectedStatus === status
-      ? setSelectedStatus(null)
-      : setSelectedStatus(status);
+    setSelectedStatus(selectedStatus === status ? null : status);
   };
 
   return (

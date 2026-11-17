@@ -19,11 +19,11 @@ export default function Dashboard() {
     auth.status === "authenticated" ? auth.user.displayName : "";
 
   return (
-    <div className="flex flex-col gap-4 w-screen p-4">
+    <div className="flex flex-col gap-4 w-full p-4">
       <WelcomeDashboardBanner displayName={displayName} />
       <DashboardIncidentsBanners incidents={mockIncidents} />
       <div className="flex gap-4">
-        <OpenIncidents /> <ServicesDown /> <ServicesImpacted />{" "}
+        <OpenIncidents /> <ServicesDown /> <ServicesImpacted />
         <ResolvedIncidents />
       </div>
       <div className="flex gap-4">

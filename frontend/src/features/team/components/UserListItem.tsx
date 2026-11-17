@@ -25,9 +25,9 @@ export const UserListItem = ({ member }: UserListItemProps) => {
   return (
     <Badge variant={"secondary"} className="h-auto py-1">
       <Avatar>
-        <AvatarImage src={avatar} alt="@shadcn" />
+        <AvatarImage src={avatar} alt={displayName} />
         <AvatarFallback>{initial}</AvatarFallback>
-        <AvatarBadge className={onlineClassName} />{" "}
+        <AvatarBadge className={onlineClassName} />
       </Avatar>
       {displayName}
     </Badge>

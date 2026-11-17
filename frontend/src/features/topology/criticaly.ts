@@ -40,7 +40,7 @@ export const criticalityStyles: Record<
   },
   low: {
     text: "text-muted-foreground",
-    bar: "[&>[dat-slot=progress-indicator]]:bg-muted-foreground",
+    bar: "[&>[data-slot=progress-indicator]]:bg-muted-foreground",
     badge: "secondary",
   },
 };

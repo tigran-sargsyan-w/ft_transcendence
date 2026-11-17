@@ -16,7 +16,7 @@ import { useAuth } from "@/features/auth/AuthContext";
 export function UserMenu() {
   let navigate = useNavigate();
 
-  const { auth } = useAuth();
+  const { auth, setUser } = useAuth();
 
   if (auth.status !== "authenticated") return null;
 
@@ -26,6 +26,7 @@ export function UserMenu() {
   async function handleLogout() {
     try {
       await logoutUser();
+      setUser(null);
       navigate("/");
     } catch (error) {
       console.error("Logout failed", error);
@@ -47,7 +48,6 @@ export function UserMenu() {
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <Link to="/organization">Organization</Link>
-          https://ui.shadcn.com/docs/components/base/badge
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={handleLogout}>Log out</DropdownMenuItem>

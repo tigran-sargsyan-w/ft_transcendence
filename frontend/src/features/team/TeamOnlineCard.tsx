@@ -14,7 +14,7 @@ export const TeamOnlineCard = ({ team }: TeamOnlineCardProps) => {
   return (
     <MainCard title="Team">
       <div className="flex flex-col gap-2">
-        <span>{`${totalOnlineMembers}/${totalMembers} membre(s) connecté(s)`}</span>{" "}
+        <span>{`${totalOnlineMembers}/${totalMembers} membre(s) connecté(s)`}</span>
         <div className="flex gap-2">
           {onlineMembers.map((m) => (
             <UserListItem member={m} key={m.user.id} />
