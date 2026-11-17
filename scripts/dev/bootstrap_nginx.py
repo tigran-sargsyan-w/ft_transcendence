@@ -26,6 +26,7 @@ DEFAULT_NETWORK = f"{pg.PROJECT}_default"
 DOMAIN = "transcendence.test"
 CERTS = pg.ROOT / "infra/nginx/certs"
 CONFIG = pg.ROOT / "infra/nginx/default.conf.template"
+TLS_GROUP_GID = "43043"
 PORTS = {
     "8080/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8080"}],
     "8443/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8443"}],
@@ -80,6 +81,7 @@ def verify_identity(item):
     if (set(networks) != {DEFAULT_NETWORK}
             or host.get("Privileged") is not False
             or host.get("PortBindings") != PORTS
+            or host.get("GroupAdd") != [TLS_GROUP_GID]
             or (host.get("RestartPolicy") or {}).get("Name") != "unless-stopped"):
         raise NginxBootstrapError("Unexpected Nginx network, ports or privileges")
 

@@ -153,6 +153,8 @@ services:
 
   nginx:
     image: owasp/modsecurity-crs:4.30.0-nginx-202611090911
+    group_add:
+      - "43043"
     ports:
       - "127.0.0.1:8080:8080"
       - "127.0.0.1:8443:8443"

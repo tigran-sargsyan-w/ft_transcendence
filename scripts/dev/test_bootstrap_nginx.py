@@ -29,6 +29,7 @@ def fixture(status="running"):
         "HostConfig": {
             "Privileged": False,
             "PortBindings": nginx.PORTS,
+            "GroupAdd": [nginx.TLS_GROUP_GID],
             "RestartPolicy": {"Name": "unless-stopped"},
         },
         "Mounts": [
@@ -115,6 +116,26 @@ class NginxTests(unittest.TestCase):
         item = fixture(); item["HostConfig"]["PortBindings"] = {
             **nginx.PORTS, "8443/tcp": [{"HostIp": "127.0.0.1", "HostPort": "443"}]}
         with self.assertRaises(nginx.NginxBootstrapError): nginx.verify_identity(item)
+
+    def test_rejects_missing_tls_group(self):
+        item = fixture()
+        item["HostConfig"]["GroupAdd"] = None
+        with self.assertRaises(nginx.NginxBootstrapError):
+            nginx.verify_identity(item)
+
+    def test_rejects_unexpected_tls_group(self):
+        item = fixture()
+        item["HostConfig"]["GroupAdd"] = ["43044"]
+        with self.assertRaises(nginx.NginxBootstrapError):
+            nginx.verify_identity(item)
+
+    def test_rejects_extra_tls_group(self):
+        item = fixture()
+        item["HostConfig"]["GroupAdd"] = [
+            nginx.TLS_GROUP_GID, "9999"
+        ]
+        with self.assertRaises(nginx.NginxBootstrapError):
+            nginx.verify_identity(item)
 
     def test_rejects_wrong_restart_policy(self):
         item = fixture(); item["HostConfig"]["RestartPolicy"] = {"Name": "always"}
