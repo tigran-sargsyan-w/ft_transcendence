@@ -342,8 +342,8 @@ def wait_https_route(suffix, attempts=20, delay=2):
             output = execute(
                 [
                     "curl",
+                    "-q",
                     "--silent",
-                    "--insecure",
                     "--noproxy", "*",
                     "--connect-timeout", "3",
                     "--max-time", "8",
