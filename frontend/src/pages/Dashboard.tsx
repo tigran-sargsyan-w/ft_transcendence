@@ -11,11 +11,16 @@ import { mockIncidents } from "@/features/incidents/mockIncidents";
 import { WelcomeDashboardBanner } from "@/components/WelcomeDashboardBanner";
 import { mockCriticalNodes } from "@/features/topology/mockCriticalNodes";
 import { mockTeam } from "@/features/team/mockTeam";
+import { useAuth } from "@/features/auth/AuthContext";
 
 export default function Dashboard() {
+  const { auth } = useAuth();
+  const displayName =
+    auth.status === "authenticated" ? auth.user.displayName : "";
+
   return (
     <div className="flex flex-col gap-4 w-screen p-4">
-      <WelcomeDashboardBanner />
+      <WelcomeDashboardBanner displayName={displayName} />
       <DashboardIncidentsBanners incidents={mockIncidents} />
       <div className="flex gap-4">
         <OpenIncidents /> <ServicesDown /> <ServicesImpacted />{" "}
