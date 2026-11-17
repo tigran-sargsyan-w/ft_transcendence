@@ -5,17 +5,31 @@ import {
   AvatarFallback,
   AvatarImage,
 } from "@/components/ui/avatar";
-import type { UserRef } from "@/types/user";
+import type { TeamMember } from "../type";
+import { getInitial } from "@/lib/user";
 
-export const UserListItem = (user: UserRef) => {
+interface UserListItemProps {
+  member: TeamMember;
+}
+
+export const UserListItem = ({ member }: UserListItemProps) => {
+  const avatar = member.user.avatarUrl ?? undefined;
+  const initial = getInitial(member.user);
+  const isOnline = member.online;
+  const displayName = member.user.displayName;
+
+  const onlineClassName = isOnline
+    ? "bg-green-600 dark:bg-green-800"
+    : "bg-red-600 dark:bg-red-800";
+
   return (
-    <Badge>
+    <Badge variant={"secondary"} className="h-auto py-1">
       <Avatar>
-        <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />
-        <AvatarFallback>CN</AvatarFallback>
-        {}
-        <AvatarBadge className="bg-green-600 dark:bg-green-800" />{" "}
+        <AvatarImage src={avatar} alt="@shadcn" />
+        <AvatarFallback>{initial}</AvatarFallback>
+        <AvatarBadge className={onlineClassName} />{" "}
       </Avatar>
+      {displayName}
     </Badge>
   );
 };

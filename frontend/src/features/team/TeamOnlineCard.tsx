@@ -1,4 +1,5 @@
 import { MainCard } from "../../components/cards/MainCard";
+import { UserListItem } from "./components/UserListItem";
 import type { TeamMember } from "./type";
 
 interface TeamOnlineCardProps {
@@ -12,11 +13,13 @@ export const TeamOnlineCard = ({ team }: TeamOnlineCardProps) => {
 
   return (
     <MainCard title="Team">
-      <span>{`${totalOnlineMembers}/${totalMembers} membre(s) connecté(s)`}</span>{" "}
       <div className="flex flex-col gap-2">
-        {onlineMembers.map((m) => (
-          <div></div>
-        ))}
+        <span>{`${totalOnlineMembers}/${totalMembers} membre(s) connecté(s)`}</span>{" "}
+        <div className="flex gap-2">
+          {onlineMembers.map((m) => (
+            <UserListItem member={m} key={m.user.id} />
+          ))}
+        </div>
       </div>
     </MainCard>
   );
