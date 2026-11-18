@@ -170,6 +170,8 @@ The service must exist before `start`; this is not a `docker compose up` replace
 
 The optional `worker` does **not exist** when the lab is first started. Adding it creates a real fourth container and a new `worker -> api` dependency. The watcher prints the new service node and `DEPENDENCY added` without any restart. Removing it deletes the node and dependency edge.
 
+**Compose metadata requirement:** `add worker` must not use `up --no-deps`. On some Docker Compose versions that option empties the `com.docker.compose.depends_on` label, so the worker still fails when API fails but the Collector/Graph Engine cannot see the dependency. The command uses `--no-recreate` to preserve existing lab services and fails if the worker's Docker label does not include API. If upgrading from the affected v1.2 script **while a worker is already running**, first run `./demo-lab/demo.sh remove worker`, then use `add worker` with the updated script.
+
 ```bash
 ./demo-lab/demo.sh add worker
 ./demo-lab/demo.sh status
@@ -183,7 +185,7 @@ You can also inject an API failure **while the worker is present** to show how t
 
 ### Scenario E — Container replacement with stable service identity
 
-Compose replaces the physical container ID while Nest's logical service node remains `svc:ft-demo-lab:api`. An observed brief outage is possible but **not guaranteed**: topology deltas are emitted only when the graph actually changes.
+The script stops/removes **only the named disposable lab container**, then creates it again with Compose dependency metadata intact. It uses `up --no-recreate` so already-running lab dependencies are not recreated. The physical container ID changes while Nest's logical service ID remains `svc:ft-demo-lab:api`; depending on event timing the logical node may briefly disappear and reappear. No trusted application services are touched.
 
 ```bash
 BEFORE="$(docker compose -p ft-demo-lab -f demo-lab/compose.yml ps -q api)"

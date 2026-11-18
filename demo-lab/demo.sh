@@ -114,14 +114,25 @@ case "${1:-help}" in
     service="${2:-api}"
     require_service "$service"
     require_existing "$service"
-    # --no-deps prevents Compose from recreating the trusted app or dependencies.
-    compose_dynamic up -d --no-deps --force-recreate --wait --wait-timeout 120 "$service"
+    # Replace only this disposable container. Using `up --no-deps` loses the
+    # com.docker.compose.depends_on label required for topology mapping.
+    # --no-recreate preserves any already-running lab dependencies.
+    compose_dynamic rm --stop --force "$service"
+    compose_dynamic up -d --no-recreate --wait --wait-timeout 120 "$service"
     ;;
   add)
     [[ $# -eq 2 && "$2" == worker ]] || { usage >&2; exit 2; }
     require_running api
-    # A distinct service is added with a real Compose depends_on edge to API.
-    compose_dynamic up -d --no-deps --wait --wait-timeout 120 worker
+    # Keep Compose dependency metadata: --no-deps strips the worker -> api
+    # label on some Compose versions, making blast-radius analysis incorrect.
+    # --no-recreate prevents touching existing lab dependencies.
+    compose_dynamic up -d --no-recreate --wait --wait-timeout 120 worker
+    worker_id="$(compose_dynamic ps -q worker)"
+    worker_deps="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.depends_on"}}' "$worker_id")"
+    if [[ ",${worker_deps}" != *",api:"* ]]; then
+      echo "Worker is running without the Compose api dependency label; remove worker, then retry add worker." >&2
+      exit 1
+    fi
     ;;
   remove)
     [[ $# -eq 2 && "$2" == worker ]] || { usage >&2; exit 2; }

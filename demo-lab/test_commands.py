@@ -20,6 +20,13 @@ printf '%s\\n' \"$*\" >> \"$DEMO_TEST_LOG\"
 case \"$*\" in
   *\"ps --status running --services\"*) printf 'db\\napi\\nweb\\nworker\\n' ;;
   *\"ps -q --all\"*) printf 'lab-only-test-container-id\\n' ;;
+  *\"com.docker.compose.depends_on\"*)
+    if [ "${DEMO_TEST_MISSING_DEPENDENCY:-0}" = 1 ]; then
+      printf '\n'
+    else
+      printf 'api:service_healthy:false\n'
+    fi
+    ;;
   *\"inspect --format\"*) printf 'healthy\\n' ;;
 esac
 """)
@@ -71,18 +78,32 @@ esac
             self.assertTrue(any(command.endswith(f"{action} api") for command in self.commands()))
             self.assert_lab_scoped()
 
-    def test_recreate_is_single_service_without_dependencies(self):
+    def test_recreate_is_single_service_without_recreating_dependencies(self):
         result = self.run_demo("recreate", "api")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(any("--no-deps --force-recreate" in command and command.endswith("api")
-                            for command in self.commands()))
+        cmds = self.commands()
+        self.assertTrue(any(command.endswith("rm --stop --force api") for command in cmds))
+        self.assertTrue(any("up -d --no-recreate --wait --wait-timeout 120 api" in command
+                            for command in cmds))
+        self.assertFalse(any("--no-deps" in command or "--force-recreate" in command
+                             for command in cmds))
         self.assert_lab_scoped()
 
-    def test_add_worker_is_opt_in_and_no_deps(self):
+    def test_add_worker_preserves_dependency_label(self):
         result = self.run_demo("add", "worker")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(any("--profile discovery up -d --no-deps" in command and command.endswith("worker")
-                            for command in self.commands()))
+        cmds = self.commands()
+        self.assertTrue(any("--profile discovery up -d --no-recreate" in command
+                            and command.endswith("worker") for command in cmds))
+        self.assertFalse(any("--no-deps" in command for command in cmds))
+        self.assertTrue(any("com.docker.compose.depends_on" in command for command in cmds))
+        self.assert_lab_scoped()
+
+    def test_add_worker_rejects_missing_dependency_label(self):
+        self.env["DEMO_TEST_MISSING_DEPENDENCY"] = "1"
+        result = self.run_demo("add", "worker")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("without the Compose api dependency label", result.stderr)
         self.assert_lab_scoped()
 
     def test_remove_worker_is_targeted(self):
