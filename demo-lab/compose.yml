@@ -1,0 +1,57 @@
+# Deliberately standalone Compose project, unrelated to the Vault-backed app.
+# No published ports, Docker socket, bind mounts, persistent volumes or secrets.
+name: ft-demo-lab
+
+x-demo-common: &demo-common
+  build:
+    context: .
+  image: ft-demo-lab:local
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /run/demo:rw,nosuid,nodev,noexec,mode=1777,size=64k
+  networks:
+    - demo_only
+  restart: "no"
+  environment:
+    PYTHONDONTWRITEBYTECODE: "1"
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+    interval: 3s
+    timeout: 2s
+    retries: 2
+    start_period: 3s
+
+services:
+  db:
+    <<: *demo-common
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      SERVICE_NAME: demo-db
+
+  api:
+    <<: *demo-common
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      SERVICE_NAME: demo-api
+      UPSTREAM_URL: http://db:8080/health
+
+  web:
+    <<: *demo-common
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      SERVICE_NAME: demo-web
+      UPSTREAM_URL: http://api:8080/health
+
+networks:
+  demo_only:
+    internal: true

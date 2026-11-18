@@ -1,0 +1,6 @@
+.git
+__pycache__/
+*.pyc
+test_*.py
+README.md
+demo.sh
