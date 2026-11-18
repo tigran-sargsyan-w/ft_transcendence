@@ -6,7 +6,7 @@
  */
 import { io } from 'socket.io-client';
 import { createInterface } from 'node:readline/promises';
-import { LAB_PREFIX as PREFIX, formatAnalysisSummary } from './demo-watch-format.mjs';
+import { LAB_PREFIX as PREFIX, formatAnalysisSummary, formatLabDependencyChange } from './demo-watch-format.mjs';
 const DEFAULT_URL = 'https://transcendence.test:8443';
 
 function options(argv) {
@@ -168,6 +168,7 @@ async function main() {
   report('Authenticated; connecting to Socket.IO (session cookie will not be displayed).');
 
   const nodes = new Map();
+  const edges = new Map();
   let position = null;
   let environmentId = null;
   let resyncing = false;
@@ -231,7 +232,9 @@ async function main() {
     position = { epoch: payload.epoch, revision: payload.revision };
     resyncing = false;
     nodes.clear();
+    edges.clear();
     for (const node of payload.nodes) nodes.set(node.id, node);
+    for (const edge of payload.edges ?? []) edges.set(edge.id, edge);
     report(`SNAPSHOT environment=${environmentId} revision=${position.revision}`);
     let count = 0;
     for (const node of nodes.values()) {
@@ -272,6 +275,19 @@ async function main() {
         if (old && interesting(operation.id)) {
           report(`DELTA r${position.revision}: ${operation.id} removed`);
         }
+      } else if (operation.op === 'edge.upsert') {
+        const edge = operation.edge;
+        const old = edges.get(edge.id);
+        edges.set(edge.id, edge);
+        if (!old) {
+          const message = formatLabDependencyChange(edge, 'added');
+          if (message) report(message);
+        }
+      } else if (operation.op === 'edge.remove') {
+        const old = edges.get(operation.id);
+        edges.delete(operation.id);
+        const message = formatLabDependencyChange(old, 'removed');
+        if (message) report(message);
       }
     }
   });

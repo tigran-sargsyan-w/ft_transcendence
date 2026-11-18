@@ -49,3 +49,14 @@ export function formatAnalysisSummary({ seedId, freshness, topologyRevision, res
   }
   return lines;
 }
+
+/** Return a concise human-facing message for lab dependency edge lifecycle. */
+export function formatLabDependencyChange(edge, action) {
+  if (!edge || edge.kind !== 'depends_on' ||
+      typeof edge.source !== 'string' || typeof edge.target !== 'string' ||
+      !edge.source.startsWith(LAB_PREFIX) || !edge.target.startsWith(LAB_PREFIX)) {
+    return null;
+  }
+  if (action !== 'added' && action !== 'removed') return null;
+  return `DEPENDENCY ${action}: ${shortLabId(edge.source)} -> ${shortLabId(edge.target)}`;
+}

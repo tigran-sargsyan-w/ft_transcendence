@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatAnalysisSummary, shortLabId } from './demo-watch-format.mjs';
+import { formatAnalysisSummary, formatLabDependencyChange, shortLabId } from './demo-watch-format.mjs';
 
 const id = (name) => `svc:ft-demo-lab:${name}`;
 
@@ -69,4 +69,18 @@ test('handles omitted analysis sections and missing depths', () => {
 test('shortens only lab service ids', () => {
   assert.equal(shortLabId(id('web')), 'web');
   assert.equal(shortLabId('svc:other:web'), 'svc:other:web');
+});
+
+
+test('reports lab-only dynamic dependency changes with short names', () => {
+  const edge = { kind: 'depends_on', source: id('worker'), target: id('api') };
+  assert.equal(formatLabDependencyChange(edge, 'added'), 'DEPENDENCY added: worker -> api');
+  assert.equal(formatLabDependencyChange(edge, 'removed'), 'DEPENDENCY removed: worker -> api');
+  assert.equal(formatLabDependencyChange(edge, 'other'), null);
+});
+
+test('ignores other projects and non-dependency edges', () => {
+  assert.equal(formatLabDependencyChange({ kind: 'connects_to', source: id('worker'), target: 'net:x' }, 'added'), null);
+  assert.equal(formatLabDependencyChange({ kind: 'depends_on', source: 'svc:app:worker', target: id('api') }, 'added'), null);
+  assert.equal(formatLabDependencyChange(null, 'added'), null);
 });

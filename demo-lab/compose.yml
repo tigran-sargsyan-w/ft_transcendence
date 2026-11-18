@@ -52,6 +52,19 @@ services:
       SERVICE_NAME: demo-web
       UPSTREAM_URL: http://api:8080/health
 
+  # Optional discovery workload: absent from the baseline, added on demand.
+  worker:
+    <<: *demo-common
+    profiles:
+      - discovery
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      SERVICE_NAME: demo-worker
+      UPSTREAM_URL: http://api:8080/health
+
 networks:
   demo_only:
     internal: true
