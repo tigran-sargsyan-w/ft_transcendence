@@ -1,4 +1,4 @@
-# Demo Lab v1.2 — reproducible multi-scenario infrastructure demonstration
+# Demo Lab v1.2.1 — reproducible multi-scenario infrastructure demonstration
 
 **Issue:** [#141](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/141) · **Purpose:** a functional, terminal-first demonstration of the existing Collector → NestJS → Socket.IO → Graph Engine pipeline, without waiting for the frontend.
 
@@ -124,7 +124,7 @@ A watcher session permits at most **12 analysis requests** to prevent accidental
 
 ## Five distinct demonstration scenarios
 
-These illustrate **different product capabilities**, not five kinds of the same error. Scenarios A/B, normal recovery, and baseline `down`/`up` have been runtime-tested on 18 November. Scenarios C/D/E introduced in v1.2 still need real Docker Engine acceptance on the operator's VM.
+These illustrate **different product capabilities**, not five kinds of the same error. All five scenarios A–E were run and verified on the operator's real Docker Engine on 18 November 2026. See [Demo Lab E2E acceptance evidence](../docs/demo-lab-e2e.md) for exact revisions, expected observations, and limitations.
 
 ### Scenario A — Service degradation (API health failure)
 
@@ -223,7 +223,7 @@ During `down` the watcher may briefly report `down` before `node.remove`; this i
 
 ## Manual acceptance evidence — 18 November 2026 (v1 / v1.1)
 
-The following scenarios were **run on the project's actual Ubuntu development VM** and output was supplied by the project operator. The v1.1 compact CLI was also run successfully: its 17:05 test confirmed a three-hop DB cascade and recovery with short analysis summaries. These results establish past observed runtime behavior; the new C/D/E commands in v1.2 have not yet been exercised against the user's Docker Engine.
+The following scenarios were **run on the project's actual Ubuntu development VM** and output was supplied by the project operator. The v1.1 compact CLI was also run successfully: its 17:05 test confirmed a three-hop DB cascade and recovery with short analysis summaries. Later runs validated all v1.2.1 scenarios and multi-user CLI topology broadcast. See [consolidated E2E acceptance report](../docs/demo-lab-e2e.md).
 
 | Scenario | Observed result | Result |
 |----------|-----------------|--------|
@@ -239,9 +239,9 @@ The following scenarios were **run on the project's actual Ubuntu development VM
 
 See the live terminal transcript or PR test notes for details. A single passing manual run establishes the observed behavior, not ongoing automated E2E coverage.
 
-### Acceptance checklist for the new scenarios (v1.2)
+### E2E acceptance of new scenarios and multi-user observation (v1.2.1)
 
-On the operator's VM, after `make health` and `up`: verify `stop api` produces `api: down`, while `web` eventually degrades; `start api` recovers them. Verify `add worker` creates a new service node **and** a `worker -> api` `depends_on` edge; `remove worker` removes both. Verify `recreate api` changes the physical container ID but preserves `svc:ft-demo-lab:api`. Then `reset`, `down`, `make health` and confirm the core is still healthy. Do not mark these tests PASS until their actual logs have been captured.
+**PASS (18 November 2026, operator VM):** `stop/start api` distinguished `down` from `degraded`; `add/remove worker` created/removed both its node and `worker -> api` dependency; API blast radius expanded dynamically; `recreate api` changed the physical Docker ID but retained `svc:ft-demo-lab:api` and its `api -> db` label. Two independently authenticated CLI clients also received identical topology revisions, and a manually reconnected client received the current snapshot. Detailed evidence, pass/fail results, and untested boundaries are recorded in [docs/demo-lab-e2e.md](../docs/demo-lab-e2e.md).
 
 ## Offline checks
 
