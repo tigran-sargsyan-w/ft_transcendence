@@ -65,3 +65,83 @@ cert-cleanup:
 # Remove local CA trust (preserve CA and certificate files)
 trust-uninstall:
 	$(PYTHON) -m scripts.dev.ca_trust uninstall
+
+# Demo Lab only. The unprefixed `up`, `down`, and `health` targets above
+# retain their existing meanings and MUST NOT be used to operate the lab.
+DEMO_SCRIPT := ./demo-lab/demo.sh
+DEMO_WATCH := backend/scripts/demo-watch.mjs
+SERVICE ?= api
+EMAIL ?=
+
+.PHONY: demo-help demo-up demo-status demo-fail demo-recover \
+        demo-stop demo-start demo-recreate demo-add-worker demo-remove-worker \
+        demo-reset demo-logs demo-down demo-watch demo-watch-plain demo-test
+
+# Export values instead of interpolating them into shell source. demo.sh also
+# explicitly allowlists service names before invoking any Docker operation.
+demo-fail demo-recover demo-stop demo-start demo-recreate: export SERVICE := $(SERVICE)
+demo-watch demo-watch-plain: export EMAIL := $(EMAIL)
+
+demo-help:
+	$(DEMO_SCRIPT) help
+
+demo-up:
+	$(DEMO_SCRIPT) up
+
+demo-status:
+	$(DEMO_SCRIPT) status
+
+demo-fail:
+	$(DEMO_SCRIPT) fail "$$SERVICE"
+
+demo-recover:
+	$(DEMO_SCRIPT) recover "$$SERVICE"
+
+demo-stop:
+	$(DEMO_SCRIPT) stop "$$SERVICE"
+
+demo-start:
+	$(DEMO_SCRIPT) start "$$SERVICE"
+
+demo-recreate:
+	$(DEMO_SCRIPT) recreate "$$SERVICE"
+
+demo-add-worker:
+	$(DEMO_SCRIPT) add worker
+
+demo-remove-worker:
+	$(DEMO_SCRIPT) remove worker
+
+demo-reset:
+	$(DEMO_SCRIPT) reset
+
+demo-logs:
+	$(DEMO_SCRIPT) logs
+
+demo-down:
+	$(DEMO_SCRIPT) down
+
+# By default show real Graph Engine summaries; EMAIL skips the email prompt.
+# Passwords are still entered interactively and are never passed as arguments.
+demo-watch:
+	@if [ -n "$$EMAIL" ]; then \
+		node $(DEMO_WATCH) --analyze --email "$$EMAIL"; \
+	else \
+		node $(DEMO_WATCH) --analyze; \
+	fi
+
+# Plain Socket.IO observation, useful when testing two independent sessions.
+demo-watch-plain:
+	@if [ -n "$$EMAIL" ]; then \
+		node $(DEMO_WATCH) --email "$$EMAIL"; \
+	else \
+		node $(DEMO_WATCH); \
+	fi
+
+# Offline tests only: no Docker operations or demo startup.
+demo-test:
+	$(PYTHON) -m unittest discover -s demo-lab -p 'test_*.py'
+	node --test backend/scripts/demo-watch-format.test.mjs
+	bash -n $(DEMO_SCRIPT)
+	node --check $(DEMO_WATCH)
+	node --check backend/scripts/demo-watch-format.mjs

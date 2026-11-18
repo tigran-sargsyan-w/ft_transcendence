@@ -51,6 +51,29 @@ The lab **never sends events to the product itself**; its containers do not need
 
 Commands below run from the repository root. After extracting a ZIP, if necessary run `chmod +x demo-lab/demo.sh` once.
 
+### Makefile shortcuts (optional)
+
+The root `Makefile` also provides **lab-only** aliases. They call the same `demo-lab/demo.sh` commands; there is no second Docker lifecycle implementation. The **unprefixed** `make up`, `make down`, `make clean`, and `make health` retain their original application/bootstrap meanings.
+
+| Direct command | Make alias |
+|---|---|
+| `./demo-lab/demo.sh up` | `make demo-up` |
+| `./demo-lab/demo.sh status` | `make demo-status` |
+| `./demo-lab/demo.sh fail db` | `make demo-fail SERVICE=db` |
+| `./demo-lab/demo.sh recover db` | `make demo-recover SERVICE=db` |
+| `./demo-lab/demo.sh stop api` | `make demo-stop SERVICE=api` |
+| `./demo-lab/demo.sh start api` | `make demo-start SERVICE=api` |
+| `./demo-lab/demo.sh recreate api` | `make demo-recreate SERVICE=api` |
+| `./demo-lab/demo.sh add worker` | `make demo-add-worker` |
+| `./demo-lab/demo.sh remove worker` | `make demo-remove-worker` |
+| `./demo-lab/demo.sh reset` | `make demo-reset` |
+| `./demo-lab/demo.sh logs` | `make demo-logs` |
+| `./demo-lab/demo.sh down` | `make demo-down` |
+| `./demo-lab/demo.sh help` | `make demo-help` |
+
+`SERVICE` defaults to `api` for fail/recover/stop/start/recreate; only `db`, `api`, `web`, and `worker` are accepted by `demo.sh`. `make demo-watch` starts the existing authenticated observer with Graph Engine analysis; `make demo-watch-plain` omits automatic analysis (useful for multi-user broadcast testing). Both accept optional `EMAIL`, e.g. `make demo-watch-plain EMAIL=demo-tester@example.com`; the password is always requested interactively. `make demo-test` runs offline Python/Node/Bash checks and does not launch Docker workloads.
+
+
 ## Creating a test account without the frontend
 
 If `/register` has not yet been implemented in React, the existing backend supports `POST /api/v1/auth/register`. This one-time terminal command uses the normal application API and prompts for the password without echoing it or storing it in shell history:
