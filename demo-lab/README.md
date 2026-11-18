@@ -1,96 +1,168 @@
-# Demo Lab v1 — isolated fault simulation for ft_transcendence
+# Demo Lab v1.1 — reproducible infrastructure incident demonstration
 
-**Scope:** functional demo, not a separately claimed 42 module. All containers are disposable. **Never inject failures into Vault, application PostgreSQL, backend, Collector, Docker proxy, or other core services.**
+**Issue:** [#141](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/141) · **Purpose:** a functional, terminal-first demonstration of the existing Collector → NestJS → Socket.IO → Graph Engine pipeline, without waiting for the frontend.
 
-## Design
+Demo Lab is a disposable workload, **not** a new 42 module or a separate monitoring environment. Never inject faults into the actual application, Vault, PostgreSQL, Nginx, Collector or Docker proxy.
 
-A separate, *internal-network-only* Compose project (`ft-demo-lab`) runs three lightweight Python HTTP services:
+## Architecture and scope
+
+A dedicated Compose project (`ft-demo-lab`) runs three minimal Python HTTP mock services:
 
 ```text
-web  ──depends_on──>  api  ──depends_on──>  db (mock, no real database)
-  \__/health calls ___/  \__ /health calls _/
+web  ──depends_on──>  api  ──depends_on──>  db
+            /health calls   /health calls
 ```
 
-Each container checks its own `/run/demo/fail` flag, then the declared upstream `/health`. The Docker healthcheck invokes `/health` every 3 seconds. Setting the flag makes the service unhealthy; an upstream failure propagates through `api` and `web`. The Nest topology maps Docker `unhealthy` to **`degraded`**, not `down`.
+Each service exposes `/health` inside its private Docker network. A local `/run/demo/fail` flag makes that service answer HTTP 503. Its dependents also become unhealthy if their upstream `/health` fails. Docker healthchecks run every three seconds (subject to retries), and the existing Collector notices Docker health changes. Nest exposes the service states and dependency edges through its authenticated Socket.IO topology stream. A `blast_radius` query estimates possible downstream impact; it is **not** itself a measurement of causality or traffic.
 
-No host ports, privileged modes, persistent volumes, external networks or Docker socket mounts. The existing Collector's *read-only* Docker API observes these new containers because it watches the same Docker Engine. Nest currently assigns the **same** `env_local_compose` environment to all containers on that Engine; the demo is a separate Compose project, **not** a separate Nest environment.
+Safety properties: separate Compose project and internal-only network; no published host ports, Docker socket, host bind mounts, persistent volumes, real database, application secrets, privileged containers or changes to the root `compose.yml` / Vault startup. `down` targets **only** `ft-demo-lab`, with no `-v`.
+
+**Isolation limitation:** The Collector inventories the *whole Docker Engine*, so Demo Lab and the real application belong to one Nest environment, `env_local_compose`. The CLI filters what it prints; it does not partition backend topology or Graph Engine computation.
 
 ## Prerequisites
 
-- Existing Vault-backed application stack already operational on its trusted Ubuntu development VM; do **not** modify or redeploy the core stack just for Demo Lab.
-- Docker Engine and modern `docker compose` with `--wait` support.
-- For the terminal listener: Node 22, installed backend dev dependencies (`cd backend && npm ci` if they are not already present), an existing application account, and locally trusted `https://transcendence.test:8443` certificate. Do not disable TLS verification.
-- Run from the repository root, after copying this `demo-lab/` directory and `backend/scripts/demo-watch.mjs` into their corresponding paths. This package is a proposed addition; it is not installed in the repository automatically.
+- Existing trusted Vault-backed development installation is healthy: `make health`.
+- Docker and Docker Compose with `up --wait`; Node.js 22 and backend dependencies for the watcher (`socket.io-client` is already declared by the backend).
+- Valid HTTPS trust for `https://transcendence.test:8443` on the host; never bypass certificate validation.
+- A **test** account in the application's development database; see next section. Do not use production credentials.
+
+Commands below run from the repository root. After extracting a ZIP, if necessary run `chmod +x demo-lab/demo.sh` once.
+
+## Creating a test account without the frontend
+
+If `/register` has not yet been implemented in React, the existing backend supports `POST /api/v1/auth/register`. This one-time terminal command uses the normal application API and prompts for the password without echoing it or storing it in shell history:
+
+```bash
+python3 - <<'PY'
+import getpass
+import json
+import urllib.request
+
+email = input('Unique demo email: ').strip()
+password = getpass.getpass('Demo password (min. 8 characters): ')
+request = urllib.request.Request(
+    'https://transcendence.test:8443/api/v1/auth/register',
+    data=json.dumps({'email': email, 'password': password, 'displayName': 'Demo Tester'}).encode(),
+    headers={'Content-Type': 'application/json'},
+    method='POST',
+)
+with urllib.request.urlopen(request, timeout=15) as response:
+    print('Registration HTTP:', response.status)
+PY
+```
+
+Expected status is `201`. A `409` means that email is already registered: use the existing account or choose a different email. The account is stored in the development PostgreSQL database, not in the disposable Demo Lab.
 
 ## Quick start
 
-Terminal A — start the independent lab:
+**Terminal A** — start lab containers and inspect real Docker health:
 
 ```bash
+make health
 ./demo-lab/demo.sh up
 ./demo-lab/demo.sh status
 ```
 
-Terminal B — watch Nest's authenticated WebSocket stream:
+Expected: `db`, `api`, and `web` all eventually report `healthy`.
+
+**Terminal B** — observe the actual authenticated backend topology and analyses:
 
 ```bash
 node backend/scripts/demo-watch.mjs --analyze
 ```
 
-`demo-watch` securely prompts for an existing demo-account email and password, logs in over HTTPS, then subscribes to `topology:subscribe` and prints only nodes with ids `svc:ft-demo-lab:*`. The `--analyze` flag requests a real `blast_radius` + `critical_nodes` analysis when a lab service becomes `degraded`/`down`; omit it to watch topology only. It **does not** auto-create incidents. Do not share account credentials, session cookies or authentication logs.
+The watcher prompts for demo-account email and password, logs in over HTTPS, connects to Socket.IO using the session cookie, then prints only Demo Lab service nodes by default. `--analyze` requests the backend's real `blast_radius` + `critical_nodes` analyses on `degraded`/`down` transitions.
 
-Terminal C — run a real controlled failure and recovery:
+For a concise summary (default):
+
+```text
+DELTA r74: svc:ft-demo-lab:db healthy -> degraded
+ANALYSIS seed=db freshness=current revision=...:74
+  BLAST potential impact: db(depth 0), api(depth 1), web(depth 2)
+  CRITICAL lab scores: db=0.40, api=0.25, web=0.00
+```
+
+Scores and revisions depend on the live topology. `critical_nodes` includes nodes outside the lab at the API level; the default terminal view only prints lab scores. The complete API result is never modified.
+
+Watcher flags:
+
+| Flag | Purpose |
+|------|---------|
+| `--analyze` | Request real Graph Engine analyses on failing demo nodes |
+| `--verbose` | **With `--analyze`**, print the complete raw analysis JSON after the compact summary |
+| `--all` | Show topology changes for *all* Docker-host nodes (not just the lab) |
+| `--email address` | Skip only the email prompt (password remains hidden and interactive) |
+| `--url https://host:port` | Choose a trusted HTTPS backend origin |
+| `--help` | Show watcher usage |
+
+A watcher session permits at most **12 analysis requests** to prevent accidental request flooding; topology observation continues afterward. Restart the watcher for a new test session. `--verbose` may print infrastructure node IDs and scores: do not post full output or credentials publicly.
+
+**Terminal C** — inject and clear a failure:
 
 ```bash
 ./demo-lab/demo.sh fail api
 ./demo-lab/demo.sh status
+# Wait until Docker and the watcher observe api + web as unhealthy / degraded.
 ./demo-lab/demo.sh recover api
 ./demo-lab/demo.sh status
 ```
 
-Expected: `api` becomes `degraded`, as does dependent `web`; `db` stays `healthy`. For a longer cascade, run `./demo-lab/demo.sh fail db` then `recover db`. Docker health transitions may take multiple healthcheck intervals; wait for status changes before concluding that a case failed.
-
-Other operations:
+Or demonstrate the two-hop cascade:
 
 ```bash
-./demo-lab/demo.sh reset  # clear flags on all lab services
-./demo-lab/demo.sh logs   # follow only demo container logs
-./demo-lab/demo.sh down   # remove only this Compose project's containers + network; no -v
+./demo-lab/demo.sh fail db
+# Wait for db, api, web to become unhealthy and for the analysis to appear.
+./demo-lab/demo.sh recover db
+# Wait for all three to become healthy again.
 ```
 
-Note: the lab may appear alongside the project's own services in topology since the Collector currently inventories the whole Docker Engine.
+**Important:** `fail` and `recover` change the mock service immediately, but Docker and Nest only report the resulting state after asynchronous healthcheck/event processing. An immediate `status` can still show `healthy` *after fail* or `unhealthy` *after recover*. It is the eventual transition that confirms the scenario.
 
-## Expected real-time events
-
-The backend socket contract uses a `{event, payload, timestamp}` envelope. On connect, the listener gets `topology:snapshot`, then `topology:status`; on health changes it receives `topology:delta` with `node.upsert` operations. The demo node IDs are `svc:ft-demo-lab:db`, `svc:ft-demo-lab:api`, and `svc:ft-demo-lab:web` because Nest uses the Docker Compose project/service labels.
-
-A dependency relation in the graph is *structural*. A `blast_radius` result is an impact **analysis**, not proof that the engine actually detected a real network failure. The Docker healthcheck, Collector event, and `degraded` topology node are the real measured states. The `Incident Room` currently needs a separate manual REST operation; automatic incident creation is not part of this prototype.
-
-## Safety and verification
-
-Unit and syntax checks without Docker:
+Other lab-only operations:
 
 ```bash
-cd demo-lab && python3 -m unittest -v test_server && cd ..
+./demo-lab/demo.sh reset   # clear every injected failure flag
+./demo-lab/demo.sh logs    # follow logs of lab containers only
+./demo-lab/demo.sh down    # remove disposable lab containers + network; no -v
+./demo-lab/demo.sh up      # clean restart and re-discovery
+make health                # ensure core app remained healthy
+```
+
+During `down` the watcher may briefly report `down` before `node.remove`; this is expected. During re-creation it may show `new -> unknown -> healthy`. The watcher can also request a blast-radius analysis during intentional teardown; it does not mean the core app is failing.
+
+## Manual acceptance evidence — 18 November 2026
+
+The following scenarios were **run on the project's actual Ubuntu development VM** and the output was supplied by the project operator. These results are evidence for v1 runtime behavior, not proof that this updated v1.1 presentation format has been exercised on the VM yet.
+
+| Scenario | Observed result | Result |
+|----------|-----------------|--------|
+| Base readiness | `make health`: `DEVELOPMENT HEALTHY`; three lab services `healthy` | PASS |
+| WebSocket discovery | Initial `topology:snapshot` contained all three `svc:ft-demo-lab:*` nodes and both `depends_on` edges | PASS |
+| API failure | API + web became Docker `unhealthy` / Nest `degraded`; DB remained healthy; `blast_radius(api)` included API + web | PASS |
+| API recovery | Socket.IO revisions `r65`, `r66` returned API + web to `healthy` | PASS |
+| DB cascade | `r74` DB degraded; `r75` API + web degraded; `blast_radius(db)` returned depths 0/1/2 | PASS |
+| DB recovery | `r76`, `r77` returned all three services to `healthy` | PASS |
+| Safe teardown | `down` removed only the three lab containers and its network; Nest removed lab nodes by `r83` | PASS |
+| Recreate | Nodes reappeared (`r84–r86`) and returned to `healthy` (`r87–r89`) without restarting the backend or Collector | PASS |
+| After restart | `make health`: `DEVELOPMENT HEALTHY` | PASS |
+
+See the live terminal transcript or PR test notes for details. A single passing manual run establishes the observed behavior, not ongoing automated E2E coverage.
+
+## Offline checks
+
+```bash
+(cd demo-lab && python3 -m unittest -v test_server)
 bash -n demo-lab/demo.sh
 node --check backend/scripts/demo-watch.mjs
+node --check backend/scripts/demo-watch-format.mjs
+node --test backend/scripts/demo-watch-format.test.mjs
 ```
 
-Live E2E acceptance still needs to run on the user's VM, since a running Docker Engine, Vault-backed Nest backend and authenticated Socket.IO are required. At minimum verify:
+## Known limitations and non-goals
 
-1. `status` reports 3 healthy lab containers after `up`.
-2. The socket client receives `topology:snapshot` with 3 `svc:ft-demo-lab:*` nodes.
-3. `fail api` produces `degraded` for API and, after propagation, web; DB remains healthy.
-4. `recover api` produces healthy nodes again.
-5. `--analyze` returns `freshness`, `topologyRevision`, `blastRadius` and `criticalNodes`, or a clearly logged API error for follow-up.
-6. `down` removes demo project resources but does not affect core app/Vault/PostgreSQL containers or volumes.
-
-Avoid reading or printing Docker environment variables, Vault secret paths, passwords or database connection strings in test output.
-
-## Known limitations
-
-- The demo is **one Docker Engine, one Nest environment**. It is not per-user or multi-environment isolation.
-- The `db` service is an HTTP mock that demonstrates dependence, not a real DB.
-- This is no automatic incident detection, persistent replay, or web UI.
-- The proposed CLI works only against a healthy, reachable backend with an existing user session or credentials.
-- There may be compatibility/integration bugs that cannot be found until the complete VM stack is exercised.
+- `db` is a lightweight HTTP mock, **not** a real database failure or a test of Prisma/PostgreSQL recovery.
+- The Graph Engine's blast radius is structural, not a verified root-cause diagnosis. Actual unhealthy states come from Docker/Collector.
+- No automatic Incident Room creation, persistent incident replay, Prometheus alerts, or frontend UI is implemented by this lab.
+- Demo Lab shares the Docker host's topology environment with the main app; only its Compose/network resources are isolated.
+- The watcher requires an authenticated dev account, trusted HTTPS and backend `socket.io-client` dependencies.
+- Before an evaluation, rerun the relevant tests after changing the Collector, topology mapping, Graph Engine or backend startup behavior.

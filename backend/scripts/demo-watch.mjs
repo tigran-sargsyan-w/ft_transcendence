@@ -6,12 +6,11 @@
  */
 import { io } from 'socket.io-client';
 import { createInterface } from 'node:readline/promises';
-
-const PREFIX = 'svc:ft-demo-lab:';
+import { LAB_PREFIX as PREFIX, formatAnalysisSummary } from './demo-watch-format.mjs';
 const DEFAULT_URL = 'https://transcendence.test:8443';
 
 function options(argv) {
-  const parsed = { url: DEFAULT_URL, email: null, analyze: false, all: false };
+  const parsed = { url: DEFAULT_URL, email: null, analyze: false, all: false, verbose: false };
   for (let i = 0; i < argv.length; i += 1) {
     switch (argv[i]) {
       case '--url':
@@ -28,16 +27,23 @@ function options(argv) {
       case '--all':
         parsed.all = true;
         break;
+      case '--verbose':
+        parsed.verbose = true;
+        break;
       case '-h':
       case '--help':
-        console.log(`Usage: node backend/scripts/demo-watch.mjs [--url ${DEFAULT_URL}] [--email user@example.com] [--analyze] [--all]\n\n` +
+        console.log(`Usage: node backend/scripts/demo-watch.mjs [--url ${DEFAULT_URL}] [--email user@example.com] [--analyze] [--all] [--verbose]\n\n` +
           'Logs in over HTTPS, then listens to authenticated Nest topology Socket.IO events.\n' +
           '--analyze requests real blast_radius + critical_nodes for degraded/down demo nodes.\n' +
-          '--all displays updates of every topology node (default: lab nodes only).');
+          '--all displays updates of every topology node (default: lab nodes only).\n' +
+          '--verbose with --analyze also prints the full raw Graph Engine analysis JSON.');
         process.exit(0);
       default:
         throw new Error(`Unknown option: ${argv[i]}`);
     }
+  }
+  if (parsed.verbose && !parsed.analyze) {
+    throw new Error('--verbose requires --analyze');
   }
   const target = new URL(parsed.url);
   if (target.protocol !== 'https:') {
@@ -124,7 +130,7 @@ function report(line) {
   console.log(`${now()} ${line}`);
 }
 
-async function analyze(origin, sid, environmentId, seedId) {
+async function analyze(origin, sid, environmentId, seedId, verbose) {
   try {
     const response = await fetch(
       `${origin}/api/v1/environments/${encodeURIComponent(environmentId)}/analyses`,
@@ -141,8 +147,12 @@ async function analyze(origin, sid, environmentId, seedId) {
       return;
     }
     const { freshness, topologyRevision, results } = payload.data;
-    report(`ANALYSIS seed=${seedId} freshness=${freshness} revision=${topologyRevision}`);
-    console.log(JSON.stringify({ blastRadius: results?.blastRadius, criticalNodes: results?.criticalNodes }, null, 2));
+    for (const line of formatAnalysisSummary({ seedId, freshness, topologyRevision, results })) {
+      report(line);
+    }
+    if (verbose) {
+      console.log(JSON.stringify({ blastRadius: results?.blastRadius, criticalNodes: results?.criticalNodes }, null, 2));
+    }
   } catch (error) {
     report(`ANALYSIS ERROR: ${error.message}`);
   }
@@ -162,6 +172,7 @@ async function main() {
   let environmentId = null;
   let resyncing = false;
   let analysisTasks = 0;
+  let analysisLimitAnnounced = false;
   const socket = io(opts.url, {
     transports: ['websocket'],
     extraHeaders: { cookie: `sid=${sid}` },
@@ -186,12 +197,15 @@ async function main() {
     if (!opts.analyze || !id.startsWith(PREFIX) || !environmentId) return;
     if (previous === status || !['degraded', 'down'].includes(status)) return;
     // Keep analysis separate from the event stream; avoid blocking the socket handler.
-    analysisTasks += 1;
-    if (analysisTasks > 12) {
-      report('Analysis limit reached for this watcher; topology continues normally.');
+    if (analysisTasks >= 12) {
+      if (!analysisLimitAnnounced) {
+        report('Analysis safety limit (12 requests per watcher) reached; topology continues normally.');
+        analysisLimitAnnounced = true;
+      }
       return;
     }
-    void analyze(opts.url, sid, environmentId, id);
+    analysisTasks += 1;
+    void analyze(opts.url, sid, environmentId, id, opts.verbose);
   };
 
   socket.on('connect', () => {
