@@ -89,8 +89,11 @@ describe('FriendsService', () => {
 
   it('creates a canonical pending request with public user data', async () => {
     const { friends, prisma } = subject();
-    prisma.user.findUnique.mockResolvedValue({ id: BOB });
-    prisma.friendship.create.mockResolvedValue(pending);
+    prisma.user.findUnique.mockResolvedValue({ id: ADA });
+    prisma.friendship.create.mockResolvedValue({
+      ...pending,
+      requestedById: BOB,
+    });
 
     const result = await friends.sendRequest(BOB, ADA);
 
@@ -123,7 +126,14 @@ describe('FriendsService', () => {
 
   it('lists pending requests as incoming and outgoing', async () => {
     const { friends, prisma } = subject();
-    const incoming = { ...pending, requestedById: BOB };
+    const carol = { id: CAROL, displayName: 'Carol', avatarUrl: null };
+    const incoming = {
+      ...pending,
+      id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      userHighId: CAROL,
+      requestedById: CAROL,
+      userHigh: carol,
+    };
     prisma.friendship.findMany.mockResolvedValue([pending, incoming]);
 
     const result = await friends.listRequests(ADA);
@@ -132,7 +142,7 @@ describe('FriendsService', () => {
       { id: pending.id, direction: 'outgoing', user: bob },
     ]);
     expect(result.incoming).toMatchObject([
-      { id: pending.id, direction: 'incoming', user: bob },
+      { id: incoming.id, direction: 'incoming', user: carol },
     ]);
     expect(prisma.friendship.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
