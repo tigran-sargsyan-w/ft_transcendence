@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { validationError } from '../../app.setup.js';
 import { PrismaService } from '../../shared/prisma/prisma.service.js';
+import { PresenceService } from '../presence/presence.service.js';
 
 // Keep the email and password hash out of every friendship response.
 const PUBLIC_FRIEND = {
@@ -80,7 +81,10 @@ function prismaCode(error: unknown): string | undefined {
 
 @Injectable()
 export class FriendsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly presence: PresenceService,
+  ) {}
 
   async listFriends(userId: string) {
     const rows = await this.prisma.friendship.findMany({
@@ -92,13 +96,15 @@ export class FriendsService {
       orderBy: [{ acceptedAt: 'desc' }, { id: 'asc' }],
     });
 
-    // Presence will be added separately; an unexpired HTTP session does not
-    // mean the friend is currently online.
-    return rows.map((row) => ({
-      id: row.id,
-      user: otherUser(row, userId),
-      friendsSince: row.acceptedAt,
-    }));
+    return rows.map((row) => {
+      const friend = otherUser(row, userId);
+      return {
+        id: row.id,
+        user: friend,
+        friendsSince: row.acceptedAt,
+        isOnline: this.presence.isOnline(friend.id),
+      };
+    });
   }
 
   async listRequests(userId: string) {
