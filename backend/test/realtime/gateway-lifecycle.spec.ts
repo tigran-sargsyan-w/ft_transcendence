@@ -22,6 +22,8 @@ describe('RealtimeGateway connection lifecycle', () => {
     const socket = {
       data: {
         session: { tokenHash: 'hash', expiresAt: new Date(Date.now() + ms) },
+        user: { id: 'user-id' },
+      
       },
       disconnect: vi.fn(),
     };
@@ -29,7 +31,9 @@ describe('RealtimeGateway connection lifecycle', () => {
     return { socket, asSocket: socket as unknown as Socket };
   };
 
-  const gateway = () => new RealtimeGateway({} as never, {} as never);
+  const presence = { connect: vi.fn(), disconnect: vi.fn() };
+  const gateway = () =>
+    new RealtimeGateway({} as never, {} as never, presence as never);
 
   it('closes a socket when its session expires', () => {
     const { socket, asSocket } = socketExpiringIn(1000);
@@ -38,6 +42,7 @@ describe('RealtimeGateway connection lifecycle', () => {
     vi.advanceTimersByTime(1000);
 
     expect(socket.disconnect).toHaveBeenCalledWith(true);
+    expect(presence.disconnect).toHaveBeenCalledWith(undefined, true);
   });
 
   it('stops waiting for the expiry of a socket that has disconnected', () => {
@@ -49,5 +54,6 @@ describe('RealtimeGateway connection lifecycle', () => {
     vi.advanceTimersByTime(2000);
 
     expect(socket.disconnect).not.toHaveBeenCalled();
+    expect(presence.disconnect).toHaveBeenCalledWith(undefined);
   });
 });
