@@ -8,6 +8,10 @@ vi.mock('../../src/modules/auth/auth.service.js', () => ({
   AuthService: class AuthService {},
 }));
 
+vi.mock('../../src/modules/incidents/incidents.service.js', () => ({
+  IncidentsService: class IncidentsService {},
+}));
+
 describe('RealtimeGateway connection lifecycle', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -29,7 +33,8 @@ describe('RealtimeGateway connection lifecycle', () => {
     return { socket, asSocket: socket as unknown as Socket };
   };
 
-  const gateway = () => new RealtimeGateway({} as never, {} as never);
+  const gateway = () =>
+    new RealtimeGateway({} as never, {} as never, {} as never);
 
   it('closes a socket when its session expires', () => {
     const { socket, asSocket } = socketExpiringIn(1000);
