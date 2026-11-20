@@ -204,6 +204,8 @@ describe('Incident room (e2e)', () => {
         const answer = await emit(socket, 'incident:join', body);
 
         expect(answer.error.code).toBe('VALIDATION_ERROR');
+        // The field is named, also for a message that is not an object.
+        expect(Object.keys(answer.error.details).length).toBeGreaterThan(0);
       }
 
       expect(socket.connected).toBe(true);
@@ -366,19 +368,35 @@ describe('Incident room (e2e)', () => {
       ]);
     });
 
-    it('puts a socket that joined with capital letters in the room the server sends to', async () => {
+    it('treats an id in capital letters as the same incident: join, update and leave', async () => {
       const id = await createIncident(ada);
+      const other = await createIncident(ada);
+      const capitals = id.toUpperCase();
       const socket = await connect(bob);
       const seen = collect(socket);
 
-      expect(await join(socket, id.toUpperCase())).toEqual({
+      expect(await join(socket, capitals)).toEqual({
         data: { incidentId: id },
       });
 
-      await patch(ada, id, { version: 1, title: 'Capitals' }).expect(200);
+      // The URL in capitals too: the room is named after the stored id.
+      await patch(ada, capitals, { version: 1, title: 'Capitals' }).expect(200);
       await waitFor(seen, 2);
 
+      expect(seen.map(({ payload }) => payload.incidentId)).toEqual([id, id]);
       expect(seen[0].payload.incident.title).toBe('Capitals');
+
+      // A leave in capitals really leaves: the control is the other incident.
+      await emit(socket, 'incident:leave', { incidentId: capitals });
+      await join(socket, other);
+      await patch(ada, id, { version: 2, title: 'Left' }).expect(200);
+      await patch(ada, other, { version: 1, title: 'Other' }).expect(200);
+      await waitFor(seen, 4);
+
+      expect(seen.slice(2).map(({ payload }) => payload.incidentId)).toEqual([
+        other,
+        other,
+      ]);
     });
 
     it('sends nothing from before the join: the client reads that over REST', async () => {

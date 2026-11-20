@@ -215,11 +215,6 @@ export class RealtimeGateway
     @MessageBody(createValidationPipe()) body: IncidentRoomDto,
     @Ack() ack?: AckFn,
   ) {
-    // A primitive gets through the pipe: it has no property to check.
-    if (typeof body !== 'object') {
-      throw validationError({ body: ['body must be an object'] });
-    }
-
     // In v1 every signed-in user may join any incident.
     const incidentId = await this.incidents.findId(body.incidentId);
 
@@ -233,10 +228,6 @@ export class RealtimeGateway
     @MessageBody(createValidationPipe()) body: IncidentRoomDto,
     @Ack() ack?: AckFn,
   ) {
-    if (typeof body !== 'object') {
-      throw validationError({ body: ['body must be an object'] });
-    }
-
     // No lookup: leaving a room one is not in does nothing.
     await socket.leave(incidentRoom(body.incidentId.toLowerCase()));
     ack?.({ data: {} });
