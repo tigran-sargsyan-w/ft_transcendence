@@ -10,6 +10,7 @@ import {
   getImpactedServices,
   getServices,
 } from "@/features/topology/utils";
+import { mockCriticalNodes } from "@/features/topology/mockCriticalNodes";
 
 export default function Topology() {
   const services = getServices(mockTopology.nodes);
@@ -47,7 +48,7 @@ export default function Topology() {
         <TopologyCard />
         <SelectedServiceCard />
       </div>
-      <ServicesListCard services={services} />
+      <ServicesListCard services={services} criticalNodes={mockCriticalNodes} />
     </section>
   );
 }

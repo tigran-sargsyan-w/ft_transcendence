@@ -1,8 +1,8 @@
 import type {
   GraphNode,
   NodeStatus,
-  EdgeKind,
   TopologySnapshot,
+  CriticalNodeRow,
 } from "./types";
 
 // Worst first: the services that need attention come at the top.
@@ -66,4 +66,12 @@ export function getImpactedServices(topology: TopologySnapshot): GraphNode[] {
   );
 
   return impactedServices;
+}
+
+export function getCriticality(
+  criticalNodes: CriticalNodeRow[],
+  nodesId: string,
+): number | undefined {
+  const criticality = criticalNodes.find((n) => n.id == nodesId)?.score;
+  return criticality;
 }

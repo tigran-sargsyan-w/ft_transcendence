@@ -9,13 +9,20 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { mockServiceDetails } from "../mockServiceDetails";
-import type { GraphNode } from "../types";
+import type { GraphNode, CriticalNodeRow } from "../types";
+import { formateDate } from "@/lib/date";
+import { getCriticality } from "../utils";
+import { CriticalNodes } from "../dashboardCards/CriticalNodes";
 
 interface ServicesListCardProps {
   services: GraphNode[];
+  criticalNodes: CriticalNodeRow[];
 }
 
-export const ServicesListCard = ({ services }: ServicesListCardProps) => {
+export const ServicesListCard = ({
+  services,
+  criticalNodes,
+}: ServicesListCardProps) => {
   const detailedServices = services.map((node) => {
     const details = mockServiceDetails[node.id];
     return {
@@ -52,10 +59,11 @@ export const ServicesListCard = ({ services }: ServicesListCardProps) => {
                 </Badge>
               </TableCell>
               <TableCell>{s.role}</TableCell>
-              <TableCell>{"Criticality"}</TableCell>
+              <TableCell>{s.image}</TableCell>
+              <TableCell>{getCriticality(criticalNodes, s.id)}</TableCell>
               <TableCell>{"used by"}</TableCell>
               <TableCell>
-                {s.lastEvent.at} : {s.lastEvent.type}
+                {formateDate(s.lastEvent.at)} : {s.lastEvent.type}
               </TableCell>
             </TableRow>
           ))}
