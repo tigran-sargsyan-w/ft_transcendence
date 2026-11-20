@@ -1,14 +1,17 @@
 import { MainCard } from "@/components/cards/MainCard";
 import { Badge } from "@/components/ui/badge";
-import { mockTopology } from "../mockTopology";
 import { countByStatus, getServices, STATUS_ORDER } from "../utils";
 import { useState } from "react";
-import type { NodeStatus } from "../types";
+import type { NodeStatus, TopologySnapshot } from "../types";
 
-export const ServicesHealth = () => {
+interface ServicesHealthProps {
+  topology: TopologySnapshot;
+}
+
+export const ServicesHealth = ({ topology }: ServicesHealthProps) => {
   const [selectedStatus, setSelectedStatus] = useState<NodeStatus | null>(null);
 
-  const services = getServices(mockTopology.nodes);
+  const services = getServices(topology.nodes);
   const counts = countByStatus(services);
 
   const selectStatus = (status: NodeStatus) => {

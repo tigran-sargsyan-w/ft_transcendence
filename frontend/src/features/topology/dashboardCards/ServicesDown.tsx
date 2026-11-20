@@ -1,9 +1,13 @@
 import { StatCard } from "@/components/cards/StatCard";
-import { mockTopology } from "../mockTopology";
 import { countByStatus, getServices } from "../utils";
+import type { TopologySnapshot } from "../types";
 
-export const ServicesDown = () => {
-  const services = getServices(mockTopology.nodes);
+interface ServicesDownProps {
+  topology: TopologySnapshot;
+}
+
+export const ServicesDown = ({ topology }: ServicesDownProps) => {
+  const services = getServices(topology.nodes);
   const counts = countByStatus(services);
 
   return (
