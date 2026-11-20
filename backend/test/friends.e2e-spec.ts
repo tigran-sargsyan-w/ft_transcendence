@@ -46,6 +46,16 @@ describe('Friendships (e2e)', () => {
     await prisma.user.deleteMany({ where: { email: { in: emails } } });
   }
 
+  const friendCount = () =>
+    prisma.friendship.count({
+      where: {
+        OR: [
+          { userLowId: { in: [ada.id, bob.id, carol.id] } },
+          { userHighId: { in: [ada.id, bob.id, carol.id] } },
+        ],
+      },
+    });
+
   const send = (who: Account, targetUserId: string) =>
     http()
       .post('/api/v1/users/me/friend-requests')
@@ -176,7 +186,7 @@ describe('Friendships (e2e)', () => {
       expect(response.body.error.code).toBe('VALIDATION_ERROR');
     }
 
-    expect(await prisma.friendship.count()).toBe(0);
+    expect(await friendCount()).toBe(0);
   });
 
   it('rejects duplicate and reverse requests, even when submitted concurrently', async () => {
@@ -189,7 +199,7 @@ describe('Friendships (e2e)', () => {
     expect(
       (first.status === 409 ? first : second).body.error.code,
     ).toBe('FRIENDSHIP_ALREADY_EXISTS');
-    expect(await prisma.friendship.count()).toBe(1);
+    expect(await friendCount()).toBe(1);
 
     const again = await send(ada, bob.id).expect(409);
     expect(again.body.error.code).toBe('FRIENDSHIP_ALREADY_EXISTS');
@@ -225,7 +235,7 @@ describe('Friendships (e2e)', () => {
     ]);
     expect((await friends(carol).expect(200)).body.data).toEqual([]);
     expect((await requests(ada).expect(200)).body.data.outgoing).toEqual([]);
-    expect(await prisma.friendship.count()).toBe(1);
+    expect(await friendCount()).toBe(1);
 
     await send(ada, bob.id).expect(409);
     await deleteRequest(ada, id).expect(404);
@@ -237,7 +247,7 @@ describe('Friendships (e2e)', () => {
     await deleteRequest(carol, id).expect(404);
     await deleteRequest(ada, id).expect(204);
     await deleteRequest(bob, id).expect(404);
-    expect(await prisma.friendship.count()).toBe(0);
+    expect(await friendCount()).toBe(0);
 
     const second = (await send(ada, bob.id).expect(201)).body.data.id as string;
     await deleteRequest(bob, second).expect(204);
@@ -269,11 +279,11 @@ describe('Friendships (e2e)', () => {
     await accept(bob, 'nope').expect(400);
     await deleteRequest(ada, 'nope').expect(400);
     await removeFriend(ada, 'nope').expect(400);
-    expect(await prisma.friendship.count()).toBe(1);
+    expect(await friendCount()).toBe(1);
 
     // PostgreSQL UUID comparison works regardless of string letter case.
     await accept(bob, id.toUpperCase()).expect(200);
     await removeFriend(ada, bob.id.toUpperCase()).expect(204);
-    expect(await prisma.friendship.count()).toBe(0);
+    expect(await friendCount()).toBe(0);
   });
 });

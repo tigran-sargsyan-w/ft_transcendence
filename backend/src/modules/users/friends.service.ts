@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { validationError } from '../../app.setup.js';
-import type { PrismaService } from '../../shared/prisma/prisma.service.js';
+import { PrismaService } from '../../shared/prisma/prisma.service.js';
 
 // Keep the email and password hash out of every friendship response.
 const PUBLIC_FRIEND = {
