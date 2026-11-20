@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { PrismaService } from '../../src/shared/prisma/prisma.service.js';
+import type { PresenceService } from '../../src/modules/presence/presence.service.js';
 
 // The Prisma client is generated during the build, after unit tests in CI.
 // Test the service with the database API mocked instead.
@@ -49,7 +50,10 @@ function subject() {
 
   return {
     prisma,
-    friends: new FriendsService(prisma as unknown as PrismaService),
+    friends: new FriendsService(
+      prisma as unknown as PrismaService,
+      { isOnline: (id: string) => id === BOB } as unknown as PresenceService,
+    ),
   };
 }
 
@@ -227,7 +231,7 @@ describe('FriendsService', () => {
 
     const result = await friends.listFriends(ADA);
 
-    expect(result).toMatchObject([{ user: bob }]);
+    expect(result).toMatchObject([{ user: bob, isOnline: true }]);
     expect(result[0].user).not.toHaveProperty('email');
     expect(prisma.friendship.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
