@@ -53,6 +53,7 @@ function otherUser(row: FriendRow, userId: string) {
 function requestView(row: FriendRow, userId: string) {
   return {
     id: row.id,
+    status: 'pending',
     direction: row.requestedById === userId ? 'outgoing' : 'incoming',
     user: otherUser(row, userId),
     createdAt: row.createdAt,

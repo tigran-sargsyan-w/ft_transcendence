@@ -138,6 +138,7 @@ describe('Friendships (e2e)', () => {
 
     expect(created.body.data).toMatchObject({
       id,
+      status: 'pending',
       direction: 'outgoing',
       user: { id: bob.id, displayName: 'Bob', avatarUrl: null },
     });

@@ -1,6 +1,6 @@
 # Standard User Management — Backend API v1 (Draft)
 
-**Status:** Proposed contract for team review; implementation in progress on `feat/standard-user-management`.
+**Status:** Friends API implemented; avatar, presence and user-search contracts proposed for team review on `feat/standard-user-management`.
 **Source:** `en.subject.pdf`, IV.3 User Management (Major: 2 points).
 **Related:** `docs/architecture/auth-and-users.md`, `docs/architecture/api-conventions.md`.
 
@@ -21,22 +21,45 @@ The existing secure registration/login and session handling are retained; advanc
 - `User.avatarUrl` is nullable and defaults to `null`.
 - A global session guard protects new endpoints by default. Success responses use `{data:...}`, errors use `{error:...}`.
 
-## Proposed new HTTP endpoints
+## Friends API — implemented
 
-All require a valid session. These are **proposed routes, not existing routes**.
+All endpoints below require a valid HTTP session and use the existing `/api/v1` prefix.
+Success JSON is wrapped as `{ "data": ... }`; error responses use `{ "error": ... }`.
+Presence is **not yet implemented**; the friends list does not pretend an online
+status is available until the separate presence stage is finished.
+
+| Method | Route | Success | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/users/me/friends` | 200 | Accepted friends and acceptance times |
+| GET | `/api/v1/users/me/friend-requests` | 200 | Pending incoming/outgoing requests |
+| POST | `/api/v1/users/me/friend-requests` | 201 | Send a request; JSON `{ "targetUserId": "UUID" }` |
+| POST | `/api/v1/users/me/friend-requests/:id/accept` | 200 | Recipient accepts a pending request |
+| DELETE | `/api/v1/users/me/friend-requests/:id` | 204 | Sender cancels, or recipient declines |
+| DELETE | `/api/v1/users/me/friends/:userId` | 204 | Either user removes an accepted friendship |
+
+The accepted friends response is a list of
+`{ id: friendshipId, user: { id, displayName, avatarUrl }, friendsSince }`.
+The pending requests response has `{ incoming: [], outgoing: [] }`; each entry
+contains `{ id, status: "pending", direction, user, createdAt }`.
+Accepting yields `{ id, status: "accepted", user, acceptedAt }`.
+The `user` object always contains *only* the public profile fields, never email.
+Timestamps are serialized as ISO 8601 UTC strings.
+
+Writes are limited to 30 requests per minute per endpoint/client. Duplicate,
+opposite-direction, or already-accepted pairs return 409 `FRIENDSHIP_ALREADY_EXISTS`.
+An unknown target user returns 404 `USER_NOT_FOUND`. Inaccessible, expired,
+or already-accepted friend requests return 404 `FRIEND_REQUEST_NOT_FOUND`.
+Removing a missing or non-accepted friendship returns 404
+`FRIENDSHIP_NOT_FOUND`. Invalid UUIDs and self-friending are rejected with 400.
+
+## Future HTTP endpoints — not implemented in this task
 
 | Method | Route | Purpose |
 |---|---|---|
-| GET | `/api/v1/users?search=...&limit=20` | Find users by public display name; omit self; cap results |
-| POST | `/api/v1/users/me/avatar` | Upload/replace JPEG, PNG or WebP; server-generated stored filename |
-| DELETE | `/api/v1/users/me/avatar` | Remove avatar, revert to default fallback |
-| GET | `/api/v1/users/:id/avatar` | Serve stored image (raw bytes, not JSON) |
-| GET | `/api/v1/users/me/friends` | Accepted friends, with online status |
-| GET | `/api/v1/users/me/friend-requests` | Incoming and outgoing pending requests |
-| POST | `/api/v1/users/me/friend-requests` | Create request: `{targetUserId: UUID}` |
-| POST | `/api/v1/users/me/friend-requests/:id/accept` | Accept incoming request |
-| DELETE | `/api/v1/users/me/friend-requests/:id` | Cancel outgoing or decline incoming request |
-| DELETE | `/api/v1/users/me/friends/:userId` | Remove accepted friendship |
+| GET | `/api/v1/users?search=...&limit=20` | Search users by public name |
+| POST | `/api/v1/users/me/avatar` | Upload/replace an avatar |
+| DELETE | `/api/v1/users/me/avatar` | Revert to default avatar |
+| GET | `/api/v1/users/:id/avatar` | Serve stored avatar image |
 
 ### Friendship behavior
 
@@ -70,11 +93,11 @@ A friendship record identifies the two users (`userLowId`, `userHighId`), the in
 
 ## Implementation stages
 
-1. Review this contract with backend owner Nathan before finalizing behavior/API.
-2. Prisma friendship schema + migration; model validation.
-3. Friends HTTP service/controllers + unit/E2E tests.
-4. Avatar processing/storage + tests.
-5. Presence tracking and friend-only Socket.IO events + tests.
+1. Review the friendship confirmation semantics with backend owner Nathan.
+2. Friendship schema, SQL migration and Friends HTTP service/controller are implemented.
+3. Friends E2E tests are committed; run them against migrated PostgreSQL before review.
+4. Avatar processing/storage + tests: later task.
+5. Presence tracking and friend-only Socket.IO events + tests: later task.
 6. Frontend after PR #136 merges; verify with two test accounts end-to-end.
 
-**Note:** This document is a draft. It is not an assertion that any new route already works.
+**Note:** The Friends API is coded but has not yet passed a real PostgreSQL E2E run in this branch; the other proposed endpoints are not implemented.
