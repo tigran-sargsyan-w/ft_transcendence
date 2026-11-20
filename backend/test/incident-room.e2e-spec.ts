@@ -132,6 +132,30 @@ describe('Incident room (e2e)', () => {
   const waitFor = (received: Envelope[], count: number) =>
     vi.waitFor(() => expect(received).toHaveLength(count), { timeout: 2000 });
 
+  // Sockets keep the order of what they receive. A note written after the
+  // change comes after everything the change sent: once it is there, a message
+  // sent twice would be in front of it. Returns, for each list, what came
+  // before the note.
+  async function untilNote(incidentId: string, ...lists: Envelope[][]) {
+    const flush = await http()
+      .post(`/api/v1/incidents/${incidentId}/notes`)
+      .set('Cookie', ada.cookie)
+      .send({ body: 'flush' })
+      .expect(201);
+    const flushId = flush.body.data.id as string;
+
+    await Promise.all(
+      lists.map((received) =>
+        vi.waitFor(
+          () => expect(received.at(-1)?.payload.entry?.id).toBe(flushId),
+          { timeout: 2000 },
+        ),
+      ),
+    );
+
+    return lists.map((received) => received.slice(0, -1));
+  }
+
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideGuard(ThrottlerGuard)
@@ -245,17 +269,21 @@ describe('Incident room (e2e)', () => {
         title: 'DB down',
         severity: 'sev1',
       }).expect(200);
-      await Promise.all([waitFor(seenByAda, 3), waitFor(seenByBob, 3)]);
+      const [forAdaOnly, forBobOnly] = await untilNote(
+        id,
+        seenByAda,
+        seenByBob,
+      );
 
-      // The same three messages for both, `updated` first.
-      expect(seenByBob).toEqual(seenByAda);
-      expect(names(seenByBob)).toEqual([
+      // The same three messages for both, `updated` first, none twice.
+      expect(forBobOnly).toEqual(forAdaOnly);
+      expect(names(forBobOnly)).toEqual([
         'incident:updated',
         'timeline:entry_added',
         'timeline:entry_added',
       ]);
 
-      const [updated, first, second] = seenByBob;
+      const [updated, first, second] = forBobOnly;
 
       expect(updated.payload.incidentId).toBe(id);
       expect(updated.payload.incident).toMatchObject({
@@ -288,10 +316,10 @@ describe('Incident room (e2e)', () => {
         .send({ body: 'Restarting the database' })
         .expect(201);
 
-      await waitFor(seen, 1);
+      const [before] = await untilNote(id, seen);
 
-      expect(names(seen)).toEqual(['timeline:entry_added']);
-      expect(seen[0].payload).toEqual({
+      expect(names(before)).toEqual(['timeline:entry_added']);
+      expect(before[0].payload).toEqual({
         incidentId: id,
         entry: note.body.data,
       });
@@ -342,10 +370,13 @@ describe('Incident room (e2e)', () => {
       await patch(ada, id, { version: 7, title: 'Late' }).expect(409);
       // The control: the first message that comes is the one of this update.
       await patch(ada, id, { version: 1, status: 'investigating' }).expect(200);
-      await waitFor(seen, 2);
+      const [before] = await untilNote(id, seen);
 
-      expect(names(seen)).toEqual(['incident:updated', 'timeline:entry_added']);
-      expect(seen[0].payload.incident.version).toBe(2);
+      expect(names(before)).toEqual([
+        'incident:updated',
+        'timeline:entry_added',
+      ]);
+      expect(before[0].payload.incident.version).toBe(2);
     });
 
     it('sends nothing more to a socket that left, and keeps its other rooms', async () => {
