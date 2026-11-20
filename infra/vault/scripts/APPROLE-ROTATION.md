@@ -1,5 +1,11 @@
 # Operator-controlled AppRole SecretID rotation (#105, phase A)
 
+> **#115 transition:** The commands below use the consolidated single-file
+> application model. Set `FT_DEV_TLS_DIR` to the existing trusted TLS directory
+> (a non-secret path). Do not start or recreate legacy development containers
+> through Compose until the reviewed unified cutover; rotation remains an
+> operator-initiated maintenance procedure, not routine startup.
+
 This initial implementation is **manual**, not a timer or a privileged long-lived issuer. It supports all three AppRoles and intentionally separates installation from revocation so a real Agent can be checked before old credentials are invalidated.
 
 ## Security boundaries
@@ -8,7 +14,7 @@ This initial implementation is **manual**, not a timer or a privileged long-live
 - Run each helper interactively. It prompts for a Vault operator token with echo disabled. The operator must be able to manage AppRole SecretIDs **and** revoke the temporary verification token via auth/token/revoke; the three AppRole identities retain their original read-only ACLs. Never put tokens or database URLs in Git, Compose, environment variables, CI or shell arguments.
 - Each temporary helper has access to **only its own** role's authentication volume, the private Vault network, the CA certificate and the read-only Python script.
 - Do not run the older *-provision services concurrently; those older services do not use the new rotation lock or journal.
-- Both initial candidate validation and finalize perform an AppRole login, consuming **one SecretID use each**. Existing roles have a 20-use limit.
+- Both initial candidate validation and finalize perform an AppRole login. Current development AppRoles have no SecretID use-count limit (`secret_id_num_uses=0`). Previously issued SecretIDs may retain their original limits.
 - Do not use Docker volume removal or broad cleanup. Preserve the original Raft and AppRole volumes.
 
 ## 1 — Issue, verify and install (does not revoke old SecretID)
@@ -16,21 +22,21 @@ This initial implementation is **manual**, not a timer or a privileged long-live
 Backend:
 
 ~~~sh
-docker compose -f infra/vault/server/compose.yml \
+docker compose -p transcendence-vault-dev -f infra/vault/server/compose.yml \
   --profile maintenance run --rm --no-deps vault-backend-rotate rotate
 ~~~
 
 Prisma migrator:
 
 ~~~sh
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -p transcendence-app-dev -f compose.yml \
   --profile vault-maintenance run --rm --no-deps vault-migrator-rotate rotate
 ~~~
 
 PostgreSQL provisioner:
 
 ~~~sh
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -p transcendence-app-dev -f compose.yml \
   --profile vault-maintenance run --rm --no-deps vault-postgres-provisioner-rotate rotate
 ~~~
 
@@ -43,9 +49,9 @@ These commands also work for initial provisioning when there is no previous Secr
 **Backend:** in a maintenance window, force the runtime Agent to read its new credentials and check health:
 
 ~~~sh
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -p transcendence-app-dev -f compose.yml \
   up -d --no-deps --force-recreate vault-backend-agent
-docker compose -f compose.yml -f compose.vault.yml ps vault-backend-agent
+docker compose -p transcendence-app-dev -f compose.yml ps vault-backend-agent
 ~~~
 
 Also verify the application's /api/v1/health endpoint.
@@ -53,18 +59,18 @@ Also verify the application's /api/v1/health endpoint.
 **Migrator:** run its existing one-shot Agent (does not apply Prisma migrations), then remove the rendered secret:
 
 ~~~sh
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -p transcendence-app-dev -f compose.yml \
   --profile vault-migration run --rm --no-deps vault-migrator-agent
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -p transcendence-app-dev -f compose.yml \
   --profile vault-maintenance run --rm --no-deps vault-migrator-cleanup
 ~~~
 
 **Provisioner:** run its existing one-shot Agent and clean up rendered credentials:
 
 ~~~sh
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -p transcendence-app-dev -f compose.yml \
   --profile vault-setup run --rm --no-deps vault-postgres-provisioner-agent
-docker compose -f compose.yml -f compose.vault.yml \
+docker compose -p transcendence-app-dev -f compose.yml \
   --profile vault-maintenance run --rm --no-deps vault-postgres-provisioner-cleanup
 ~~~
 
@@ -110,7 +116,7 @@ PostgreSQL passwords and Vault AppRole credentials have separate lifecycles:
 | Credential | Lifecycle |
 | --- | --- |
 | Vault token | 1h TTL, 4h maximum TTL; Agent manages authentication and renewal |
-| AppRole SecretID | 168h TTL, 20-use limit; operator-controlled rotation |
+| AppRole SecretID | 2160h TTL (90 days), unlimited uses (0); operator-controlled rotation |
 | PostgreSQL password | Static until explicitly changed; stored as a DSN in KV v2 |
 | Vault TLS certificate | Separate certificate renewal and activation procedure |
 

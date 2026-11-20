@@ -5,7 +5,7 @@ umask 077
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-TLS_DIR="$PWD/tls"
+TLS_DIR="${FT_DEV_TLS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/transcendence/dev/tls}"
 CA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ft-transcendence/vault-ca"
 
 command -v openssl >/dev/null || {

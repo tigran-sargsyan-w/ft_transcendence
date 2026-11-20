@@ -20,6 +20,7 @@ Documents here should stay short and stable. Concrete stack and product decision
 - [Realtime topology protocol](./realtime-topology.md) (Socket.IO: snapshot, deltas, revisions)
 - [Analyses API](./analysis-api.md) (HTTP: blast radius, attack paths, critical nodes on the live topology)
 - [Nest ↔ Graph Engine smoke](./nest-graph-engine-smoke.md) (manual Compose → Nest → engine checks)
+- [Incidents API](./incidents-api.md) (HTTP: incidents, timeline and notes, optimistic locking)
 - [Architecture Decision Records](../adr/README.md)
 
 ## Current status
@@ -33,6 +34,7 @@ Documents here should stay short and stable. Concrete stack and product decision
 - Graph Engine (product-specific) — Python FastAPI + NetworkX, plain HTTP/JSON — [ADR 0001](../adr/0001-python-graph-engine.md), [graph contract](./graph-contract.md)
 - authentication — server-side sessions with an opaque cookie — [ADR 0002](../adr/0002-server-side-sessions.md)
 - realtime transport — Socket.IO — [realtime topology protocol](./realtime-topology.md)
+- incident events and topology history — append-only tables, optimistic locking on incidents — [ADR 0004](../adr/0004-incident-events-and-topology-history.md), [incidents API](./incidents-api.md) (issue #119)
 
 **Proposed / pending team review:**
 

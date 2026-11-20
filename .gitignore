@@ -15,3 +15,6 @@ __pycache__/
 
 # Local development TLS certificates
 infra/nginx/certs/
+
+# DEV ONLY: Vault recovery shares and root token — never commit
+/vault-init.json

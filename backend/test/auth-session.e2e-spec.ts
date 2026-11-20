@@ -81,6 +81,10 @@ describe('Sessions (e2e)', () => {
 
     expect(response.body.data.email).toBe(email);
     expect(response.body.data).toHaveProperty('id');
+    expect(response.body.data.displayName).toBe(
+      `User ${response.body.data.id.slice(0, 8)}`,
+    );
+    expect(response.body.data.avatarUrl).toBeNull();
     expect(response.body.data).not.toHaveProperty('passwordHash');
 
     const cookie = response.get('Set-Cookie')?.[0] ?? '';
@@ -158,6 +162,8 @@ describe('Sessions (e2e)', () => {
       .expect(200);
 
     expect(response.body.data.email).toBe(email);
+    expect(response.body.data.displayName).toMatch(/^User [0-9a-f]{8}$/);
+    expect(response.body.data.avatarUrl).toBeNull();
     expect(response.body.data).not.toHaveProperty('passwordHash');
   });
 

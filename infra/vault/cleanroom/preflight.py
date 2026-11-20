@@ -109,6 +109,13 @@ def main():
             f"Missing or invalid Clean-Room TLS file: {name}",
         )
 
+    # The single-file Vault runtime requires this source path at interpolation.
+    # Refuse an inherited non-isolated TLS identity rather than overriding it.
+    runtime_tls = os.environ.get("FT_DEV_TLS_DIR")
+    if runtime_tls and Path(runtime_tls).resolve() != tls_dir:
+        raise RuntimeError("FT_DEV_TLS_DIR does not match isolated Clean-Room TLS")
+    os.environ["FT_DEV_TLS_DIR"] = str(tls_dir)
+
     print("PASS: Clean-Room TLS files exist and are regular files")
 
     vault = compose_config([
@@ -124,7 +131,6 @@ def main():
         "docker", "compose",
         "-p", app_project,
         "-f", str(ROOT / "compose.yml"),
-        "-f", str(ROOT / "compose.vault.yml"),
         "-f", str(app_override),
         "--profile", "vault-setup",
         "--profile", "vault-maintenance",
