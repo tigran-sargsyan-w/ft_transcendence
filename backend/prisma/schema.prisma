@@ -22,6 +22,10 @@ model User {
   commandedIncidents Incident[]      @relation("IncidentCommander")
   incidentEvents     IncidentEvent[]
 
+  friendshipsAsLow       Friendship[] @relation("FriendshipLow")
+  friendshipsAsHigh      Friendship[] @relation("FriendshipHigh")
+  friendshipRequestsSent Friendship[] @relation("FriendshipRequester")
+
   @@map("users")
 }
 
@@ -84,4 +88,26 @@ model IncidentEvent {
 
   @@index([incidentId, seq])
   @@map("incident_events")
+}
+
+// One canonical record per unordered pair of users. Database CHECK constraints
+// enforce pair ordering, requester membership and status/timestamp consistency.
+model Friendship {
+  id            String    @id @default(uuid()) @db.Uuid
+  userLowId     String    @db.Uuid
+  userHighId    String    @db.Uuid
+  requestedById String    @db.Uuid
+  status        String    @default("pending") // pending | accepted
+  createdAt     DateTime  @default(now())
+  acceptedAt    DateTime?
+
+  userLow       User      @relation("FriendshipLow", fields: [userLowId], references: [id], onDelete: Cascade)
+  userHigh      User      @relation("FriendshipHigh", fields: [userHighId], references: [id], onDelete: Cascade)
+  requestedBy   User      @relation("FriendshipRequester", fields: [requestedById], references: [id], onDelete: Cascade)
+
+  @@unique([userLowId, userHighId])
+  @@index([userLowId, status])
+  @@index([userHighId, status])
+  @@index([requestedById, status])
+  @@map("friendships")
 }
