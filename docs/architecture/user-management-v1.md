@@ -1,6 +1,6 @@
 # Standard User Management — Backend API v1 (Draft)
 
-**Status:** Friends API and Avatar API implemented; presence and user-search proposed for team review on `feat/standard-user-management`.
+**Status:** Friends API, Avatar API and single-instance Presence implemented; user search remains proposed for team review.
 **Source:** `en.subject.pdf`, IV.3 User Management (Major: 2 points).
 **Related:** `docs/architecture/auth-and-users.md`, `docs/architecture/api-conventions.md`.
 
@@ -25,12 +25,12 @@ The existing secure registration/login and session handling are retained; advanc
 
 All endpoints below require a valid HTTP session and use the existing `/api/v1` prefix.
 Success JSON is wrapped as `{ "data": ... }`; error responses use `{ "error": ... }`.
-Presence is **not yet implemented**; the friends list does not pretend an online
-status is available until the separate presence stage is finished.
+The accepted friends list also returns `isOnline: boolean` per friendship.
+The value is derived from authenticated Socket.IO connections, not HTTP sessions.
 
 | Method | Route | Success | Purpose |
 |---|---|---|---|
-| GET | `/api/v1/users/me/friends` | 200 | Accepted friends and acceptance times |
+| GET | `/api/v1/users/me/friends` | 200 | Accepted friends, acceptance times and online status |
 | GET | `/api/v1/users/me/friend-requests` | 200 | Pending incoming/outgoing requests |
 | POST | `/api/v1/users/me/friend-requests` | 201 | Send a request; JSON `{ "targetUserId": "UUID" }` |
 | POST | `/api/v1/users/me/friend-requests/:id/accept` | 200 | Recipient accepts a pending request |
@@ -38,7 +38,7 @@ status is available until the separate presence stage is finished.
 | DELETE | `/api/v1/users/me/friends/:userId` | 204 | Either user removes an accepted friendship |
 
 The accepted friends response is a list of
-`{ id: friendshipId, user: { id, displayName, avatarUrl }, friendsSince }`.
+`{ id: friendshipId, user: { id, displayName, avatarUrl }, friendsSince, isOnline }`.
 The pending requests response has `{ incoming: [], outgoing: [] }`; each entry
 contains `{ id, status: "pending", direction, user, createdAt }`.
 Accepting yields `{ id, status: "accepted", user, acceptedAt }`.
@@ -87,12 +87,27 @@ Postman requests may omit browser-only Origin headers.
 
 A friendship record identifies the two users (`userLowId`, `userHighId`), the initiating user (`requestedById`), its `pending` or `accepted` status, and timestamps. The migration should enforce ordering, membership, state consistency, and uniqueness. The relationship is symmetric once accepted.
 
-### Presence behavior
+### Presence behavior — implemented
 
-- Online means at least one currently connected authenticated Socket.IO client, not simply an unexpired HTTP session.
-- The existing gateway authenticates socket handshakes, and disconnects sockets when their session ends.
-- Track socket counts per user (handle multiple browser tabs), read snapshots through the friends API, and emit `presence:changed` **only to authorized friends**.
-- Initial implementation is single-backend-process only; distributed presence requires a shared store/pub-sub.
+- **Online:** at least one active, authenticated Socket.IO connection. HTTP login or an unexpired session without a socket does not count.
+- Connections from multiple browser tabs, devices and sessions share one presence state per user. Disconnecting one socket does not change the status while another is connected.
+- After the last ordinary transport disconnect, the user remains online for **5 seconds** to allow reconnection. A reconnect in that window cancels the pending offline transition.
+- An explicit logout immediately removes sockets belonging to that session; session expiry immediately removes the expiring socket. Other live sessions remain online.
+- `GET /api/v1/users/me/friends` returns a top-level `isOnline` value for each **accepted** friend; the nested public `user` object and `GET /users/:id` have no presence field.
+- On a transition, the gateway emits `presence:changed` only to sockets in server-managed `user:<UUID>` rooms of the user's **currently accepted friends**. The server looks up friendship authorization on each transition; pending/removed friendships cannot subscribe or receive these updates.
+- A client must read the friends snapshot on initial load and after reconnect, as Socket.IO may miss events while disconnected.
+
+The notification uses the standard Socket.IO server envelope:
+
+```json
+{
+  "event": "presence:changed",
+  "payload": { "userId": "<UUID>", "isOnline": true },
+  "timestamp": "2026-11-20T19:00:00.000Z"
+}
+```
+
+Presence is in memory for **one NestJS backend process** and is not written to PostgreSQL. Horizontal scaling requires shared presence state and pub/sub (e.g. Redis) before it can be enabled.
 
 ### Avatar safety
 
@@ -117,7 +132,7 @@ A friendship record identifies the two users (`userLowId`, `userHighId`), the in
 2. Friendship schema, SQL migration and Friends HTTP service/controller are implemented.
 3. Friends E2E tests are committed; run them against migrated PostgreSQL before review.
 4. Avatar processing/storage + tests: implemented; run full E2E and WAF/Postman smoke tests.
-5. Presence tracking and friend-only Socket.IO events + tests: later task.
+5. Presence tracking, friend-only Socket.IO events and unit/E2E tests: implemented in `feat/user-presence`.
 6. Frontend after PR #136 merges; verify with two test accounts end-to-end.
 
-**Note:** The Friends API is coded but has not yet passed a real PostgreSQL E2E run in this branch; the other proposed endpoints are not implemented.
+**Note:** Friends and Avatar API passed unit/E2E and manual HTTPS verification before the Presence stage. Presence still requires a full test run on the integration branch before merge.
