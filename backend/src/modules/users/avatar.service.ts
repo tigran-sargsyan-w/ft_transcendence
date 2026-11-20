@@ -1,4 +1,5 @@
 import {
+  HttpException,
   Injectable,
   NotFoundException,
   PayloadTooLargeException,
@@ -75,10 +76,7 @@ async function normalizeAvatar(file: UploadedAvatar | undefined) {
 
     return new Uint8Array(processed);
   } catch (error) {
-    if (
-      error instanceof PayloadTooLargeException ||
-      (error instanceof Error && error.name === 'BadRequestException')
-    ) {
+    if (error instanceof HttpException) {
       throw error;
     }
 

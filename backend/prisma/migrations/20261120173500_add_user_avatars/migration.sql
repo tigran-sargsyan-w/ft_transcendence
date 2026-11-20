@@ -4,7 +4,7 @@ CREATE TABLE "user_avatars" (
     "userId" UUID NOT NULL,
     "data" BYTEA NOT NULL,
     "mimeType" VARCHAR(32) NOT NULL,
-    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "user_avatars_pkey" PRIMARY KEY ("userId"),
     CONSTRAINT "user_avatars_mimeType_check" CHECK ("mimeType" = 'image/webp'),
