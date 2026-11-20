@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { type Observable, Subject } from 'rxjs';
 import { validationError } from '../../app.setup.js';
 import type { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../shared/prisma/prisma.service.js';
@@ -116,6 +117,15 @@ async function viewIncident(db: Db, id: string) {
   return incidentOf(incident, histories.get(incident.id) ?? []);
 }
 
+// What a committed request tells the room of an incident: the new timeline
+// entries, oldest first, and the incident they gave (null for a note, which
+// does not change it).
+export type IncidentChange = {
+  incidentId: string;
+  incident: ReturnType<typeof incidentOf> | null;
+  entries: ReturnType<typeof toTimelineEntry>[];
+};
+
 // The incident and its history are two reads. In one transaction at this level
 // they see the same data: without it, a reopen committed in between would give
 // `resolved` next to a history that ends on `open`. Only for `get` and `list`:
@@ -130,6 +140,13 @@ const ONE_SNAPSHOT = { isolationLevel: 'RepeatableRead' } as const;
 // (docs/architecture/incidents-api.md).
 @Injectable()
 export class IncidentsService {
+  private readonly changes = new Subject<IncidentChange>();
+
+  // Sent once the transaction is committed, so a client never hears of a change
+  // that was rolled back. The service does not know Socket.IO: the realtime
+  // gateway relays it.
+  readonly changes$: Observable<IncidentChange> = this.changes.asObservable();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly topology: TopologyService,
@@ -156,6 +173,20 @@ export class IncidentsService {
         summaryOf(incident, histories.get(incident.id) ?? []),
       );
     }, ONE_SNAPSHOT);
+  }
+
+  // The id as stored, in small letters, or 404: the name of the incident's room.
+  async findId(id: string) {
+    const incident = await this.prisma.incident.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!incident) {
+      throw incidentNotFound();
+    }
+
+    return incident.id;
   }
 
   get(id: string) {
@@ -214,7 +245,7 @@ export class IncidentsService {
 
   // One transaction (docs/adr/0004): read, update where the version is the
   // one the client read, then write the events.
-  update(id: string, userId: string, dto: UpdateIncidentDto) {
+  async update(id: string, userId: string, dto: UpdateIncidentDto) {
     const { version, ...wanted } = dto;
 
     if (Object.values(wanted).every((value) => value === undefined)) {
@@ -223,7 +254,7 @@ export class IncidentsService {
       });
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const { incident, entries } = await this.prisma.$transaction(async (tx) => {
       const current = await tx.incident.findUnique({ where: { id } });
 
       if (!current) {
@@ -250,7 +281,7 @@ export class IncidentsService {
 
       // Every value is the current one: nothing to write, not even a version.
       if (events.length === 0) {
-        return viewIncident(tx, id);
+        return { incident: await viewIncident(tx, id), entries: [] };
       }
 
       // The version is in the WHERE clause, so a change made since the client
@@ -271,7 +302,7 @@ export class IncidentsService {
         );
       }
 
-      await tx.incidentEvent.createMany({
+      const written = await tx.incidentEvent.createManyAndReturn({
         data: events.map((event) => ({
           incidentId: id,
           version: version + 1,
@@ -279,10 +310,24 @@ export class IncidentsService {
           actorId: userId,
           data: event.data,
         })),
+        include: WITH_ACTOR,
       });
 
-      return viewIncident(tx, id);
+      return { incident: await viewIncident(tx, id), entries: written };
     });
+
+    // Nothing was written when there is no entry: the room hears nothing.
+    if (entries.length > 0) {
+      this.changes.next({
+        incidentId: incident.id,
+        incident,
+        entries: entries
+          .sort((a, b) => a.seq - b.seq)
+          .map((event) => toTimelineEntry(event)),
+      });
+    }
+
+    return incident;
   }
 
   async timeline(id: string, query: TimelineQueryDto) {
@@ -315,8 +360,8 @@ export class IncidentsService {
 
   // A note does not change the incident: no new version, so it never makes
   // another user's update fail.
-  addNote(id: string, userId: string, dto: CreateNoteDto) {
-    return this.prisma.$transaction(async (tx) => {
+  async addNote(id: string, userId: string, dto: CreateNoteDto) {
+    const entry = await this.prisma.$transaction(async (tx) => {
       const incident = await tx.incident.findUnique({
         where: { id },
         select: { version: true },
@@ -339,5 +384,13 @@ export class IncidentsService {
 
       return toTimelineEntry(event);
     });
+
+    this.changes.next({
+      incidentId: entry.incidentId,
+      incident: null,
+      entries: [entry],
+    });
+
+    return entry;
   }
 }
