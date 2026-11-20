@@ -57,7 +57,7 @@ One room per environment: `env:<environmentId>`. A client never names a room: it
 
 There is one environment for now. Its id comes from the collector (`ENVIRONMENT_ID`, `env_local_compose` in Compose) and no endpoint gives it to the front, so `environmentId` is optional in `topology:subscribe`.
 
-Every authenticated user may subscribe: there is no permission per environment yet. The rooms `incident:<incidentId>` and `user:<userId>`, and the delivery of analysis results, are not specified yet.
+Every authenticated user may subscribe: there is no permission per environment yet. The room `incident:<incidentId>` is described in [Incidents API](./incidents-api.md#live-updates). The room `user:<userId>` and the delivery of analysis results are not specified yet.
 
 ## Client to server
 
