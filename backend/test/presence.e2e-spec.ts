@@ -196,30 +196,43 @@ describe('Friend-only presence (e2e)', () => {
     expect(outsiderEvents).toEqual([]);
   });
 
-  it('keeps a user online across tabs and closes only the logged-out session', async () => {
+  it('keeps a user online across tabs and independent sessions', async () => {
     await befriend(ada, bob);
     const observer = await connect(ada.cookie);
     const bobFirst = await connect(bob.cookie);
-    const secondCookie = await login(emails[1]);
-    const bobSecond = await connect(secondCookie);
+    const bobSecondTab = await connect(bob.cookie);
+    const otherSession = await login(emails[1]);
+    const bobPhone = await connect(otherSession);
 
-    bobFirst.disconnect();
-    expect((await friends(ada).expect(200)).body.data[0].isOnline).toBe(true);
-
-    const gone = expectChange(observer, bob.id, false);
-    const disconnected = new Promise<void>((resolve) =>
-      bobSecond.once('disconnect', () => resolve()),
+    const firstClosed = Promise.all(
+      [bobFirst, bobSecondTab].map(
+        (socket) => new Promise<void>((resolve) =>
+          socket.once('disconnect', () => resolve()),
+        ),
+      ),
     );
 
     await http()
       .post('/api/v1/auth/logout')
-      .set('Cookie', secondCookie)
+      .set('Cookie', bob.cookie)
       .expect(204);
 
-    await disconnected;
+    await firstClosed;
+    expect((await friends(ada).expect(200)).body.data[0].isOnline).toBe(true);
+    expect(bobPhone.connected).toBe(true);
+
+    const gone = expectChange(observer, bob.id, false);
+    const phoneClosed = new Promise<void>((resolve) =>
+      bobPhone.once('disconnect', () => resolve()),
+    );
+    await http()
+      .post('/api/v1/auth/logout')
+      .set('Cookie', otherSession)
+      .expect(204);
+
+    await phoneClosed;
     expect((await gone).payload).toEqual({ userId: bob.id, isOnline: false });
     expect((await friends(ada).expect(200)).body.data[0].isOnline).toBe(false);
-    expect(bobSecond.connected).toBe(false);
   });
 
   it('reports offline after the last connection grace, but not before', async () => {
@@ -238,7 +251,9 @@ describe('Friend-only presence (e2e)', () => {
   it('immediately reports offline on logout without leaking to removed friends', async () => {
     await befriend(ada, bob);
     const observer = await connect(ada.cookie);
+    const online = expectChange(observer, bob.id, true);
     await connect(bob.cookie);
+    await online;
 
     await http()
       .delete('/api/v1/users/me/friends/' + bob.id)

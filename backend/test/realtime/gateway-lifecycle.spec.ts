@@ -43,6 +43,7 @@ describe('RealtimeGateway connection lifecycle', () => {
     const { socket, asSocket } = socketExpiringIn(1000);
 
     gateway().handleConnection(asSocket);
+    expect(presence.connect).toHaveBeenCalledWith('user-id', 'socket-id', 'hash');
     vi.advanceTimersByTime(1000);
 
     expect(socket.disconnect).toHaveBeenCalledWith(true);
