@@ -1,6 +1,6 @@
 # Standard User Management — Backend API v1 (Draft)
 
-**Status:** Friends API implemented; avatar, presence and user-search contracts proposed for team review on `feat/standard-user-management`.
+**Status:** Friends API and Avatar API implemented; presence and user-search proposed for team review on `feat/standard-user-management`.
 **Source:** `en.subject.pdf`, IV.3 User Management (Major: 2 points).
 **Related:** `docs/architecture/auth-and-users.md`, `docs/architecture/api-conventions.md`.
 
@@ -52,14 +52,34 @@ or already-accepted friend requests return 404 `FRIEND_REQUEST_NOT_FOUND`.
 Removing a missing or non-accepted friendship returns 404
 `FRIENDSHIP_NOT_FOUND`. Invalid UUIDs and self-friending are rejected with 400.
 
+## Avatar API — implemented
+
+| Method | Route | Success | Purpose |
+|---|---|---|---|
+| POST | `/api/v1/users/me/avatar` | 201 | Upload or replace: `multipart/form-data` with exactly one `file` field |
+| GET | `/api/v1/users/:id/avatar` | 200 | Returns canonical WebP bytes; not a JSON envelope |
+| DELETE | `/api/v1/users/me/avatar` | 204 | Remove an avatar; `avatarUrl` becomes null |
+
+JPEG/PNG/WebP images up to 2 MiB are accepted. Input dimensions must not exceed
+4096x4096 and are resized inside 1024x1024, with EXIF and other metadata
+removed by server-side WebP re-encoding. The output is capped at 2 MiB and
+stored as PostgreSQL `bytea` in `user_avatars`, never inline in user JSON.
+No extra multipart fields or files are accepted. Mutations require a session,
+verify browser Origin / Fetch Metadata and are rate-limited.
+
+`avatarUrl` is `/api/v1/users/<UUID>/avatar` when the user has an avatar and
+null otherwise; the frontend should render the default initials/avatar
+placeholder when null. GET of a missing avatar returns 404 `AVATAR_NOT_FOUND`.
+Successful GET includes `image/webp`, `Cache-Control: private, no-store`,
+`X-Content-Type-Options: nosniff` and a sandbox CSP to avoid stale or
+unsafe responses. Browser upload uses the same authenticated HTTPS origin;
+Postman requests may omit browser-only Origin headers.
+
 ## Future HTTP endpoints — not implemented in this task
 
 | Method | Route | Purpose |
 |---|---|---|
 | GET | `/api/v1/users?search=...&limit=20` | Search users by public name |
-| POST | `/api/v1/users/me/avatar` | Upload/replace an avatar |
-| DELETE | `/api/v1/users/me/avatar` | Revert to default avatar |
-| GET | `/api/v1/users/:id/avatar` | Serve stored avatar image |
 
 ### Friendship behavior
 
@@ -96,7 +116,7 @@ A friendship record identifies the two users (`userLowId`, `userHighId`), the in
 1. Review the friendship confirmation semantics with backend owner Nathan.
 2. Friendship schema, SQL migration and Friends HTTP service/controller are implemented.
 3. Friends E2E tests are committed; run them against migrated PostgreSQL before review.
-4. Avatar processing/storage + tests: later task.
+4. Avatar processing/storage + tests: implemented; run full E2E and WAF/Postman smoke tests.
 5. Presence tracking and friend-only Socket.IO events + tests: later task.
 6. Frontend after PR #136 merges; verify with two test accounts end-to-end.
 
