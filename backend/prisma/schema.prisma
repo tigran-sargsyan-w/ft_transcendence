@@ -17,6 +17,7 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   sessions     Session[]
+  avatar        UserAvatar?
 
   createdIncidents   Incident[]      @relation("IncidentCreator")
   commandedIncidents Incident[]      @relation("IncidentCommander")
@@ -110,4 +111,16 @@ model Friendship {
   @@index([userHighId, status])
   @@index([requestedById, status])
   @@map("friendships")
+}
+
+// Avatars are stored outside User so normal profile reads never load image bytes.
+model UserAvatar {
+  userId    String   @id @db.Uuid
+  data      Bytes    @db.ByteA
+  mimeType  String   @db.VarChar(32)
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_avatars")
 }
