@@ -32,6 +32,7 @@ import {
   type TopologyChange,
   TopologyService,
 } from '../topology/topology.service.js';
+import { PresenceService, type PresenceChange } from '../presence/presence.service.js';
 import { CommandLimitGuard } from './command-limit.guard.js';
 import { SubscribeDto } from './dto/subscribe.dto.js';
 import { disconnectAt } from './session-expiry.js';
@@ -45,6 +46,9 @@ const room = (environmentId: string) => `env:${environmentId}`;
 // One room per session, to close its sockets when it ends. It is named after
 // the hash of the session token, which is never sent to a client.
 const sessionRoom = (tokenHash: string) => `session:${tokenHash}`;
+
+// Server-assigned; a client cannot subscribe to another user's room.
+const userRoom = (userId: string) => `user:${userId}`;
 
 // What the server sends: the envelope of docs/architecture/realtime-conventions.md.
 function send(
@@ -72,12 +76,15 @@ export class RealtimeGateway
 
   private readonly logger = new Logger(RealtimeGateway.name);
   private readonly relays: Subscription[] = [];
+  // Preserve event order even if a friendship database lookup is slow.
+  private presenceBroadcasts = Promise.resolve();
   // Known from the first snapshot: a delta does not name its environment.
   private environmentId: string | null = null;
 
   constructor(
     private readonly authService: AuthService,
     private readonly topology: TopologyService,
+    private readonly presence: PresenceService,
   ) {}
 
   afterInit(server: Server) {
@@ -109,6 +116,7 @@ export class RealtimeGateway
           expiresAt: session.expiresAt,
         };
         await socket.join(sessionRoom(session.tokenHash));
+        await socket.join(userRoom(session.user.id));
         next();
       } catch (error) {
         // `connect_error` on the client, with `error.data = { code, message }`.
@@ -127,9 +135,17 @@ export class RealtimeGateway
         this.toRoom('topology:status', status),
       ),
       // A logout closes the sockets of that session at once.
-      this.authService.sessionEnded$.subscribe((tokenHash) =>
-        this.server.in(sessionRoom(tokenHash)).disconnectSockets(true),
-      ),
+      this.authService.sessionEnded$.subscribe((tokenHash) => {
+        this.presence.endSession(tokenHash);
+        this.server.in(sessionRoom(tokenHash)).disconnectSockets(true);
+      }),
+      this.presence.changes$.subscribe((change) => {
+        this.presenceBroadcasts = this.presenceBroadcasts
+          .then(() => this.publishPresenceChange(change))
+          .catch((error: unknown) =>
+            this.logger.error('Presence broadcast failed', error),
+          );
+      }),
     );
   }
 
@@ -141,13 +157,27 @@ export class RealtimeGateway
   // unless a logout closes it before. The client then receives `disconnect`
   // with the reason `io server disconnect`.
   handleConnection(socket: Socket) {
-    socket.data.stopExpiry = disconnectAt(socket.data.session.expiresAt, () =>
-      socket.disconnect(true),
+    this.presence.connect(
+      socket.data.user.id,
+      socket.id,
+      socket.data.session.tokenHash,
     );
+    socket.data.stopExpiry = disconnectAt(socket.data.session.expiresAt, () => {
+      this.presence.disconnect(socket.id, true);
+      socket.disconnect(true);
+    });
   }
 
   handleDisconnect(socket: Socket) {
     socket.data.stopExpiry?.();
+    this.presence.disconnect(socket.id);
+  }
+
+  private async publishPresenceChange(change: PresenceChange) {
+    const friendIds = await this.presence.acceptedFriendIds(change.userId);
+    for (const friendId of friendIds) {
+      send(this.server.to(userRoom(friendId)), 'presence:changed', change);
+    }
   }
 
   @SubscribeMessage('topology:subscribe')
