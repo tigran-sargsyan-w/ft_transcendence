@@ -15,10 +15,22 @@ describe('User search (e2e)', () => {
     { email: 'search-e2e-ada@example.com', displayName: 'SearchCaseAda' },
     { email: 'search-e2e-bob@example.com', displayName: 'SearchCaseBob' },
     { email: 'search-e2e-bobby@example.com', displayName: 'SearchCaseBobby' },
-    { email: 'search-e2e-percent@example.com', displayName: 'SearchPct100% Real' },
-    { email: 'search-e2e-under@example.com', displayName: 'SearchUnder_a_bench' },
-    { email: 'search-e2e-slash@example.com', displayName: 'SearchSlashPath\\Name' },
-    { email: 'search-e2e-secretmarker@example.com', displayName: 'SearchCarol' },
+    {
+      email: 'search-e2e-percent@example.com',
+      displayName: 'SearchPct100% Real',
+    }
+    {
+      email: 'search-e2e-under@example.com',
+      displayName: 'SearchUnder_a_bench',
+    }
+    {
+      email: 'search-e2e-slash@example.com',
+      displayName: 'SearchSlashPath\\Name',
+    }
+    {
+      email: 'search-e2e-secretmarker@example.com',
+      displayName: 'SearchCarol',
+    }
   ];
   type Account = { id: string; cookie: string };
   let ada: Account;
@@ -93,8 +105,9 @@ describe('User search (e2e)', () => {
   it('searches by public display name case-insensitively in stable order', async () => {
     const response = await search(ada, { search: 'SEARCHCASEBO' }).expect(200);
 
-    expect(response.body.data.map((user: { displayName: string }) => user.displayName))
-      .toEqual(['SearchCaseBob', 'SearchCaseBobby']);
+    expect(
+      response.body.data.map((user: { displayName: string }) => user.displayName),
+    ).toEqual(['SearchCaseBob', 'SearchCaseBobby']);
     expect(response.body.data[0]).toEqual({
       id: bob.id,
       displayName: 'SearchCaseBob',
@@ -111,8 +124,9 @@ describe('User search (e2e)', () => {
 
   it('trims search text and excludes the signed-in user', async () => {
     const results = await search(ada, { search: '  SearchCase  ' }).expect(200);
-    expect(results.body.data.map((user: { id: string }) => user.id)).not
-      .toContain(ada.id);
+    expect(
+      results.body.data.map((user: { id: string }) => user.id),
+    ).not.toContain(ada.id);
     expect(results.body.data).toHaveLength(2);
 
     const ownName = await search(ada, { search: 'SearchCaseAda' }).expect(200);
@@ -142,16 +156,19 @@ describe('User search (e2e)', () => {
 
   it('treats percent, underscore and backslash as literal characters', async () => {
     const percent = await search(ada, { search: '100%' }).expect(200);
-    expect(percent.body.data.map((user: { displayName: string }) => user.displayName))
-      .toEqual(['SearchPct100% Real']);
+    expect(
+      percent.body.data.map((user: { displayName: string }) => user.displayName),
+    ).toEqual(['SearchPct100% Real']);
 
     const underscore = await search(ada, { search: 'Under_' }).expect(200);
-    expect(underscore.body.data.map((user: { displayName: string }) => user.displayName))
-      .toEqual(['SearchUnder_a_bench']);
+    expect(
+      underscore.body.data.map((user: { displayName: string }) => user.displayName),
+    ).toEqual(['SearchUnder_a_bench']);
 
     const slash = await search(ada, { search: 'Path\\' }).expect(200);
-    expect(slash.body.data.map((user: { displayName: string }) => user.displayName))
-      .toEqual(['SearchSlashPath\\Name']);
+    expect(
+      slash.body.data.map((user: { displayName: string }) => user.displayName),
+    ).toEqual(['SearchSlashPath\\Name']);
   });
 
   it('rejects invalid searches and unknown query keys', async () => {

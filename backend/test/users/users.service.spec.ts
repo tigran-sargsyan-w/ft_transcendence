@@ -5,6 +5,18 @@ vi.mock('../../src/shared/prisma/prisma.service.js', () => ({
   PrismaService: class PrismaService {},
 }));
 
+// Importing PUBLIC_USER must not load the generated Prisma types at runtime.
+vi.mock('../../src/modules/auth/auth.service.js', () => ({
+  PUBLIC_USER: {
+    id: true,
+    email: true,
+    displayName: true,
+    avatarUrl: true,
+    createdAt: true,
+    updatedAt: true,
+  },
+}));
+
 import { UsersService } from '../../src/modules/users/users.service.js';
 
 const ADA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
