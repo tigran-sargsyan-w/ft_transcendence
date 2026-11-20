@@ -18,19 +18,19 @@ describe('User search (e2e)', () => {
     {
       email: 'search-e2e-percent@example.com',
       displayName: 'SearchPct100% Real',
-    }
+    },
     {
       email: 'search-e2e-under@example.com',
       displayName: 'SearchUnder_a_bench',
-    }
+    },
     {
       email: 'search-e2e-slash@example.com',
       displayName: 'SearchSlashPath\\Name',
-    }
+    },
     {
       email: 'search-e2e-secretmarker@example.com',
       displayName: 'SearchCarol',
-    }
+    },
   ];
   type Account = { id: string; cookie: string };
   let ada: Account;
@@ -76,7 +76,7 @@ describe('User search (e2e)', () => {
       where: { email: { in: accounts.map((entry) => entry.email) } },
     });
 
-    const created = [];
+    const created: Account[] = [];
     for (const account of accounts) {
       created.push(await register(account.email, account.displayName));
     }
