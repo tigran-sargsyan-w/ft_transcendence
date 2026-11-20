@@ -1,6 +1,6 @@
 # Standard User Management — Backend API v1 (Draft)
 
-**Status:** Friends API, Avatar API and single-instance Presence implemented; user search remains proposed for team review.
+**Status:** Friends API, Avatar API, single-instance Presence and User Search API implemented; frontend integration remains pending.
 **Source:** `en.subject.pdf`, IV.3 User Management (Major: 2 points).
 **Related:** `docs/architecture/auth-and-users.md`, `docs/architecture/api-conventions.md`.
 
@@ -75,11 +75,31 @@ Successful GET includes `image/webp`, `Cache-Control: private, no-store`,
 unsafe responses. Browser upload uses the same authenticated HTTPS origin;
 Postman requests may omit browser-only Origin headers.
 
-## Future HTTP endpoints — not implemented in this task
+## User Search API — implemented
 
-| Method | Route | Purpose |
-|---|---|---|
-| GET | `/api/v1/users?search=...&limit=20` | Search users by public name |
+| Method | Route | Success | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/users?search=...&limit=20` | 200 | Find users by public display name |
+
+Search requires an authenticated HTTP session. The `search` query parameter
+is required, trimmed, and must contain **2–64 characters** after trimming;
+it must not contain NUL. Matching is a case-insensitive substring search
+on `displayName` only (never `email`). Literal percent signs, underscores
+and backslashes are escaped so they cannot widen a LIKE search.
+
+`limit` is an optional decimal integer from **1 through 20** (default 20).
+Unknown query parameters, repeated/array values, malformed limits and invalid
+search terms return 400 `VALIDATION_ERROR`. Missing or invalid sessions
+return 401 `UNAUTHORIZED`. Searches are rate-limited to 60 requests
+per minute per client; exceeding that limit returns 429.
+
+Results are ordered by `displayName` ascending and then `id` ascending.
+The signed-in user is excluded. The response is wrapped in `{ "data": [...] }`;
+each entry contains only `{ id, displayName, avatarUrl }`. Neither email,
+session details nor online status of strangers is disclosed.
+
+No schema migration or dependency is required. Search is backed by the
+existing PostgreSQL `users` table and Prisma client.
 
 ### Friendship behavior
 
@@ -133,6 +153,7 @@ Presence is in memory for **one NestJS backend process** and is not written to P
 3. Friends E2E tests are committed; run them against migrated PostgreSQL before review.
 4. Avatar processing/storage + tests: implemented; run full E2E and WAF/Postman smoke tests.
 5. Presence tracking, friend-only Socket.IO events and unit/E2E tests: implemented in `feat/user-presence`.
-6. Frontend after PR #136 merges; verify with two test accounts end-to-end.
+6. Public User Search API with query validation and unit/E2E tests: implemented in `feat/user-search`.
+7. Frontend after PR #136 merges; verify with two test accounts end-to-end.
 
 **Note:** Friends and Avatar API passed unit/E2E and manual HTTPS verification before the Presence stage. Presence still requires a full test run on the integration branch before merge.

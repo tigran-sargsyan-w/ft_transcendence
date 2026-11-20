@@ -10,9 +10,30 @@ export const PUBLIC_PROFILE = {
   avatarUrl: true,
 } as const;
 
+// Prisma's PostgreSQL "contains" uses LIKE/ILIKE pattern matching.
+// Escape user input so '%' and '_' are searched literally, not as wildcards.
+function escapeLikePattern(value: string) {
+  return value.replace(/[\\%_]/g, (character) => '\\' + character);
+}
+
 @Injectable()
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
+
+  searchUsers(userId: string, search: string, limit: number) {
+    return this.prisma.user.findMany({
+      where: {
+        id: { not: userId },
+        displayName: {
+          contains: escapeLikePattern(search),
+          mode: 'insensitive',
+        },
+      },
+      select: PUBLIC_PROFILE,
+      orderBy: [{ displayName: 'asc' }, { id: 'asc' }],
+      take: limit,
+    });
+  }
 
   async findProfile(id: string) {
     const profile = await this.prisma.user.findUnique({
