@@ -52,7 +52,7 @@ function subject() {
     prisma,
     friends: new FriendsService(
       prisma as unknown as PrismaService,
-      { isOnline: (id: string) => id === BOB } as PresenceService,
+      { isOnline: (id: string) => id === BOB } as unknown as PresenceService,
     ),
   };
 }

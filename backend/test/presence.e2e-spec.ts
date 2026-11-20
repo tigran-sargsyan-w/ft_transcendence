@@ -203,20 +203,23 @@ describe('Friend-only presence (e2e)', () => {
     const secondCookie = await login(emails[1]);
     const bobSecond = await connect(secondCookie);
 
-    const updates: Change[] = [];
-    observer.on('presence:changed', (change: Change) => updates.push(change));
     bobFirst.disconnect();
-
     expect((await friends(ada).expect(200)).body.data[0].isOnline).toBe(true);
+
+    const gone = expectChange(observer, bob.id, false);
+    const disconnected = new Promise<void>((resolve) =>
+      bobSecond.once('disconnect', () => resolve()),
+    );
 
     await http()
       .post('/api/v1/auth/logout')
       .set('Cookie', secondCookie)
       .expect(204);
 
+    await disconnected;
+    expect((await gone).payload).toEqual({ userId: bob.id, isOnline: false });
     expect((await friends(ada).expect(200)).body.data[0].isOnline).toBe(false);
     expect(bobSecond.connected).toBe(false);
-    expect(updates.filter((change) => change.payload.userId === bob.id)).toEqual([]);
   });
 
   it('reports offline after the last connection grace, but not before', async () => {
@@ -265,7 +268,7 @@ describe('Friend-only presence (e2e)', () => {
 
     await prisma.session.update({
       where: { tokenHash: hashToken(sid) },
-      data: { expiresAt: new Date(Date.now() + 600) },
+      data: { expiresAt: new Date(Date.now() + 1_500) },
     });
 
     const socket = await connect(second);
