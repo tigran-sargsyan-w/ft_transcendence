@@ -95,6 +95,7 @@ SQL
 {
   echo 'SET ROLE transcendence_migrator;'
   cat backend/prisma/migrations/20261112140000_add_incidents/migration.sql
+  cat backend/prisma/migrations/20261120161500_add_friendships/migration.sql
   echo 'RESET ROLE;'
 } | psql_test >/dev/null
 
@@ -109,7 +110,10 @@ for change in \
   'REVOKE USAGE ON SEQUENCE public.incident_events_seq_seq FROM transcendence_app' \
   'GRANT DELETE ON public.incidents TO transcendence_app' \
   'GRANT UPDATE ON public.incident_events TO transcendence_app' \
-  'GRANT UPDATE ON SEQUENCE public.incident_events_seq_seq TO transcendence_app'
+  'GRANT UPDATE ON SEQUENCE public.incident_events_seq_seq TO transcendence_app' \
+  'REVOKE SELECT ON public.friendships FROM transcendence_app' \
+  'REVOKE DELETE ON public.friendships FROM transcendence_app' \
+  'GRANT TRUNCATE ON public.friendships TO transcendence_app'
 do
   sql "$change"
   check_audit pending
