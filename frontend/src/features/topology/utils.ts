@@ -36,6 +36,22 @@ export function countByStatus(nodes: GraphNode[]): Record<NodeStatus, number> {
   return counts;
 }
 
+export function getHealthyServices(topology: TopologySnapshot): GraphNode[] {
+  const healthyServices = topology.nodes.filter(
+    (service) => service.status === "healthy",
+  );
+
+  return healthyServices;
+}
+
+export function getDownServices(topology: TopologySnapshot): GraphNode[] {
+  const downServices = topology.nodes.filter(
+    (service) => service.status === "down",
+  );
+
+  return downServices;
+}
+
 export function getImpactedServices(topology: TopologySnapshot): GraphNode[] {
   const downServicesId = topology.nodes
     .filter((service) => service.status === "down")
