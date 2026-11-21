@@ -18,6 +18,7 @@ class UnifiedTests(unittest.TestCase):
             "host", "resources", "vault", "vault-config", "vault-secrets",
             "postgres", "postgres-roles", "migrations", "backend-agent",
             "backend", "support-services", "frontend", "nginx",
+            "prometheus",
         ])
 
     def test_unknown_command_denied(self):
@@ -39,7 +40,7 @@ class UnifiedTests(unittest.TestCase):
         with patch.object(unified, "command", return_value=True) as cmd, contextlib.redirect_stdout(io.StringIO()):
             unified.check()
         self.assertEqual([call.args[0] for call in cmd.call_args_list],
-                         ["--check-host", "--check-resources", "--check-nginx"])
+                         ["--check-host", "--check-resources", "--check-nginx", "--check-prometheus"])
         self.assertTrue(all(call.kwargs["quiet"] for call in cmd.call_args_list))
 
     def test_check_stops_on_first_failure(self):
@@ -50,12 +51,12 @@ class UnifiedTests(unittest.TestCase):
         self.assertEqual(cmd.call_count, unified.READ_ONLY_ATTEMPTS)
         self.assertEqual(sleep.call_count, unified.READ_ONLY_ATTEMPTS - 1)
 
-    def test_health_report_fast_path_only_three_checks(self):
+    def test_health_report_fast_path_checks_prometheus(self):
         with patch.object(unified, "command", return_value=True) as command, \
              contextlib.redirect_stdout(io.StringIO()) as output:
             unified.health_report()
         self.assertEqual([call.args[0] for call in command.call_args_list],
-                         ["--check-host", "--check-resources", "--check-nginx"])
+                         ["--check-host", "--check-resources", "--check-nginx", "--check-prometheus"])
         self.assertTrue(all(call.kwargs["quiet"] for call in command.call_args_list))
         self.assertIn("RESULT: DEVELOPMENT HEALTHY", output.getvalue())
 
@@ -141,7 +142,7 @@ class UnifiedTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             unified.start()
         self.assertEqual([call.args[0] for call in ck.call_args_list],
-                         ["host", "resources", "nginx"])
+                         ["host", "resources", "nginx", "prometheus"])
         vault.assert_called_once()
 
     def test_routine_fails_before_database_if_vault_sealed(self):
@@ -371,7 +372,7 @@ class UnifiedTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             unified.start()
         self.assertEqual([item.args[0] for item in command.call_args_list],
-                         ["--check-host", "--check-resources", "--check-nginx"])
+                         ["--check-host", "--check-resources", "--check-nginx", "--check-prometheus"])
         guard.assert_called_once()
         resume.assert_not_called()
 
@@ -588,6 +589,62 @@ class UnifiedTests(unittest.TestCase):
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(unified.main(["start"]), 1)
 
+
+
+    def test_health_report_rejects_unavailable_prometheus(self):
+        checks = lambda name: name != "prometheus"
+
+        with patch.object(unified, "checked", side_effect=checks), \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaisesRegex(
+                unified.UnifiedStartupError, "prometheus"
+            ):
+                unified.health_report()
+
+        self.assertIn("FAIL: prometheus", output.getvalue())
+        self.assertNotIn("RESULT: DEVELOPMENT HEALTHY", output.getvalue())
+
+    def test_start_never_creates_missing_prometheus(self):
+        def checked(name):
+            return name != "prometheus"
+
+        def resume(name):
+            if name == "prometheus":
+                raise unified.UnifiedStartupError(
+                    "Missing Prometheus container"
+                )
+
+        with patch.object(unified, "checked", side_effect=checked), \
+             patch.object(unified, "vault_seal_guard"), \
+             patch.object(unified, "resume", side_effect=resume) as mocked, \
+             contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(
+                unified.UnifiedStartupError, "Missing Prometheus"
+            ):
+                unified.start()
+
+        self.assertEqual(mocked.call_args.args[0], "prometheus")
+
+    def test_guard_resume_prometheus_keeps_container_identity(self):
+        prometheus = types.ModuleType("bootstrap_prometheus")
+        prometheus.NAME = "trusted-prometheus"
+        prometheus.container = MagicMock(return_value={
+            "Id": "retained-id",
+            "State": {"Running": False, "Status": "exited"},
+        })
+        prometheus.verify_identity = MagicMock()
+
+        with patch.dict(
+            "sys.modules", {"bootstrap_prometheus": prometheus}
+        ):
+            targets = unified.guard_resume("prometheus")
+
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(targets[0][:2], (
+            "trusted-prometheus", "retained-id"
+        ))
+        self.assertEqual(targets[0][3], "stopped")
+        prometheus.verify_identity.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()

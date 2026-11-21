@@ -20,7 +20,7 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'HELP'
-Usage: ./scripts/bootstrap.sh [--initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--plan-waf-upgrade|--upgrade-waf|--help]
+Usage: ./scripts/bootstrap.sh [--initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--prepare-prometheus|--check-prometheus|--plan-waf-upgrade|--upgrade-waf|--help]
 
   --initialize    Trusted first install: sequential stages with per-step confirmation.
   --start         Resume only existing verified containers (Vault must be unsealed).
@@ -57,6 +57,8 @@ Usage: ./scripts/bootstrap.sh [--initialize|--start|--recover|--check-all|--heal
   --check-frontend         Verify frontend Compose identity and local HTTP/API proxy.
   --prepare-nginx          Start only trusted Nginx on loopback 8080/8443 (HTTPS).
   --check-nginx            Verify Nginx identity, TLS, redirect and HTTPS routes.
+  --prepare-prometheus     Explicitly create/start only trusted Prometheus.
+  --check-prometheus       Read-only Prometheus identity and readiness verification.
   --plan-waf-upgrade       Read-only preflight for migrating legacy Nginx to WAF.
   --upgrade-waf            One-time confirmed upgrade of ONLY legacy Nginx to WAF.
   --help          Show this message.
@@ -71,7 +73,7 @@ HELP
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--plan-waf-upgrade|--upgrade-waf) ;;
+  --initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--prepare-prometheus|--check-prometheus|--plan-waf-upgrade|--upgrade-waf) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -250,6 +252,7 @@ case "$MODE" in
     python3 scripts/dev/bootstrap_support_services.py plan
     python3 scripts/dev/bootstrap_frontend.py plan
     python3 scripts/dev/bootstrap_nginx.py plan
+    python3 scripts/dev/bootstrap_prometheus.py plan
     say "RESULT: BOOTSTRAP PLAN COMPLETE (read-only)"
     ;;
   --check-host)
@@ -306,6 +309,21 @@ case "$MODE" in
     ;;
   --check-nginx)
     python3 scripts/dev/bootstrap_nginx.py check
+    ;;
+  --check-prometheus)
+    python3 scripts/dev/bootstrap_prometheus.py check
+    ;;
+  --prepare-prometheus)
+    host_check || fail "Host preparation incomplete"
+    python3 scripts/dev/bootstrap_resources.py check || fail "Docker resources incomplete"
+    python3 scripts/dev/bootstrap_support_services.py check || fail "Support services incomplete"
+    python3 scripts/dev/bootstrap_prometheus.py plan
+    say ""
+    say "This stage starts ONLY the trusted Prometheus Compose service."
+    say "No host ports or Docker socket are exposed."
+    say "Existing containers are preserved and never recreated."
+    confirm "Create/start Prometheus on this VM?" || fail "Cancelled"
+    python3 scripts/dev/bootstrap_prometheus.py apply
     ;;
   --prepare-nginx)
     host_check || fail "Host preparation incomplete"

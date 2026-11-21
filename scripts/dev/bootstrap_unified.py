@@ -42,9 +42,10 @@ STAGES = (
     ("support-services", "--check-support-services", "--prepare-support-services"),
     ("frontend", "--check-frontend", "--prepare-frontend"),
     ("nginx", "--check-nginx", "--prepare-nginx"),
+    ("prometheus", "--check-prometheus", "--prepare-prometheus"),
 )
 STAGE_BY_NAME = {name: (check, prepare) for name, check, prepare in STAGES}
-RESUMABLE = ("postgres", "backend-agent", "backend", "support-services", "frontend", "nginx")
+RESUMABLE = ("postgres", "backend-agent", "backend", "support-services", "frontend", "nginx", "prometheus")
 READ_ONLY_ATTEMPTS = 3
 READ_ONLY_RETRY_DELAY = 1
 
@@ -143,6 +144,9 @@ def guard_resume(name):
     elif name == "nginx":
         import bootstrap_nginx as nginx
         targets = ((nginx.NAME, nginx.container(), nginx.verify_identity),)
+    elif name == "prometheus":
+        import bootstrap_prometheus as prometheus
+        targets = ((prometheus.NAME, prometheus.container(), prometheus.verify_identity),)
     else:
         raise UnifiedStartupError(f"Cannot resume stage {name}")
 
@@ -385,7 +389,7 @@ def start():
     # Nginx's check walks the full trusted dependency chain down to Vault and
     # PostgreSQL. Rechecking each dependency separately is expensive and can
     # saturate a small VM with redundant nested Docker/psql invocations.
-    if checked("nginx"):
+    if checked("nginx") and checked("prometheus"):
         print("KEEP: complete Vault-backed stack ready", flush=True)
         print("RESULT: UNIFIED STARTUP READY", flush=True)
         return
@@ -407,6 +411,7 @@ def check():
     require("resources")
     # Nginx's read-only check covers the entire transitive service chain.
     require("nginx")
+    require("prometheus")
     print("RESULT: UNIFIED STACK READY (read-only)", flush=True)
 
 
@@ -434,8 +439,12 @@ def health_report():
     # Vault configuration. Do not repeat this expensive chain on success.
     if checked("nginx"):
         print("PASS: end-to-end Nginx HTTPS, application and trusted dependencies", flush=True)
-        print("RESULT: DEVELOPMENT HEALTHY (read-only)", flush=True)
-        return
+        if checked("prometheus"):
+            print("PASS: Prometheus readiness and trusted identity", flush=True)
+            print("RESULT: DEVELOPMENT HEALTHY (read-only)", flush=True)
+            return
+        print("FAIL: prometheus; inspect --check-prometheus", flush=True)
+        raise UnifiedStartupError("Health report failed at prometheus")
 
     print("WARN: end-to-end check failed; locating the first failing dependency", flush=True)
     for name, _, _ in STAGES[2:]:
