@@ -29,6 +29,14 @@ CA_FILE = config.vault.STATE / "tls/ca.crt"
 ENTRYPOINT = ["/bin/sh", "/vault/scripts/grafana-agent.sh"]
 HEALTHCHECK = ["CMD", *ENTRYPOINT, "check"]
 
+# Explicitly override unused persistent volumes inherited from Vault.
+TMPFS_PATHS = {
+    "/tmp",
+    "/vault/runtime",
+    "/vault/file",
+    "/vault/logs",
+}
+
 
 class GrafanaAgentError(Exception):
     """Credential-free diagnostics only."""
@@ -73,7 +81,7 @@ def verify_identity(item):
         or set(host.get("CapDrop") or []) != {"ALL"}
         or host.get("CapAdd")
         or "no-new-privileges:true" not in (host.get("SecurityOpt") or [])
-        or set(host.get("Tmpfs") or {}) != {"/tmp", "/vault/runtime"}
+        or set(host.get("Tmpfs") or {}) != TMPFS_PATHS
     ):
         raise GrafanaAgentError("Unexpected Grafana Agent runtime privileges")
 

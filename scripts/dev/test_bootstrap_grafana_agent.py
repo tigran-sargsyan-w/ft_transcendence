@@ -68,7 +68,7 @@ def trusted_agent():
             "CapDrop": ["ALL"],
             "CapAdd": [],
             "SecurityOpt": ["no-new-privileges:true"],
-            "Tmpfs": {"/tmp": "", "/vault/runtime": ""},
+            "Tmpfs": {path: "" for path in mod.TMPFS_PATHS},
         },
         "NetworkSettings": {
             "Networks": {mod.NETWORK: {}},
@@ -254,6 +254,37 @@ class AgentTests(unittest.TestCase):
             f"type=volume,source={mod.AUTH_VOLUME},target=/vault/auth,readonly",
             command,
         )
+
+
+
+    def test_inherited_vault_volumes_must_be_overridden(self):
+        for path in ("/vault/file", "/vault/logs"):
+            with self.subTest(path=path):
+                item = trusted_agent()
+                del item["HostConfig"]["Tmpfs"][path]
+
+                with self.assertRaises(mod.GrafanaAgentError):
+                    mod.verify_identity(item)
+
+    def test_unexpected_tmpfs_rejected(self):
+        item = trusted_agent()
+        item["HostConfig"]["Tmpfs"]["/unexpected"] = ""
+
+        with self.assertRaises(mod.GrafanaAgentError):
+            mod.verify_identity(item)
+
+    def test_inherited_anonymous_volume_rejected(self):
+        item = trusted_agent()
+
+        item["Mounts"].append({
+            "Type": "volume",
+            "Name": "unexpected-anonymous-volume",
+            "Destination": "/vault/file",
+            "RW": True,
+        })
+
+        with self.assertRaises(mod.GrafanaAgentError):
+            mod.verify_identity(item)
 
 
 if __name__ == "__main__":
