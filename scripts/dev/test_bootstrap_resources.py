@@ -51,11 +51,11 @@ class ResourceTests(unittest.TestCase):
             existing = mod.scan()
             self.assertFalse(any(existing.values()))
             mod.create_missing(existing)
-            self.assertEqual(len(self.creates), 14)
+            self.assertEqual(len(self.creates), 15)
             verified = mod.scan()
             self.assertTrue(all(verified.values()))
             mod.create_missing(verified)
-            self.assertEqual(len(self.creates), 14)
+            self.assertEqual(len(self.creates), 15)
 
     def test_existing_unsafe_network_refused_without_creating(self):
         self.state[("network", "transcendence-vault-dev_vault_private")] = {
@@ -79,7 +79,7 @@ class ResourceTests(unittest.TestCase):
 
     def test_networks_have_exact_isolation(self):
         self.assertEqual(len(mod.NETWORKS), 3)
-        self.assertEqual(len(mod.VOLUMES), 11)
+        self.assertEqual(len(mod.VOLUMES), 12)
         self.assertTrue(mod.NETWORKS["transcendence-vault-dev_vault_private"][2])
         self.assertTrue(mod.NETWORKS["transcendence-app-dev_collector_control"][2])
         self.assertFalse(mod.NETWORKS["transcendence-app-dev_default"][2])

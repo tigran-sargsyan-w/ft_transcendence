@@ -308,6 +308,73 @@ services:
 
     restart: unless-stopped
 
+  vault-grafana-storage-init:
+    image: hashicorp/vault:2.2.1
+    user: "0:0"
+
+    profiles:
+      - vault-setup
+
+    entrypoint:
+      - /bin/sh
+      - /vault/scripts/grafana-storage.sh
+
+    volumes:
+      - ./infra/vault/scripts/grafana-storage.sh:/vault/scripts/grafana-storage.sh:ro
+      - grafana_vault_auth:/vault/auth
+      - grafana_vault_rendered:/vault/rendered
+
+    network_mode: none
+    read_only: true
+
+    cap_drop:
+      - ALL
+
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+
+    security_opt:
+      - no-new-privileges:true
+
+    restart: "no"
+
+  vault-grafana-provision:
+    image: hashicorp/vault:2.2.1
+    user: "100:1000"
+
+    profiles:
+      - vault-setup
+
+    entrypoint:
+      - /bin/sh
+      - /vault/scripts/grafana-auth.sh
+
+    command: ["apply"]
+
+    environment:
+      VAULT_ADDR: https://vault:8200
+      VAULT_CACERT: /vault/tls/ca.crt
+
+    volumes:
+      - ./infra/vault/scripts/grafana-auth.sh:/vault/scripts/grafana-auth.sh:ro
+      - ${FT_DEV_TLS_DIR:?Set FT_DEV_TLS_DIR}/ca.crt:/vault/tls/ca.crt:ro
+      - grafana_vault_auth:/vault/auth
+
+    networks:
+      - vault_private
+
+    read_only: true
+
+    cap_drop:
+      - ALL
+
+    security_opt:
+      - no-new-privileges:true
+
+    restart: "no"
+
   vault-postgres-provisioner-storage-init:
     image: hashicorp/vault:2.2.1
     user: "0:0"
@@ -755,6 +822,7 @@ volumes:
   postgres_data:
   prometheus_data:
   grafana_data:
+  grafana_vault_auth:
   grafana_vault_rendered:
   migrator_vault_auth:
   migrator_vault_rendered:

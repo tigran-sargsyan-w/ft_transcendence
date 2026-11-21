@@ -39,6 +39,7 @@ VOLUMES = (
     f"{APP}_postgres_data",
     f"{APP}_prometheus_data",
     f"{APP}_grafana_data",
+    f"{APP}_grafana_vault_auth",
     f"{APP}_grafana_vault_rendered",
     f"{APP}_migrator_vault_auth",
     f"{APP}_migrator_vault_rendered",
