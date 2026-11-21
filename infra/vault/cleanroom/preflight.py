@@ -45,6 +45,30 @@ def main():
     test_password = require_env("FT_CR_PG_PASSWORD")
     override = Path(require_env("FT_APP_COMPOSE_OVERRIDE")).resolve()
 
+    custom_dir = os.environ.get("FT_CR_OVERRIDE_DIR")
+
+    if custom_dir:
+        config_dir = Path(custom_dir)
+
+        check(
+            config_dir.is_absolute()
+            and config_dir.is_dir()
+            and not config_dir.is_symlink(),
+            "Invalid Clean-Room override directory",
+        )
+
+        app_override = config_dir / "app.override.yml"
+        vault_override = config_dir / "vault.override.yml"
+
+        for config in (app_override, vault_override):
+            check(
+                config.is_file() and not config.is_symlink(),
+                f"Missing or invalid override file: {config.name}",
+            )
+    else:
+        app_override = APP_OVERRIDE
+        vault_override = VAULT_OVERRIDE
+
     check(
         app_project.startswith("ft-cr-")
         and vault_project.startswith("ft-cr-")
@@ -53,7 +77,7 @@ def main():
     )
 
     check(
-        override == APP_OVERRIDE.resolve(),
+        override == app_override.resolve(),
         "Unexpected application Compose override",
     )
 
@@ -73,11 +97,32 @@ def main():
         "Clean-room TLS directory overlaps production TLS",
     )
 
+    # Reject missing or directory-backed bind mount sources.
+    # Docker Compose may otherwise create an absent file path
+    # as a directory.
+    for name in ("ca.crt", "vault.crt", "vault.key"):
+        tls_file = tls_dir / name
+        check(
+            not tls_file.is_symlink()
+            and tls_file.is_file()
+            and tls_file.stat().st_size > 0,
+            f"Missing or invalid Clean-Room TLS file: {name}",
+        )
+
+    # The single-file Vault runtime requires this source path at interpolation.
+    # Refuse an inherited non-isolated TLS identity rather than overriding it.
+    runtime_tls = os.environ.get("FT_DEV_TLS_DIR")
+    if runtime_tls and Path(runtime_tls).resolve() != tls_dir:
+        raise RuntimeError("FT_DEV_TLS_DIR does not match isolated Clean-Room TLS")
+    os.environ["FT_DEV_TLS_DIR"] = str(tls_dir)
+
+    print("PASS: Clean-Room TLS files exist and are regular files")
+
     vault = compose_config([
         "docker", "compose",
         "-p", vault_project,
         "-f", str(ROOT / "infra/vault/server/compose.yml"),
-        "-f", str(VAULT_OVERRIDE),
+        "-f", str(vault_override),
         "--profile", "setup",
         "--profile", "maintenance",
     ])
@@ -86,8 +131,7 @@ def main():
         "docker", "compose",
         "-p", app_project,
         "-f", str(ROOT / "compose.yml"),
-        "-f", str(ROOT / "compose.vault.yml"),
-        "-f", str(APP_OVERRIDE),
+        "-f", str(app_override),
         "--profile", "vault-setup",
         "--profile", "vault-maintenance",
     ])
@@ -157,6 +201,9 @@ def main():
         "vault-backend-provision": (
             "/vault/tls/ca.crt", tls_dir / "ca.crt", True
         ),
+        "vault-backend-rotate": (
+            "/vault/tls/ca.crt", tls_dir / "ca.crt", True
+        ),
         "vault-bootstrap": (
             "/vault/tls/ca.crt", tls_dir / "ca.crt", True
         ),
@@ -199,6 +246,25 @@ def main():
                 )
 
     check(ca_mounts >= 4, "Expected Vault CA mounts are missing")
+
+    # Every new role-scoped rotation helper must use the isolated CA.
+    for name in (
+        "vault-migrator-rotate",
+        "vault-postgres-provisioner-rotate",
+    ):
+        check(name in app["services"], f"Rotation helper missing: {name}")
+        mounts = [
+            m for m in app["services"][name].get("volumes", [])
+            if m["target"] == "/vault/tls/ca.crt"
+        ]
+        check(
+            len(mounts) == 1
+            and mounts[0]["type"] == "bind"
+            and mounts[0].get("read_only") is True
+            and Path(mounts[0]["source"]).resolve() == tls_dir / "ca.crt",
+            f"Unsafe rotation CA mount: {name}",
+        )
+
     print("PASS: TLS files isolated from production")
 
     for project in (vault, app):

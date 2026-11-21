@@ -1,0 +1,3902 @@
+{
+  "info": {
+    "_postman_id": "7d945720-0aaf-445f-8972-0a18b3778ac6",
+    "name": "ft_transcendence | Authentication + Standard User Management (Demo v1.2)",
+    "description": "v1-style ordered demo: Authentication and Standard User Management with 104 HTTP requests. Each run generates 3 fresh development-only test users; explicit per-user sid headers and disabled cookie jar keep sessions isolated. Upload fixture file paths use the single collection variable fixtures_dir, default tests/postman/fixtures relative to the Postman working directory. Run all folders in order; the suite writes to the dev DB and does not delete user accounts. The Socket.IO event lifecycle is out of scope for HTTP-only requests. See README-user-management.md.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": {
+      "major": 1,
+      "minor": 2,
+      "patch": 0
+    }
+  },
+  "item": [
+    {
+      "name": "00 — Setup and baseline",
+      "description": "Run this folder first. Each run generates unique demo accounts; they are not deleted by the API.",
+      "item": [
+        {
+          "name": "00.1 — Initialize a fresh run and confirm backend health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health",
+            "description": "Regenerates test identifiers and empties old temporary SID variables. No cleanup or destructive database operation."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Application and PostgreSQL healthy\", () => { const h = pm.response.json().data; pm.expect(h.status).to.eql(\"ok\"); pm.expect(h.database).to.eql(\"ok\"); });",
+                  "pm.test(\"Fresh run marker generated\", () => pm.expect(pm.collectionVariables.get(\"run_marker\")).to.match(/^UM-[0-9a-f]{12}$/));"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const id = pm.variables.replaceIn('{{$guid}}').replace(/-/g, '').slice(0, 12).toLowerCase();",
+                  "const marker = 'UM-' + id;",
+                  "const vars = {",
+                  "  run_id: id, run_marker: marker, demo_password: 'Demo!' + id + '-42a',",
+                  "  ada_email: 'um-private-' + id + '-ada@example.com',",
+                  "  bob_email: 'um-private-' + id + '-bob@example.com',",
+                  "  carol_email: 'um-private-' + id + '-carol@example.com',",
+                  "  ada_name: marker + '-Ada', bob_name: marker + '-Bob', carol_name: marker + '-Carol_100%'",
+                  "};",
+                  "Object.entries(vars).forEach(([key, value]) => pm.collectionVariables.set(key, value));",
+                  "['ada_id','bob_id','carol_id','request_id','ada_sid','bob_sid','carol_sid'].forEach(key => pm.collectionVariables.unset(key));",
+                  "console.log('New user-management run marker:', marker, '(three new accounts will be created)');"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 — Registration",
+      "description": "Fresh accounts Ada, Bob, Carol; field validation and email uniqueness. Requires setup.",
+      "item": [
+        {
+          "name": "01.1 — Register Ada (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/register",
+            "description": "POST /auth/register creates a user but does not log in / establish a session.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{ada_email}}\",\"password\":\"{{demo_password}}\",\"displayName\":\"{{ada_name}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Safe registered user\", () => { pm.expect(data.id).to.be.a(\"string\"); pm.expect(data.avatarUrl).to.eql(null); pm.expect(data).to.not.have.property(\"passwordHash\"); });",
+                  "pm.test(\"Ada email normalized and name saved\", () => {pm.expect(data.email).to.eql(pm.collectionVariables.get(\"ada_email\"));pm.expect(data.displayName).to.eql(pm.collectionVariables.get(\"ada_name\"));});",
+                  "pm.collectionVariables.set(\"ada_id\",data.id);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "01.2 — Register Bob (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/register",
+            "description": "POST /auth/register creates a user but does not log in / establish a session.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{bob_email}}\",\"password\":\"{{demo_password}}\",\"displayName\":\"{{bob_name}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Safe registered user\", () => { pm.expect(data.id).to.be.a(\"string\"); pm.expect(data.avatarUrl).to.eql(null); pm.expect(data).to.not.have.property(\"passwordHash\"); });",
+                  "pm.test(\"Bob email normalized and name saved\", () => {pm.expect(data.email).to.eql(pm.collectionVariables.get(\"bob_email\"));pm.expect(data.displayName).to.eql(pm.collectionVariables.get(\"bob_name\"));});",
+                  "pm.collectionVariables.set(\"bob_id\",data.id);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "01.3 — Register Carol (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/register",
+            "description": "POST /auth/register creates a user but does not log in / establish a session.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{carol_email}}\",\"password\":\"{{demo_password}}\",\"displayName\":\"{{carol_name}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Safe registered user\", () => { pm.expect(data.id).to.be.a(\"string\"); pm.expect(data.avatarUrl).to.eql(null); pm.expect(data).to.not.have.property(\"passwordHash\"); });",
+                  "pm.test(\"Carol email normalized and name saved\", () => {pm.expect(data.email).to.eql(pm.collectionVariables.get(\"carol_email\"));pm.expect(data.displayName).to.eql(pm.collectionVariables.get(\"carol_name\"));});",
+                  "pm.collectionVariables.set(\"carol_id\",data.id);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "01.4 — Duplicate email rejected (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/register",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{ada_email}}\",\"password\":\"{{demo_password}}\",\"displayName\":\"Duplicate\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"Error code: EMAIL_ALREADY_EXISTS\", () => pm.expect(pm.response.json().error.code).to.eql(\"EMAIL_ALREADY_EXISTS\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "01.5 — Invalid email rejected (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/register",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"not-an-email\",\"password\":\"{{demo_password}}\",\"displayName\":\"Invalid\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "01.6 — Password too short (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/register",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"new-{{run_id}}@example.com\",\"password\":\"short\",\"displayName\":\"Invalid\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "01.7 — Empty display name (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/register",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"new-{{run_id}}@example.com\",\"password\":\"{{demo_password}}\",\"displayName\":\"  \"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "01.8 — Unknown field rejected (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/register",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"new-{{run_id}}@example.com\",\"password\":\"{{demo_password}}\",\"isAdmin\":true}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 — Authentication and sessions",
+      "description": "Wrong credentials, login DTO validation, distinct session cookies for three accounts, /auth/me and invalid session. Avoid login brute-force/rate-limit experiments during this run.",
+      "item": [
+        {
+          "name": "02.1 — Incorrect password (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/login",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{ada_email}}\",\"password\":\"definitely-wrong\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error code: AUTH_INVALID_CREDENTIALS\", () => pm.expect(pm.response.json().error.code).to.eql(\"AUTH_INVALID_CREDENTIALS\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "02.2 — Unknown email (same 401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/login",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"unknown-{{run_id}}@example.com\",\"password\":\"{{demo_password}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error code: AUTH_INVALID_CREDENTIALS\", () => pm.expect(pm.response.json().error.code).to.eql(\"AUTH_INVALID_CREDENTIALS\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "02.3 — Unexpected field in login (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/login",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{ada_email}}\",\"password\":\"{{demo_password}}\",\"remember\":true}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "02.4 — Login validation: missing password (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/login",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{ada_email}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "02.5 — Login Ada, save separate SID (200)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/login",
+            "description": "The response cookie is stored in a Postman collection variable for distinct user sessions. Never export or commit live SID values.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{ada_email}}\",\"password\":\"{{demo_password}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Correct Ada login identity\", () => pm.expect(data.id).to.eql(pm.collectionVariables.get(\"ada_id\")));",
+                  "pm.test(\"No password hash / sensitive fields\", () => { pm.expect(data).to.not.have.property(\"passwordHash\"); pm.expect(data).to.not.have.property(\"tokenHash\"); });",
+                  "const cookieHeader = pm.response.headers.get(\"Set-Cookie\") || \"\";",
+                  "const sidMatch = cookieHeader.match(/(?:^|[,\\s])sid=([^;\\s,]+)/);",
+                  "pm.test(\"SID cookie set, HttpOnly, Secure, SameSite=Lax\", () => {pm.expect(sidMatch).to.not.eql(null); pm.expect(cookieHeader).to.include(\"HttpOnly\"); pm.expect(cookieHeader).to.include(\"Secure\"); pm.expect(cookieHeader).to.include(\"SameSite=Lax\");});",
+                  "if(sidMatch)pm.collectionVariables.set(\"ada_sid\",sidMatch[1]);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "02.6 — Login Bob, save separate SID (200)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/login",
+            "description": "The response cookie is stored in a Postman collection variable for distinct user sessions. Never export or commit live SID values.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{bob_email}}\",\"password\":\"{{demo_password}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Correct Bob login identity\", () => pm.expect(data.id).to.eql(pm.collectionVariables.get(\"bob_id\")));",
+                  "pm.test(\"No password hash / sensitive fields\", () => { pm.expect(data).to.not.have.property(\"passwordHash\"); pm.expect(data).to.not.have.property(\"tokenHash\"); });",
+                  "const cookieHeader = pm.response.headers.get(\"Set-Cookie\") || \"\";",
+                  "const sidMatch = cookieHeader.match(/(?:^|[,\\s])sid=([^;\\s,]+)/);",
+                  "pm.test(\"SID cookie set, HttpOnly, Secure, SameSite=Lax\", () => {pm.expect(sidMatch).to.not.eql(null); pm.expect(cookieHeader).to.include(\"HttpOnly\"); pm.expect(cookieHeader).to.include(\"Secure\"); pm.expect(cookieHeader).to.include(\"SameSite=Lax\");});",
+                  "if(sidMatch)pm.collectionVariables.set(\"bob_sid\",sidMatch[1]);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "02.7 — Login Carol, save separate SID (200)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/login",
+            "description": "The response cookie is stored in a Postman collection variable for distinct user sessions. Never export or commit live SID values.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{carol_email}}\",\"password\":\"{{demo_password}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Correct Carol login identity\", () => pm.expect(data.id).to.eql(pm.collectionVariables.get(\"carol_id\")));",
+                  "pm.test(\"No password hash / sensitive fields\", () => { pm.expect(data).to.not.have.property(\"passwordHash\"); pm.expect(data).to.not.have.property(\"tokenHash\"); });",
+                  "const cookieHeader = pm.response.headers.get(\"Set-Cookie\") || \"\";",
+                  "const sidMatch = cookieHeader.match(/(?:^|[,\\s])sid=([^;\\s,]+)/);",
+                  "pm.test(\"SID cookie set, HttpOnly, Secure, SameSite=Lax\", () => {pm.expect(sidMatch).to.not.eql(null); pm.expect(cookieHeader).to.include(\"HttpOnly\"); pm.expect(cookieHeader).to.include(\"Secure\"); pm.expect(cookieHeader).to.include(\"SameSite=Lax\");});",
+                  "if(sidMatch)pm.collectionVariables.set(\"carol_sid\",sidMatch[1]);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "02.8 — GET /auth/me as Ada (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Authenticated as Ada\", () => {pm.expect(data.id).to.eql(pm.collectionVariables.get(\"ada_id\"));pm.expect(data.email).to.eql(pm.collectionVariables.get(\"ada_email\"));});",
+                  "pm.test(\"No password hash / sensitive fields\", () => { pm.expect(data).to.not.have.property(\"passwordHash\"); pm.expect(data).to.not.have.property(\"tokenHash\"); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "02.9 — GET /auth/me as Bob (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{bob_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Authenticated as Bob\", () => {pm.expect(data.id).to.eql(pm.collectionVariables.get(\"bob_id\"));pm.expect(data.email).to.eql(pm.collectionVariables.get(\"bob_email\"));});",
+                  "pm.test(\"No password hash / sensitive fields\", () => { pm.expect(data).to.not.have.property(\"passwordHash\"); pm.expect(data).to.not.have.property(\"tokenHash\"); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "02.10 — GET /auth/me as Carol (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{carol_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Authenticated as Carol\", () => {pm.expect(data.id).to.eql(pm.collectionVariables.get(\"carol_id\"));pm.expect(data.email).to.eql(pm.collectionVariables.get(\"carol_email\"));});",
+                  "pm.test(\"No password hash / sensitive fields\", () => { pm.expect(data).to.not.have.property(\"passwordHash\"); pm.expect(data).to.not.have.property(\"tokenHash\"); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "02.11 — Bad SID rejected by /auth/me (401)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid=invalid-token-do-not-use",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error code: UNAUTHORIZED\", () => pm.expect(pm.response.json().error.code).to.eql(\"UNAUTHORIZED\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 — Profiles and authorization",
+      "description": "Public profile contains only id/displayName/avatarUrl; PATCH /users/me updates only the authenticated user.",
+      "item": [
+        {
+          "name": "03.1 — Bob public profile read as Ada (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/{{bob_id}}",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Only three public profile fields\", () => {pm.expect(Object.keys(data).sort()).to.eql([\"avatarUrl\",\"displayName\",\"id\"]);pm.expect(data.id).to.eql(pm.collectionVariables.get(\"bob_id\"));pm.expect(data.displayName).to.eql(pm.collectionVariables.get(\"bob_name\"));});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "03.2 — Unknown user profile (404)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/00000000-0000-4000-8000-000000000001",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Error code: USER_NOT_FOUND\", () => pm.expect(pm.response.json().error.code).to.eql(\"USER_NOT_FOUND\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "03.3 — Invalid UUID profile (400)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/not-a-uuid",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "03.4 — Update own displayName (trimmed, 200)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"displayName\":\"  {{run_marker}}-AdaUpdated  \"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Name is trimmed and only Ada changed\", () => {pm.expect(data.id).to.eql(pm.collectionVariables.get(\"ada_id\")); pm.expect(data.displayName).to.eql(pm.collectionVariables.get(\"run_marker\") + \"-AdaUpdated\");});",
+                  "pm.test(\"No password hash / sensitive fields\", () => { pm.expect(data).to.not.have.property(\"passwordHash\"); pm.expect(data).to.not.have.property(\"tokenHash\"); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "03.5 — GET /auth/me reflects updated name (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Own profile mutation persisted\", () => pm.expect(data.displayName).to.eql(pm.collectionVariables.get(\"run_marker\") + \"-AdaUpdated\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "03.6 — Bob profile unchanged (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/{{bob_id}}",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Other user unchanged\", () => pm.expect(data.displayName).to.eql(pm.collectionVariables.get(\"bob_name\")));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "03.7 — Empty displayName rejected (400)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"displayName\":\"   \"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "03.8 — displayName above 64 rejected (400)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"displayName\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "03.9 — Attempt to change email rejected (400)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"displayName\":\"KeepName\",\"email\":\"attacker@example.com\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "03.10 — Invalid SID cannot edit profile (401)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid=invalid-token-do-not-use",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"displayName\":\"ShouldNotChange\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error code: UNAUTHORIZED\", () => pm.expect(pm.response.json().error.code).to.eql(\"UNAUTHORIZED\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 — Public User Search",
+      "description": "Tests case-insensitivity, privacy, caller exclusion, limits, LIKE literal underscore, and validation. Search is not an email lookup.",
+      "item": [
+        {
+          "name": "04.1 — Search by case-insensitive run marker (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users?search={{run_marker}}&limit=20",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Search finds Bob and Carol, excludes Ada\", () => {pm.expect(data).to.be.an(\"array\"); const ids=data.map(u=>u.id);pm.expect(ids).to.include(pm.collectionVariables.get(\"bob_id\"));pm.expect(ids).to.include(pm.collectionVariables.get(\"carol_id\"));pm.expect(ids).to.not.include(pm.collectionVariables.get(\"ada_id\"));});",
+                  "pm.test(\"Only public fields in every result\", () => data.forEach(u=>pm.expect(Object.keys(u).sort()).to.eql([\"avatarUrl\",\"displayName\",\"id\"])));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "04.2 — Case-insensitive substring (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users?search=bOb&limit=20",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Bob found case-insensitively\", () => pm.expect(data.some(u => u.id === pm.collectionVariables.get(\"bob_id\"))).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "04.3 — Limit=1 (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users?search={{run_marker}}&limit=1",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"At most one result\", () => pm.expect(data.length).to.be.at.most(1));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "04.4 — Own name excluded (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users?search={{run_marker}}-AdaUpdated",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Signed-in user not listed\", () => pm.expect(data).to.eql([]));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "04.5 — Email-only substring never searched (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users?search=private-{{run_id}}",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"No email search\", () => pm.expect(data).to.eql([]));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "04.6 — Literal underscore in name (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users?search={{run_marker}}-Carol_100",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Carol with literal underscore found\", () => pm.expect(data.some(u => u.id === pm.collectionVariables.get(\"carol_id\"))).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "04.7 — Search too short (400)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users?search=a",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "04.8 — Search missing (400)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "04.9 — Invalid limit=100 (400)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users?search=Bob&limit=100",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "04.10 — Invalid limit=01 (400)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users?search=Bob&limit=01",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "04.11 — Unknown query key (400)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users?search=Bob&sort=email",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "04.12 — Unauthorized search (401)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid=invalid-token-do-not-use",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users?search=Bob",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error code: UNAUTHORIZED\", () => pm.expect(pm.response.json().error.code).to.eql(\"UNAUTHORIZED\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 — Friends: complete lifecycle",
+      "description": "Order-sensitive workflow: send -> duplicate/reverse prevention -> incoming/outgoing -> unauthorized accept -> accept -> presence snapshot -> unfriend -> decline/cancel. Re-running a single step out of order may cause conflicts.",
+      "item": [
+        {
+          "name": "05.1 — Initially empty friends (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friends",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"No accepted friends\", () => pm.expect(data).to.eql([]));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.2 — Ada sends Bob a request (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"targetUserId\":\"{{bob_id}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Pending outgoing request\", () => {pm.expect(data.status).to.eql(\"pending\");pm.expect(data.direction).to.eql(\"outgoing\");pm.expect(data.user.id).to.eql(pm.collectionVariables.get(\"bob_id\"));});",
+                  "pm.collectionVariables.set(\"request_id\", data.id);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.3 — Duplicate pending pair (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"targetUserId\":\"{{bob_id}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"Error code: FRIENDSHIP_ALREADY_EXISTS\", () => pm.expect(pm.response.json().error.code).to.eql(\"FRIENDSHIP_ALREADY_EXISTS\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.4 — Opposite-direction pending pair (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{bob_sid}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"targetUserId\":\"{{ada_id}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"Error code: FRIENDSHIP_ALREADY_EXISTS\", () => pm.expect(pm.response.json().error.code).to.eql(\"FRIENDSHIP_ALREADY_EXISTS\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.5 — Ada outgoing requests (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Outgoing includes Bob\", () => {pm.expect(data.incoming).to.eql([]);pm.expect(data.outgoing.some(r => r.id === pm.collectionVariables.get(\"request_id\") && r.user.id === pm.collectionVariables.get(\"bob_id\"))).to.eql(true);});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.6 — Bob incoming requests (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{bob_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Incoming from Ada\", () => pm.expect(data.incoming.some(r => r.id === pm.collectionVariables.get(\"request_id\") && r.user.id === pm.collectionVariables.get(\"ada_id\"))).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.7 — Carol cannot see Ada/Bob requests (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{carol_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Third-party requests private\", () => {pm.expect(data.incoming).to.eql([]);pm.expect(data.outgoing).to.eql([]);});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.8 — Self-friend request rejected (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"targetUserId\":\"{{ada_id}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.9 — Invalid target UUID rejected (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"targetUserId\":\"not-a-uuid\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.10 — Unknown target rejected (404)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"targetUserId\":\"00000000-0000-4000-8000-000000000001\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Error code: USER_NOT_FOUND\", () => pm.expect(pm.response.json().error.code).to.eql(\"USER_NOT_FOUND\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.11 — Extra request body field rejected (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"targetUserId\":\"{{bob_id}}\",\"isAdmin\":true}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.12 — Sender cannot accept own outgoing (404)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests/{{request_id}}/accept",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Error code: FRIEND_REQUEST_NOT_FOUND\", () => pm.expect(pm.response.json().error.code).to.eql(\"FRIEND_REQUEST_NOT_FOUND\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.13 — Outsider cannot accept (404)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{carol_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests/{{request_id}}/accept",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Error code: FRIEND_REQUEST_NOT_FOUND\", () => pm.expect(pm.response.json().error.code).to.eql(\"FRIEND_REQUEST_NOT_FOUND\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.13a — Outsider cannot decline an unrelated pending request (404)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{carol_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests/{{request_id}}",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Error code: FRIEND_REQUEST_NOT_FOUND\", () => pm.expect(pm.response.json().error.code).to.eql(\"FRIEND_REQUEST_NOT_FOUND\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.13b — Pending request is not yet an accepted friend (404)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friends/{{bob_id}}",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Error code: FRIENDSHIP_NOT_FOUND\", () => pm.expect(pm.response.json().error.code).to.eql(\"FRIENDSHIP_NOT_FOUND\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.13c — Unauthenticated accept rejected (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid=invalid-token-do-not-use",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests/{{request_id}}/accept",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error code: UNAUTHORIZED\", () => pm.expect(pm.response.json().error.code).to.eql(\"UNAUTHORIZED\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.14 — Bob accepts Ada request (200)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{bob_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests/{{request_id}}/accept",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Friendship accepted by recipient\", () => {pm.expect(data.status).to.eql(\"accepted\");pm.expect(data.id).to.eql(pm.collectionVariables.get(\"request_id\"));pm.expect(data.user.id).to.eql(pm.collectionVariables.get(\"ada_id\"));pm.expect(data.acceptedAt).to.be.a(\"string\");});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.15 — Cannot accept twice (404)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{bob_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests/{{request_id}}/accept",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Error code: FRIEND_REQUEST_NOT_FOUND\", () => pm.expect(pm.response.json().error.code).to.eql(\"FRIEND_REQUEST_NOT_FOUND\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.16 — Ada friends include Bob + isOnline boolean (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friends",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Accepted friendship snapshot\", () => {const x=data.find(x=>x.user.id===pm.collectionVariables.get(\"bob_id\"));pm.expect(x).to.be.an(\"object\");pm.expect(x.id).to.eql(pm.collectionVariables.get(\"request_id\"));pm.expect(x.isOnline).to.be.a(\"boolean\");pm.expect(x.friendsSince).to.be.a(\"string\");pm.expect(Object.keys(x.user).sort()).to.eql([\"avatarUrl\",\"displayName\",\"id\"]);});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.17 — Bob friends include Ada (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{bob_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friends",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Friendship symmetric\", () => pm.expect(data.some(x=>x.user.id===pm.collectionVariables.get(\"ada_id\"))).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.18 — Pending lists empty once accepted (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"No pending request after acceptance\", () => {pm.expect(data.incoming).to.eql([]);pm.expect(data.outgoing).to.eql([]);});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.19 — Duplicate accepted friendship rejected (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"targetUserId\":\"{{bob_id}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"Error code: FRIENDSHIP_ALREADY_EXISTS\", () => pm.expect(pm.response.json().error.code).to.eql(\"FRIENDSHIP_ALREADY_EXISTS\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.20 — Outsider cannot remove Bob/Ada relationship (404)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{carol_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friends/{{ada_id}}",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Error code: FRIENDSHIP_NOT_FOUND\", () => pm.expect(pm.response.json().error.code).to.eql(\"FRIENDSHIP_NOT_FOUND\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.21 — Bob removes friendship (204)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{bob_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friends/{{ada_id}}",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.22 — Ada friends empty again (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friends",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Friendship removed\", () => pm.expect(data).to.eql([]));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.23 — Cannot remove twice (404)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friends/{{bob_id}}",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Error code: FRIENDSHIP_NOT_FOUND\", () => pm.expect(pm.response.json().error.code).to.eql(\"FRIENDSHIP_NOT_FOUND\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.24 — Re-request after removal (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"targetUserId\":\"{{bob_id}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "const data = pm.response.json().data;",
+                  "pm.collectionVariables.set(\"request_id\", data.id);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.25 — Bob declines request (204)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{bob_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests/{{request_id}}",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.26 — Declined request cannot be deleted twice (404)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests/{{request_id}}",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Error code: FRIEND_REQUEST_NOT_FOUND\", () => pm.expect(pm.response.json().error.code).to.eql(\"FRIEND_REQUEST_NOT_FOUND\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.27 — Ada sends request to cancel (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"targetUserId\":\"{{bob_id}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "const data = pm.response.json().data;",
+                  "pm.collectionVariables.set(\"request_id\", data.id);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.28 — Sender cancels request (204)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests/{{request_id}}",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.29 — Invalid UUID on accept (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests/not-uuid/accept",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.30 — Unauthorized friends list (401)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid=invalid-token-do-not-use",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friends",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error code: UNAUTHORIZED\", () => pm.expect(pm.response.json().error.code).to.eql(\"UNAUTHORIZED\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "05.31 — Unauthorized request mutation (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid=invalid-token-do-not-use",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friend-requests",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"targetUserId\":\"{{bob_id}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error code: UNAUTHORIZED\", () => pm.expect(pm.response.json().error.code).to.eql(\"UNAUTHORIZED\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 — Avatar uploads (local files required)",
+      "description": "Optional file-backed folder: first attach three fixtures in Postman (or run with Newman using correct working directory). Do not claim fully automated portable uploads without their fixtures. No user cleanup on completion.",
+      "item": [
+        {
+          "name": "06.1 — No avatar initially: GET returns 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/{{ada_id}}/avatar",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Error code: AVATAR_NOT_FOUND\", () => pm.expect(pm.response.json().error.code).to.eql(\"AVATAR_NOT_FOUND\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.1a — Missing file rejected (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/avatar",
+            "description": "Explicit empty multipart body: backend requires a single image file.",
+            "body": {
+              "mode": "formdata",
+              "formdata": []
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.1b — Malformed avatar user UUID rejected (400)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/not-a-uuid/avatar",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.1c — Unauthenticated upload rejected (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid=invalid-token-do-not-use",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/avatar",
+            "description": "Requires valid PNG fixture even though global session guard should block first.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "{{fixtures_dir}}/um-avatar.png"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error code: UNAUTHORIZED\", () => pm.expect(pm.response.json().error.code).to.eql(\"UNAUTHORIZED\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.2 — Upload PNG (fixture required), returns user (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/avatar",
+            "description": "Requires tests/postman/fixtures/um-avatar.png. In Postman desktop, select the bundled PNG in the file picker. Browser Origin may be omitted by Postman.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "{{fixtures_dir}}/um-avatar.png"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Avatar URL generated for own ID\", () => pm.expect(data.avatarUrl).to.eql(\"/api/v1/users/\"+pm.collectionVariables.get(\"ada_id\")+\"/avatar\"));",
+                  "pm.test(\"No password hash / sensitive fields\", () => { pm.expect(data).to.not.have.property(\"passwordHash\"); pm.expect(data).to.not.have.property(\"tokenHash\"); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.3 — Bob can view Ada image: WebP binary (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{bob_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/{{ada_id}}/avatar",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Canonical WebP media type\", () => pm.expect(pm.response.headers.get(\"Content-Type\")||\"\").to.include(\"image/webp\"));",
+                  "pm.test(\"No-store and no-sniff headers\", () => {pm.expect(pm.response.headers.get(\"Cache-Control\")||\"\").to.include(\"no-store\");pm.expect(pm.response.headers.get(\"X-Content-Type-Options\")).to.eql(\"nosniff\");});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.4 — Public profile exposes generated avatar URL (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{bob_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/{{ada_id}}",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Public profile reflects avatar\", () => pm.expect(data.avatarUrl).to.eql(\"/api/v1/users/\"+pm.collectionVariables.get(\"ada_id\")+\"/avatar\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.5 — Replace image with JPEG (fixture required) (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/avatar",
+            "description": "Requires tests/postman/fixtures/um-avatar-replacement.jpg.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "{{fixtures_dir}}/um-avatar-replacement.jpg"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Avatar URL stays stable on replacement\", () => pm.expect(data.avatarUrl).to.eql(\"/api/v1/users/\"+pm.collectionVariables.get(\"ada_id\")+\"/avatar\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.6 — Invalid image bytes rejected (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/avatar",
+            "description": "Requires tests/postman/fixtures/um-invalid.txt (not a real image). Existing valid avatar should remain.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "{{fixtures_dir}}/um-invalid.txt"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error code: VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));",
+                  "pm.test(\"Uploaded malformed bytes (not a missing file)\", () => pm.expect(pm.response.json().error.details.file).to.include(\"Invalid or unsupported image\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.7 — Extra multipart field rejected (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/avatar",
+            "description": "Extra form field is rejected (files=1 fields=0 parts=1).",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "{{fixtures_dir}}/um-avatar.png"
+                },
+                {
+                  "key": "unexpected",
+                  "value": "not-allowed",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.8 — Cross-origin upload forbidden (403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "https://evil.invalid",
+                "type": "text"
+              },
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/avatar",
+            "description": "An untrusted Origin is forbidden. Depending on gateway rules the 403 may come from WAF or backend; this request does not attribute it.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "{{fixtures_dir}}/um-avatar.png"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"Forbidden upload does not return success\", () => pm.expect(pm.response.code).to.eql(403));",
+                  "pm.test(\"Backend origin guard rejected the request\", () => pm.expect(pm.response.json().error.code).to.eql(\"INVALID_ORIGIN\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.9 — Avatar remains available after rejected replacements (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{bob_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/{{ada_id}}/avatar",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Retained valid avatar\", () => pm.expect(pm.response.headers.get(\"Content-Type\")||\"\").to.include(\"image/webp\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.10 — Unauthorized avatar GET rejected (401)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid=invalid-token-do-not-use",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/{{ada_id}}/avatar",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error code: UNAUTHORIZED\", () => pm.expect(pm.response.json().error.code).to.eql(\"UNAUTHORIZED\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.11 — Unauthorized avatar deletion rejected (401)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid=invalid-token-do-not-use",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/avatar",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error code: UNAUTHORIZED\", () => pm.expect(pm.response.json().error.code).to.eql(\"UNAUTHORIZED\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.12 — Delete own avatar (204)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/avatar",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.13 — Deleting absent avatar is idempotent (204)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/avatar",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.14 — GET after delete returns 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{bob_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/{{ada_id}}/avatar",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Error code: AVATAR_NOT_FOUND\", () => pm.expect(pm.response.json().error.code).to.eql(\"AVATAR_NOT_FOUND\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "06.15 — /auth/me avatarUrl reset to null (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Fallback avatar state restored\", () => pm.expect(data.avatarUrl).to.eql(null));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 — Presence (HTTP prerequisites, not live realtime)",
+      "description": "The full online/offline and friend-only events require socket.io-client. This folder intentionally avoids claiming those results based on an HTTP 200 handshake.",
+      "item": [
+        {
+          "name": "07.1 — /friends is a presence snapshot (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/me/friends",
+            "description": "HTTP alone cannot mark users online. After section 05 unfriend, the list is expected to be empty. To test actual presence transitions, use an authenticated Socket.IO client and an accepted friendship."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Presence snapshot is an array\", () => pm.expect(data).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "07.2 — Engine.IO polling transport handshake (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/socket.io/?EIO=4&transport=polling",
+            "description": "IMPORTANT: This only validates transport-level opening; it does NOT authenticate the Socket.IO namespace, mark Ada online or verify presence:changed. A real socket.io-client is needed for those."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Engine.IO opening packet\", () => {const raw=pm.response.text();pm.expect(raw.charAt(0)).to.eql(\"0\"); const message=JSON.parse(raw.slice(1));pm.expect(message.sid).to.be.a(\"string\");});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 — Logout, SID revocation and session isolation",
+      "description": "Logout invalidates only the current session. End here to discard locally captured SID values. Created user accounts intentionally remain in dev database.",
+      "item": [
+        {
+          "name": "08.1 — Logout without a valid SID (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid=invalid-token-do-not-use",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/logout",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error code: UNAUTHORIZED\", () => pm.expect(pm.response.json().error.code).to.eql(\"UNAUTHORIZED\"));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "08.2 — Ada logout invalidates her SID (204)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/logout",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "08.3 — Ada old SID rejected after logout (401)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{ada_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error code: UNAUTHORIZED\", () => pm.expect(pm.response.json().error.code).to.eql(\"UNAUTHORIZED\"));",
+                  "pm.collectionVariables.unset(\"ada_sid\");"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "08.4 — Bob remains authenticated after Ada logs out (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{bob_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"Independent Bob session remains active\", () => pm.expect(data.id).to.eql(pm.collectionVariables.get(\"bob_id\")));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "08.5 — Bob logout (204)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{bob_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/logout",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "08.6 — Bob old SID rejected (401)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{bob_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error code: UNAUTHORIZED\", () => pm.expect(pm.response.json().error.code).to.eql(\"UNAUTHORIZED\"));",
+                  "pm.collectionVariables.unset(\"bob_sid\");"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "08.7 — Carol logout (204)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{carol_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/logout",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "08.8 — Carol old SID rejected (401)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "sid={{carol_sid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"Error code: UNAUTHORIZED\", () => pm.expect(pm.response.json().error.code).to.eql(\"UNAUTHORIZED\"));",
+                  "pm.collectionVariables.unset(\"carol_sid\");",
+                  "pm.collectionVariables.unset(\"demo_password\");"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "noauth"
+  },
+  "event": [],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://transcendence.test:8443",
+      "type": "string",
+      "description": "Local authorized HTTPS gateway only."
+    },
+    {
+      "key": "fixtures_dir",
+      "value": "tests/postman/fixtures",
+      "type": "string",
+      "description": "Single editable folder for avatar file fixtures. Relative to Postman/Newman working directory (normally the repository root). May be set to an absolute path if supported by the local runner."
+    },
+    {
+      "key": "run_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "run_marker",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "demo_password",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ada_email",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bob_email",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "carol_email",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ada_name",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bob_name",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "carol_name",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ada_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bob_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "carol_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "request_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ada_sid",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bob_sid",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "carol_sid",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "protocolProfileBehavior": {
+    "disableCookies": true
+  }
+}

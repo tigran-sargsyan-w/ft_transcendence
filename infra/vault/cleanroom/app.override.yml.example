@@ -5,6 +5,20 @@ services:
         source: "${FT_CR_TLS_DIR:?Set FT_CR_TLS_DIR}/ca.crt"
         target: /vault/tls/ca.crt
         read_only: true
+  vault-migrator-rotate:
+    volumes:
+      - type: bind
+        source: ${FT_CR_TLS_DIR:?Set FT_CR_TLS_DIR}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+
+  vault-postgres-provisioner-rotate:
+    volumes:
+      - type: bind
+        source: ${FT_CR_TLS_DIR:?Set FT_CR_TLS_DIR}/ca.crt
+        target: /vault/tls/ca.crt
+        read_only: true
+
   backend:
     ports: !reset []
 

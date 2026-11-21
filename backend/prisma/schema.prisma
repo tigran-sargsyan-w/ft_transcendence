@@ -11,9 +11,21 @@ model User {
   id           String    @id @default(uuid()) @db.Uuid
   email        String    @unique
   passwordHash String
+  displayName  String
+  // null = no avatar yet.
+  avatarUrl    String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   sessions     Session[]
+  avatar        UserAvatar?
+
+  createdIncidents   Incident[]      @relation("IncidentCreator")
+  commandedIncidents Incident[]      @relation("IncidentCommander")
+  incidentEvents     IncidentEvent[]
+
+  friendshipsAsLow       Friendship[] @relation("FriendshipLow")
+  friendshipsAsHigh      Friendship[] @relation("FriendshipHigh")
+  friendshipRequestsSent Friendship[] @relation("FriendshipRequester")
 
   @@map("users")
 }
@@ -28,4 +40,87 @@ model Session {
   expiresAt DateTime
 
   @@map("sessions")
+}
+
+// Incident room v1 (docs/adr/0004). `severity` and `status` are plain text:
+// the allowed values are in the code (incident-events.ts) and checked by the
+// DTOs, so the rules do not depend on the generated client.
+model Incident {
+  id               String          @id @default(uuid()) @db.Uuid
+  environmentId    String
+  title            String
+  // sev1 (most severe) to sev4.
+  severity         String
+  // open, investigating or resolved.
+  status           String
+  seedNodeIds      String[]
+  createdById      String          @db.Uuid
+  createdBy        User            @relation("IncidentCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  commanderId      String          @db.Uuid
+  commander        User            @relation("IncidentCommander", fields: [commanderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  // The topology the incident was opened against.
+  openedAtEpoch    String
+  openedAtRevision Int
+  // Starts at 1, +1 for each update (optimistic locking).
+  version          Int             @default(1)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  events           IncidentEvent[]
+
+  @@map("incidents")
+}
+
+// The timeline: rows are only ever inserted.
+model IncidentEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  // Sorts the timeline: the order of insertion, with gaps.
+  seq        Int      @default(autoincrement())
+  incidentId String   @db.Uuid
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  // The incident version this event belongs to (a note: the version read).
+  version    Int
+  // created, title_changed, severity_changed, status_changed,
+  // commander_changed or note_added.
+  type       String
+  actorId    String   @db.Uuid
+  actor      User     @relation(fields: [actorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  data       Json
+  createdAt  DateTime @default(now())
+
+  @@index([incidentId, seq])
+  @@map("incident_events")
+}
+
+// One canonical record per unordered pair of users. Database CHECK constraints
+// enforce pair ordering, requester membership and status/timestamp consistency.
+model Friendship {
+  id            String    @id @default(uuid()) @db.Uuid
+  userLowId     String    @db.Uuid
+  userHighId    String    @db.Uuid
+  requestedById String    @db.Uuid
+  status        String    @default("pending") // pending | accepted
+  createdAt     DateTime  @default(now())
+  acceptedAt    DateTime?
+
+  userLow       User      @relation("FriendshipLow", fields: [userLowId], references: [id], onDelete: Cascade)
+  userHigh      User      @relation("FriendshipHigh", fields: [userHighId], references: [id], onDelete: Cascade)
+  requestedBy   User      @relation("FriendshipRequester", fields: [requestedById], references: [id], onDelete: Cascade)
+
+  @@unique([userLowId, userHighId])
+  @@index([userLowId, status])
+  @@index([userHighId, status])
+  @@index([requestedById, status])
+  @@map("friendships")
+}
+
+// Avatars are stored outside User so normal profile reads never load image bytes.
+model UserAvatar {
+  userId    String   @id @db.Uuid
+  data      Bytes    @db.ByteA
+  mimeType  String   @db.VarChar(32)
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_avatars")
 }

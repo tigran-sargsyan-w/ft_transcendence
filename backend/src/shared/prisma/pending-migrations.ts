@@ -2,16 +2,14 @@ import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { PrismaService } from './prisma.service.js';
 
-// Where `prisma migrate deploy` reads them (prisma.config.ts): one folder per
-// migration, relative to the working directory.
-const MIGRATIONS_DIR = join(process.cwd(), 'prisma', 'migrations');
-
 // The migrations of the repository that the database has not applied, or did
 // not finish. A backend started before `prisma migrate deploy`, or after a
 // new migration was pulled, would fail on its first query.
+// They are read where `prisma migrate deploy` reads them (prisma.config.ts):
+// one folder per migration, relative to the working directory.
 export async function pendingMigrations(
   prisma: Pick<PrismaService, '$queryRaw'>,
-  dir = MIGRATIONS_DIR,
+  dir = join(process.cwd(), 'prisma', 'migrations'),
 ) {
   const folders = (await readdir(dir, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())

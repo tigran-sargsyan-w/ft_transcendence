@@ -20,9 +20,9 @@ export class AnalyzeDto {
   @IsIn(ANALYSES, { each: true })
   analyses!: string[];
 
-  // The engine requires them for blast_radius and attack_paths, and refuses
-  // an id that is not in the topology: it answers GRAPH_MISSING_SEEDS or
-  // GRAPH_INVALID_TOPOLOGY, which is passed on.
+  // Required for blast_radius and attack_paths, and each id must be a node of
+  // the topology. The service checks both before calling the engine, so the
+  // user gets a VALIDATION_ERROR that names this field.
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(50)

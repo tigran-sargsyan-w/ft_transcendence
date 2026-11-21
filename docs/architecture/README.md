@@ -9,7 +9,10 @@ Documents here should stay short and stable. Concrete stack and product decision
 - [Principles and module boundaries](./principles.md)
 - [Authentication and users](./auth-and-users.md)
 - [API conventions](./api-conventions.md)
+- [User Management API](./user-management-v1.md)
+- [User Management frontend integration guide](./user-management-frontend-api.md)
 - [Graph contract](./graph-contract.md) (topology snapshot and analyze API v0)
+- [Graph Engine analyses cheat-sheet](./graph-engine-analyses.md) (which analysis when; frontend→Nest vs Nest→engine)
 - [Collector contract](./collector-contract.md) (Docker collector snapshot and events, draft v0)
 - [Topology mapping](./topology-mapping.md) (collector containers to graph nodes and edges)
 - [Incident Room contract](./incident-room-contract.md) (incidents REST and realtime events, frontend draft v0)
@@ -19,6 +22,7 @@ Documents here should stay short and stable. Concrete stack and product decision
 - [Real-time conventions](./realtime-conventions.md)
 - [Realtime topology protocol](./realtime-topology.md) (Socket.IO: snapshot, deltas, revisions)
 - [Analyses API](./analysis-api.md) (HTTP: blast radius, attack paths, critical nodes on the live topology)
+- [Incidents API](./incidents-api.md) (HTTP: incidents, timeline and notes, optimistic locking)
 - [Architecture Decision Records](../adr/README.md)
 
 ## Current status
@@ -32,6 +36,7 @@ Documents here should stay short and stable. Concrete stack and product decision
 - Graph Engine (product-specific) — Python FastAPI + NetworkX, plain HTTP/JSON — [ADR 0001](../adr/0001-python-graph-engine.md), [graph contract](./graph-contract.md)
 - authentication — server-side sessions with an opaque cookie — [ADR 0002](../adr/0002-server-side-sessions.md)
 - realtime transport — Socket.IO — [realtime topology protocol](./realtime-topology.md)
+- incident events and topology history — append-only tables, optimistic locking on incidents — [ADR 0004](../adr/0004-incident-events-and-topology-history.md), [incidents API](./incidents-api.md) (issue #119)
 
 **Proposed / pending team review:**
 

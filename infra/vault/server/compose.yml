@@ -1,4 +1,4 @@
-name: transcendence-vault-poc
+name: transcendence-vault-dev
 
 services:
   vault-storage-permissions:
@@ -41,7 +41,7 @@ services:
       - vault_data:/vault/data
       - backend_agent_auth:/vault/backend-auth
       - backend_rendered:/vault/backend-rendered
-      - ./tls:/vault/tls
+      - ${FT_DEV_TLS_DIR:?Set FT_DEV_TLS_DIR}:/vault/tls
 
     network_mode: none
     restart: "no"
@@ -56,7 +56,7 @@ services:
 
     volumes:
       - ./vault.hcl:/vault/config/vault.hcl:ro
-      - ./tls:/vault/tls:ro
+      - ${FT_DEV_TLS_DIR:?Set FT_DEV_TLS_DIR}:/vault/tls:ro
       - vault_data:/vault/data
 
     networks:
@@ -129,12 +129,33 @@ services:
       VAULT_CACERT: /vault/tls/ca.crt
 
     volumes:
-      - ./tls/ca.crt:/vault/tls/ca.crt:ro
+      - ${FT_DEV_TLS_DIR:?Set FT_DEV_TLS_DIR}/ca.crt:/vault/tls/ca.crt:ro
       - backend_agent_auth:/vault/auth
 
     networks:
       - vault_private
 
+    restart: "no"
+
+
+  vault-backend-rotate:
+    image: python:3.12-alpine
+    profiles: [maintenance]
+    user: "100:1000"
+    entrypoint: ["python3", "/vault/scripts/rotate-approle.py", "backend-reader", "/vault/auth"]
+    command: ["rotate"]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ../scripts/rotate-approle.py:/vault/scripts/rotate-approle.py:ro
+      - ${FT_DEV_TLS_DIR:?Set FT_DEV_TLS_DIR}/ca.crt:/vault/tls/ca.crt:ro
+      - backend_agent_auth:/vault/auth
+    networks:
+      - vault_private
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     restart: "no"
 
   vault-bootstrap:
@@ -165,7 +186,7 @@ services:
     volumes:
       - ./bootstrap.sh:/vault/scripts/bootstrap.sh:ro
       - ../policies:/vault/policies:ro
-      - ./tls/ca.crt:/vault/tls/ca.crt:ro
+      - ${FT_DEV_TLS_DIR:?Set FT_DEV_TLS_DIR}/ca.crt:/vault/tls/ca.crt:ro
 
     networks:
       - vault_private
@@ -192,7 +213,7 @@ services:
     command: ["help"]
 
     volumes:
-      - ./tls:/vault/tls
+      - ${FT_DEV_TLS_DIR:?Set FT_DEV_TLS_DIR}:/vault/tls
       - ./tls-files.sh:/vault/scripts/tls-files.sh:ro
 
     network_mode: none
@@ -217,5 +238,5 @@ volumes:
 
 networks:
   vault_private:
-    driver: bridge
-    internal: true
+    external: true
+    name: transcendence-vault-dev_vault_private

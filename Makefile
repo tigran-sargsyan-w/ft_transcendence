@@ -2,30 +2,55 @@
 
 PYTHON ?= python3
 COMPOSE := docker compose -f compose.yml
+BOOTSTRAP := ./scripts/bootstrap.sh
 
-.PHONY: up setup check down clean domain-cleanup cert-cleanup trust-uninstall
+.PHONY: up start initialize recover health check-all plan acceptance \
+        setup check down clean domain-cleanup cert-cleanup trust-uninstall
 
-# Prepare the local environment and start containers
-up: setup
-	$(COMPOSE) up -d --build
+# Default entry point: use the guarded Vault-only startup, never raw Compose up.
+up start:
+	$(BOOTSTRAP) --start
 
-# Configure domain, TLS certificates and CA trust
+# First-time operator-approved provisioning (interactive; not for routine use).
+initialize:
+	$(BOOTSTRAP) --initialize
+
+# Trusted restoration after reboot; prompts for Shamir shares when Vault is sealed.
+recover:
+	$(BOOTSTRAP) --recover
+
+# Read-only end-to-end readiness and failure localization.
+health:
+	$(BOOTSTRAP) --health-report
+
+check-all:
+	$(BOOTSTRAP) --check-all
+
+plan:
+	$(BOOTSTRAP) --plan
+
+# Operator-initiated, non-destructive repeated-start acceptance on a healthy VM.
+acceptance:
+	$(PYTHON) scripts/dev/verify_startup_idempotency.py --runs 3
+
+# Legacy host-only helpers (not a substitute for --initialize).
 setup:
 	$(PYTHON) -m scripts.dev.domains setup
 	$(PYTHON) -m scripts.dev.certificates setup
 	$(PYTHON) -m scripts.dev.ca_trust setup
 
-# Verify the local environment
+# Host-only checks. Use `make health` to validate the whole application.
 check:
 	$(PYTHON) -m scripts.dev.domains check
 	$(PYTHON) -m scripts.dev.certificates check
 	$(PYTHON) -m scripts.dev.ca_trust check
 
-# Stop containers without removing them
+# Legacy raw-Compose maintenance operations: NOT part of trusted recovery.
+# These may leave an initialized runtime unable to resume via --start.
 down:
 	$(COMPOSE) stop
 
-# Remove project containers and networks, preserve volumes
+# Removes application containers/networks (volumes preserved). Never use as recovery.
 clean:
 	$(COMPOSE) down --remove-orphans
 
@@ -40,3 +65,83 @@ cert-cleanup:
 # Remove local CA trust (preserve CA and certificate files)
 trust-uninstall:
 	$(PYTHON) -m scripts.dev.ca_trust uninstall
+
+# Demo Lab only. The unprefixed `up`, `down`, and `health` targets above
+# retain their existing meanings and MUST NOT be used to operate the lab.
+DEMO_SCRIPT := ./demo-lab/demo.sh
+DEMO_WATCH := backend/scripts/demo-watch.mjs
+SERVICE ?= api
+EMAIL ?=
+
+.PHONY: demo-help demo-up demo-status demo-fail demo-recover \
+        demo-stop demo-start demo-recreate demo-add-worker demo-remove-worker \
+        demo-reset demo-logs demo-down demo-watch demo-watch-plain demo-test
+
+# Export values instead of interpolating them into shell source. demo.sh also
+# explicitly allowlists service names before invoking any Docker operation.
+demo-fail demo-recover demo-stop demo-start demo-recreate: export SERVICE := $(SERVICE)
+demo-watch demo-watch-plain: export EMAIL := $(EMAIL)
+
+demo-help:
+	$(DEMO_SCRIPT) help
+
+demo-up:
+	$(DEMO_SCRIPT) up
+
+demo-status:
+	$(DEMO_SCRIPT) status
+
+demo-fail:
+	$(DEMO_SCRIPT) fail "$$SERVICE"
+
+demo-recover:
+	$(DEMO_SCRIPT) recover "$$SERVICE"
+
+demo-stop:
+	$(DEMO_SCRIPT) stop "$$SERVICE"
+
+demo-start:
+	$(DEMO_SCRIPT) start "$$SERVICE"
+
+demo-recreate:
+	$(DEMO_SCRIPT) recreate "$$SERVICE"
+
+demo-add-worker:
+	$(DEMO_SCRIPT) add worker
+
+demo-remove-worker:
+	$(DEMO_SCRIPT) remove worker
+
+demo-reset:
+	$(DEMO_SCRIPT) reset
+
+demo-logs:
+	$(DEMO_SCRIPT) logs
+
+demo-down:
+	$(DEMO_SCRIPT) down
+
+# By default show real Graph Engine summaries; EMAIL skips the email prompt.
+# Passwords are still entered interactively and are never passed as arguments.
+demo-watch:
+	@if [ -n "$$EMAIL" ]; then \
+		node $(DEMO_WATCH) --analyze --email "$$EMAIL"; \
+	else \
+		node $(DEMO_WATCH) --analyze; \
+	fi
+
+# Plain Socket.IO observation, useful when testing two independent sessions.
+demo-watch-plain:
+	@if [ -n "$$EMAIL" ]; then \
+		node $(DEMO_WATCH) --email "$$EMAIL"; \
+	else \
+		node $(DEMO_WATCH); \
+	fi
+
+# Offline tests only: no Docker operations or demo startup.
+demo-test:
+	$(PYTHON) -m unittest discover -s demo-lab -p 'test_*.py'
+	node --test backend/scripts/demo-watch-format.test.mjs
+	bash -n $(DEMO_SCRIPT)
+	node --check $(DEMO_WATCH)
+	node --check backend/scripts/demo-watch-format.mjs

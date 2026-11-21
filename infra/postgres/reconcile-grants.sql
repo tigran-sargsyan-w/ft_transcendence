@@ -23,6 +23,11 @@ BEGIN
     IF to_regclass('public.users') IS NULL
        OR to_regclass('public.sessions') IS NULL
        OR to_regclass('public._prisma_migrations') IS NULL
+       OR to_regclass('public.incidents') IS NULL
+       OR to_regclass('public.incident_events') IS NULL
+       OR to_regclass('public.friendships') IS NULL
+       OR to_regclass('public.user_avatars') IS NULL
+       OR to_regclass('public.incident_events_seq_seq') IS NULL
     THEN
         RAISE EXCEPTION 'Required Prisma tables are missing';
     END IF;
@@ -45,7 +50,16 @@ REVOKE ALL PRIVILEGES
 ON TABLE
     public.users,
     public.sessions,
-    public._prisma_migrations
+    public._prisma_migrations,
+    public.incidents,
+    public.incident_events,
+    public.friendships,
+    public.user_avatars
+FROM transcendence_app;
+
+-- Remove previous sequence privileges before applying the allowlist.
+REVOKE ALL PRIVILEGES
+ON SEQUENCE public.incident_events_seq_seq
 FROM transcendence_app;
 
 -- Backend: application data access only.
@@ -56,6 +70,32 @@ TO transcendence_app;
 -- Backend: read-only Prisma migration status.
 GRANT SELECT
 ON TABLE public._prisma_migrations
+TO transcendence_app;
+
+-- Incident API: read, create and update incidents.
+GRANT SELECT, INSERT, UPDATE
+ON TABLE public.incidents
+TO transcendence_app;
+
+-- Incident timeline: append-only events.
+GRANT SELECT, INSERT
+ON TABLE public.incident_events
+TO transcendence_app;
+
+-- Friends API: a user can create, accept and delete friendships.
+-- Row ownership is enforced by the NestJS service, not by RLS in v1.
+GRANT SELECT, INSERT, UPDATE, DELETE
+ON TABLE public.friendships
+TO transcendence_app;
+
+-- Avatar API: only the application owns and updates the image rows.
+GRANT SELECT, INSERT, UPDATE, DELETE
+ON TABLE public.user_avatars
+TO transcendence_app;
+
+-- Required for the SERIAL event sequence.
+GRANT USAGE
+ON SEQUENCE public.incident_events_seq_seq
 TO transcendence_app;
 
 COMMIT;

@@ -1,11 +1,58 @@
 # ADR 0003: HashiCorp Vault for application secret delivery
 
-- Status: Proposed
+- Status: Implemented (local development; not production-ready)
 - Date: 2026-10-24
 - Owner: Tigran (infrastructure/security); Nathan owns NestJS/Prisma integration
 - Tracking: [Issue #92](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/92)
 
-## Context
+## Current implementation (November 2026)
+
+This ADR records the original architecture decision. The original
+context, proposal and open questions below are preserved as historical
+design material, not as descriptions of the current runtime.
+
+The local development implementation now includes:
+
+- HashiCorp Vault in normal server mode with persistent single-node
+  Raft storage and manually managed Shamir unseal.
+- TLS-protected Vault communication on a private Docker network,
+  without publishing the Vault API on the host.
+- KV v2 secret storage, dedicated AppRoles and narrowly scoped ACLs
+  for the backend, Prisma migrator and PostgreSQL provisioner.
+- Vault Agent file rendering with separate authentication and
+  secret-delivery volumes for the relevant consumers.
+- Separate PostgreSQL application and migration roles, with
+  restricted application permissions.
+- Vault-backed application startup through `scripts/dev-start.sh`,
+  with existing runtime preflight and readiness checks.
+- Operator-controlled AppRole SecretID rotation and recovery.
+
+The current development AppRole bootstrap configuration uses
+a 90-day SecretID TTL (`2160h`), unlimited SecretID uses (`0`),
+a 1-hour token TTL and a 4-hour maximum token TTL.
+Existing issued credentials may retain earlier limitations.
+
+### Operational boundaries
+
+- First-time initialization, provisioning and Shamir unseal require
+  trusted operator actions. The application startup command does
+  not remove these prerequisites.
+- Restarting a sealed Vault requires operator-assisted unseal.
+  Production-grade auto-unseal and high availability are not implemented.
+- PostgreSQL credentials are static until explicitly rotated.
+  Automatic end-to-end database credential rotation is not implemented.
+- Docker host administrators can access sensitive persistent volumes.
+- This architecture is intended for local development and evaluation,
+  not as a production deployment.
+
+### Implementation references
+
+- [Runtime operations](../../infra/vault/runtime/README.md)
+- [Vault server operations](../../infra/vault/server/vault-server-README.md)
+- [AppRole rotation](../../infra/vault/scripts/APPROLE-ROTATION.md)
+- [Hardening and evidence — Issue #103](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/103)
+
+## Original context (2026-10-24)
 
 The project currently passes `POSTGRES_PASSWORD` from a local `.env` into PostgreSQL and interpolates that password into the backend's `DATABASE_URL` in `compose.yml`. The backend's startup command runs `prisma migrate deploy` before NestJS starts. Existing `.env` hygiene satisfies the basic security baseline, but the planned Cybersecurity major module also requires HashiCorp Vault for managed, encrypted, isolated secrets alongside a hardened WAF.
 
@@ -29,7 +76,7 @@ Would avoid file handoff but couples application code and availability directly 
 
 Provides leased credentials but requires decisions on Prisma migrations, privileged bootstrap accounts, connection management and rotation. Defer until static-secret integration is understood and tested.
 
-## Proposed decision
+## Original proposed decision
 
 Adopt option **B** in incremental phases, subject to team review:
 
@@ -67,7 +114,7 @@ See [Vault secret delivery contract v1](../architecture/vault-secret-delivery.md
 - More services, secure volumes, TLS trust, protected initialization material and failure modes to test.
 - No claim of production readiness, high availability or automatic secret rotation from the initial POC.
 
-## Open integration decisions
+## Original open integration decisions (historical)
 
 - How to provision a separate least-privilege PostgreSQL application user and migration role, without handing the backend PostgreSQL bootstrap/admin credentials.
 - Whether PostgreSQL's supported `POSTGRES_PASSWORD_FILE` initialization path fits the selected image and how an existing initialized volume is migrated; initial database password changes are not applied automatically merely by changing the startup variable.
