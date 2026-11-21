@@ -109,6 +109,24 @@ docker inspect --format '{{.State.Health.Status}}' transcendence-app-dev-backend
 
 If `make health` reports a failing stage, run its corresponding `--check-*` command first. Inspect logs locally and redact sensitive data; never print or share Vault tokens, Shamir shares, AppRole SecretIDs, rendered PostgreSQL DSNs or private key files.
 
+## Monitoring — Issue #142
+
+```bash
+make health
+./scripts/bootstrap.sh --check-prometheus
+./scripts/bootstrap.sh --check-grafana-secrets
+./scripts/bootstrap.sh --check-grafana-agent
+./scripts/bootstrap.sh --check-grafana
+./scripts/bootstrap.sh --check-grafana-https
+```
+
+Open Grafana at https://transcendence.test:8443/grafana/
+using authorized credentials on the configured trusted host.
+
+For initial provisioning, recovery limitations, dashboards
+and controlled failure demonstrations, see the
+[monitoring guide](docs/dev-monitoring.md).
+
 ## F. Development & tests
 
 Commands inside a package use that package's directory:

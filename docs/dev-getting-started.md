@@ -28,7 +28,7 @@ This guide documents the **development VM** startup. Run commands at the reposit
    # Equivalent: ./scripts/bootstrap.sh --initialize
    ```
 
-   The operator must review and individually approve the necessary preparation stages (host TLS/CA, Docker resources, Vault, KV/ACL/AppRoles, initial DB secrets, PostgreSQL, roles, Prisma migrations, runtime Agent, backend, support services, frontend and Nginx). The helper never silently replaces a detected existing initialized Vault or PostgreSQL cluster. **Do not use initialization to recover from a reboot or a failed check.**
+   The operator must review and individually approve the necessary preparation stages (host TLS/CA, Docker resources, Vault, KV/ACL/AppRoles, initial DB secrets, PostgreSQL, roles, Prisma migrations, runtime Agent, backend, support services, frontend, Nginx, Prometheus, Grafana credentials, Grafana Vault Agent and Grafana). The helper never silently replaces a detected existing initialized Vault or PostgreSQL cluster. **Do not use initialization to recover from a reboot or a failed check.**
 
 4. Secure the generated Vault recovery material according to the local procedure and retain **two distinct Shamir shares in approved secure storage outside the VM**. The protected local `vault-init.json` contains root-level recovery material: never print it, commit it or paste it into an issue. Maintain an independent backup of persistent application data.
 5. Validate readiness:
@@ -79,6 +79,20 @@ Only enter shares when the Vault CLI itself requests them with hidden input. The
 - `make down` and `make clean` remain **legacy raw-Compose maintenance targets** for compatibility. They are **not** part of the trusted startup/recovery contract; in particular `make clean` removes application containers/networks and can make the guarded routine start unable to recover. Discuss any required intentional teardown with the infrastructure owner first.
 - Stage-specific `--prepare-*` tools remain available for **reviewed, explicit maintenance** and may request confirmation; use `./scripts/bootstrap.sh --help` to see them. Changes to Vault policies, credentials or Prisma migrations require separate review and should not be disguised as routine startup.
 - Do not log root tokens, unseal shares, SecretIDs, DSNs or entire Docker inspect records. Do not share private `vault-init.json`. Only store non-secret test results in issues/PRs.
+
+## Operational monitoring
+
+Prometheus and Grafana are part of the guarded startup,
+readiness and recovery contract.
+
+Use https://transcendence.test:8443/grafana/ from an
+authorized browser with trusted TLS.
+
+The monitoring guide documents initial image prerequisites,
+operator-approved provisioning, existing-installation
+cutover boundaries, secret delivery, dashboards and alerts.
+
+See [development monitoring](dev-monitoring.md).
 
 ## Further reading / acceptance
 

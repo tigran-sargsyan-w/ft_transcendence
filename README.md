@@ -1,6 +1,17 @@
 # ft_transcendence
 
-An infrastructure intelligence / real-time incident platform built for the 42 `ft_transcendence` project. The development stack uses a React/Vite frontend, NestJS backend, PostgreSQL/Prisma, Docker Socket Proxy, Collector, Graph Engine, Nginx HTTPS and a separate Vault server with a runtime Vault Agent.
+An infrastructure intelligence / real-time incident platform built for the 42 `ft_transcendence` project. The development stack uses a React/Vite frontend, NestJS backend, PostgreSQL/Prisma, Docker Socket Proxy, Collector, Graph Engine, Nginx HTTPS and a separate Vault server with a runtime Vault Agent. Operational monitoring uses Prometheus and Grafana with a dedicated Vault Agent.
+
+## Operational monitoring
+
+Prometheus collects real Collector and monitoring pipeline metrics.
+Grafana provides two provisioned custom dashboards, historical
+metrics and visibility into alert states.
+
+- Grafana: https://transcendence.test:8443/grafana/
+- [Monitoring architecture, operations and evaluation](docs/dev-monitoring.md)
+
+Monitoring is included in the guarded startup and recovery workflow.
 
 ## Development startup (Ubuntu VM)
 
