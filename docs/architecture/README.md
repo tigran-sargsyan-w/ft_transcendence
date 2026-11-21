@@ -14,6 +14,7 @@ Documents here should stay short and stable. Concrete stack and product decision
 - [Graph contract](./graph-contract.md) (topology snapshot and analyze API v0)
 - [Graph Engine analyses cheat-sheet](./graph-engine-analyses.md) (which analysis when; frontend→Nest vs Nest→engine)
 - [Collector contract](./collector-contract.md) (Docker collector snapshot and events, draft v0)
+- [Incident Room contract](./incident-room-contract.md) (incidents REST and realtime events, frontend draft v0)
 - [Topology mapping](./topology-mapping.md) (collector containers to graph nodes and edges)
 - [Security baseline](./security-baseline.md)
 - [Vault secret delivery contract v1 — proposed](./vault-secret-delivery.md)
