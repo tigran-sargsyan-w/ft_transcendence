@@ -85,15 +85,15 @@ server {
         # Transaction metadata remains available in the audit log.
         error_log /var/log/nginx/error.log crit;
 
-        # CRS 953100 falsely detects PHP leakage in Grafana login HTML.
-        # Limit the exception to read-only requests for this exact page.
+        # CRS 953100 falsely detects PHP leakage in Grafana UI HTML.
+        # Limit the exception to GET/HEAD requests for verified UI paths.
         # Keep inbound inspection and outbound blocking rules enabled.
         modsecurity_rules '
             # Remove sensitive audit sections for this transaction.
             SecAction "id:1000045,phase:1,pass,nolog,ctl:auditLogParts=-BCDEFGHIJK"
 
             SecRule REQUEST_METHOD "@rx ^(?:GET|HEAD)$" "id:1000044,phase:1,pass,nolog,t:none,chain"
-                SecRule REQUEST_FILENAME "@streq /grafana/login" "t:none,ctl:ruleRemoveById=953100"
+                SecRule REQUEST_FILENAME "@rx ^(?:/grafana/login|/grafana/|/grafana/dashboards|/grafana/d/ft-demo-lab/demo-lab-service-availability|/grafana/dashboards/f/ft-monitoring/transcendence|/grafana/d/ft-monitoring-pipeline/monitoring-pipeline-operational-health)$" "t:none,ctl:ruleRemoveById=953100"
         ';
 
         proxy_pass http://grafana_upstream;
