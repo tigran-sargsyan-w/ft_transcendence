@@ -37,6 +37,8 @@ def fixture(status="running"):
              "Source": str(nginx.CONFIG), "RW": False},
             {"Destination": "/etc/nginx/certs", "Type": "bind",
              "Source": str(nginx.CERTS), "RW": False},
+            {"Destination": nginx.PROMQL_RULES_RUNTIME, "Type": "bind",
+             "Source": str(nginx.PROMQL_RULES), "RW": False},
         ],
         "NetworkSettings": {"Networks": {nginx.DEFAULT_NETWORK: {}}},
         "State": {"Running": status == "running", "Status": status},
@@ -56,6 +58,36 @@ def responses():
 class NginxTests(unittest.TestCase):
     def test_valid_container(self):
         nginx.verify_identity(fixture())
+
+    def test_rejects_missing_promql_rules_mount(self):
+        item = fixture()
+        item["Mounts"].pop()
+        with self.assertRaises(nginx.NginxBootstrapError):
+            nginx.verify_identity(item)
+
+    def test_rejects_writable_promql_rules_mount(self):
+        item = fixture()
+        item["Mounts"][2]["RW"] = True
+        with self.assertRaises(nginx.NginxBootstrapError):
+            nginx.verify_identity(item)
+
+    def test_rejects_wrong_promql_rules_source(self):
+        item = fixture()
+        item["Mounts"][2]["Source"] = "/tmp/untrusted-rules.conf"
+        with self.assertRaises(nginx.NginxBootstrapError):
+            nginx.verify_identity(item)
+
+    def test_rejects_wrong_promql_rules_destination(self):
+        item = fixture()
+        item["Mounts"][2]["Destination"] = "/tmp/rules.conf"
+        with self.assertRaises(nginx.NginxBootstrapError):
+            nginx.verify_identity(item)
+
+    def test_rejects_promql_rules_volume_instead_of_bind(self):
+        item = fixture()
+        item["Mounts"][2]["Type"] = "volume"
+        with self.assertRaises(nginx.NginxBootstrapError):
+            nginx.verify_identity(item)
 
     def test_rejects_non_dict(self):
         with self.assertRaises(nginx.NginxBootstrapError):

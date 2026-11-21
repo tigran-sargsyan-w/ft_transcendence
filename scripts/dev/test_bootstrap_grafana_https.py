@@ -1,6 +1,8 @@
 """Regression tests for trusted Grafana HTTPS verification."""
 
 import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -162,6 +164,56 @@ class GrafanaHTTPSTests(unittest.TestCase):
         ):
             with self.assertRaises(https.GrafanaHTTPSBootstrapError):
                 https.verify_gateway()
+
+    def verify_policy_fixture(self, runtime_rules):
+        configuration = (
+            b"ctl:auditLogParts=-BCDEFGHIJK\\n"
+            b"error_log /var/log/nginx/error.log crit;\\n"
+        )
+
+        trusted_rules = b"# trusted PromQL rules\\n"
+
+        item = {
+            "Config": {
+                "Env": ["MODSEC_RULE_ENGINE=On"],
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "nginx.conf"
+            rules = Path(directory) / "promql.conf"
+
+            config.write_bytes(configuration)
+            rules.write_bytes(trusted_rules)
+
+            with (
+                patch.object(https.nginx, "CONFIG", config),
+                patch.object(https.nginx, "PROMQL_RULES", rules),
+                patch.object(https.nginx, "container", return_value=item),
+                patch.object(https.nginx, "verify_identity"),
+                patch.object(https.nginx, "running", return_value=True),
+                patch.object(
+                    https.nginx, "run",
+                    side_effect=[configuration, runtime_rules],
+                ),
+            ):
+                https.verify_gateway()
+
+    def test_runtime_promql_policy_matches_source(self):
+        self.verify_policy_fixture(b"# trusted PromQL rules\\n")
+
+    def test_runtime_promql_policy_drift_rejected(self):
+        with self.assertRaisesRegex(
+            https.GrafanaHTTPSBootstrapError,
+            "Runtime PromQL CRS rules differ",
+        ):
+            self.verify_policy_fixture(b"# modified rules\\n")
+
+    def test_empty_runtime_promql_policy_rejected(self):
+        with self.assertRaises(
+            https.GrafanaHTTPSBootstrapError,
+        ):
+            self.verify_policy_fixture(b"")
 
     def test_plan_is_read_only(self):
         with patch.object(https, "check") as check:

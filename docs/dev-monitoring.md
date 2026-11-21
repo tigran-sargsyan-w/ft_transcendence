@@ -429,6 +429,63 @@ The Monitoring CI job also validates Grafana dashboard JSON,
 Prometheus configuration and alerting rule scenarios using
 the pinned Prometheus image.
 
+### Grafana datasource and WAF regression tests
+
+Grafana sends dashboard queries to `POST /grafana/api/ds/query`.
+CRS rule 942100 previously rejected four legitimate panels because
+libinjection misclassified their PromQL expressions as SQL injection.
+
+The persistent custom policy is stored in:
+
+`infra/nginx/waf/REQUEST-900-FT-GRAFANA-PROMQL.conf`
+
+It is mounted read-only into `/opt/owasp-crs/rules/` and loaded
+before the SQL injection detection rules.
+
+The two exclusions apply only to exact approved expression values
+in the first or second parsed JSON query expression field, for
+POST requests to the exact datasource endpoint with valid JSON.
+Duplicate values and collisions with URL parameters prevent the
+matching exclusion. Rule 942100 remains enabled for other data,
+and inbound anomaly blocking (949110) is not disabled.
+
+Dashboard changes that introduce new false positives require
+separate security review; do not broadly disable SQL injection
+inspection.
+
+Run the isolated integration test:
+
+```sh
+docker pull owasp/modsecurity-crs:4.30.0-nginx-202611090911
+python3 scripts/dev/verify_grafana_datasource.py --isolated
+```
+
+The isolated test is also part of the Monitoring CI job. It checks
+all eleven dashboard request payloads and eight synthetic WAF
+security controls without application credentials, persistent
+application volumes or application network access.
+
+On an initialized, healthy development VM with the Demo Lab running
+and sufficient recent service-health samples, run:
+
+```sh
+python3 scripts/dev/verify_grafana_datasource.py --live
+```
+
+The live test verifies actual metric samples through trusted HTTPS,
+WAF security controls and rejection of anonymous datasource access.
+Credentials and raw response bodies are not displayed.
+
+Keep the live integration test separate from routine readiness
+checks. A legitimately absent Demo Lab can produce empty service
+history; the live test requires a prepared demonstration baseline.
+
+The initial controlled WAF cutover verified all eleven live
+dashboard requests, seven live blocking controls, anonymous
+access rejection and preservation of unrelated container
+lifecycles, persistent volumes, networks and Prisma migration
+history. Eight security controls were also verified in isolation.
+
 ### Operational verification
 
 ```sh

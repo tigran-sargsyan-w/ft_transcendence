@@ -62,6 +62,35 @@ def verify_gateway():
         "Required Grafana logging protection missing.",
     )
 
+    require(
+        nginx.PROMQL_RULES.is_file()
+        and not nginx.PROMQL_RULES.is_symlink(),
+        "Trusted PromQL CRS source unavailable.",
+    )
+
+    expected_rules = nginx.PROMQL_RULES.read_bytes()
+
+    require(
+        bool(expected_rules),
+        "Trusted PromQL CRS source is empty.",
+    )
+
+    runtime_rules = nginx.run(
+        [
+            "docker", "exec", nginx.NAME,
+            "cat", nginx.PROMQL_RULES_RUNTIME,
+        ],
+        env=agent.safe_env(),
+        timeout=20,
+    )
+
+    require(
+        runtime_rules == expected_rules,
+        "Runtime PromQL CRS rules differ from trusted source.",
+    )
+
+    print("PASS: Persistent Grafana PromQL CRS policy.", flush=True)
+
     print("PASS: Grafana HTTPS gateway identity and policy.", flush=True)
 
 

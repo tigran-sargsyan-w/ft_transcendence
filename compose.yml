@@ -245,6 +245,12 @@ services:
       ALLOWED_METHODS: "GET HEAD POST OPTIONS PUT PATCH DELETE"
     volumes:
       - ./infra/nginx/default.conf.template:/etc/nginx/templates/conf.d/default.conf.template:ro
+      - type: bind
+        source: ./infra/nginx/waf/REQUEST-900-FT-GRAFANA-PROMQL.conf
+        target: /opt/owasp-crs/rules/REQUEST-900-FT-GRAFANA-PROMQL.conf
+        read_only: true
+        bind:
+          create_host_path: false
       - ./infra/nginx/certs:/etc/nginx/certs:ro
     depends_on:
       - frontend
