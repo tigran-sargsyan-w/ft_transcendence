@@ -31,6 +31,8 @@ CONTAINERS = (
     f"{APP}-graph-engine-1",
     f"{APP}-frontend-1",
     f"{APP}-nginx-1",
+    f"{APP}-vault-grafana-agent-1",
+    f"{APP}-grafana-1",
 )
 VOLUMES = (
     f"{VAULT}_vault_data",
