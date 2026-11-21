@@ -1,6 +1,6 @@
 # Incidents API
 
-How the browser opens, reads and updates incidents, and reads their timeline. This is the first version (v1) of the incident room: incidents are opened by hand, every action is written in a timeline that is only ever added to, and two people changing the same incident at the same time cannot overwrite each other. The data model and the reasons are in [ADR 0004](../adr/0004-incident-events-and-topology-history.md); the screens' draft is [pull request #121](https://github.com/tigran-sargsyan-w/ft_transcendence/pull/121). Where this page and the draft differ, this page is what the server answers.
+How the browser opens, reads and updates incidents, and reads their timeline. This is the first version (v1) of the incident room: incidents are opened by hand, every action is written in a timeline that is only ever added to, and two people changing the same incident at the same time cannot overwrite each other. The data model and design decisions are in [ADR 0004](../adr/0004-incident-events-and-topology-history.md). For frontend integration, see [Incident Room v1](./incident-room-contract.md). Future features are documented in the [v2+ proposal](./incident-room-future-proposal.md), and the [original frontend proposal](./incident-room-original-proposal.md) is preserved for reference. **This document remains the authoritative backend API contract.**
 
 ## Status
 
@@ -8,7 +8,7 @@ Implemented in the `incidents` module (REST) and the `realtime` module (live upd
 
 **Every signed-in user sees and changes every incident.** v1 has no organization, participant or role. That is only acceptable for the demo data: the isolation by organization and the permissions will come separately, and then an incident of another organization will answer `404 INCIDENT_NOT_FOUND`.
 
-## Differences from the draft
+## Compatibility notes for the original draft
 
 The server answers differently from the screens' draft on these points:
 
