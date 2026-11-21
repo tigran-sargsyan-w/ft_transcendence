@@ -18,6 +18,30 @@ services:
     networks:
       - collector_control
 
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    profiles:
+      - monitoring
+    user: "65534:65534"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.listen-address=0.0.0.0:9090
+    volumes:
+      - ./infra/monitoring/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    networks:
+      - default
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
   collector:
     build:
       context: ./services/collector
@@ -676,6 +700,7 @@ services:
 
 volumes:
   postgres_data:
+  prometheus_data:
   migrator_vault_auth:
   migrator_vault_rendered:
   postgres_provisioner_vault_auth:

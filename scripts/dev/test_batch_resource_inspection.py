@@ -47,7 +47,7 @@ class BatchResourceInspectionTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()):
             state = mod.scan(batch=True)
         self.assertEqual(run.call_count, 2)
-        self.assertEqual(len(state), 11)
+        self.assertEqual(len(state), 12)
         self.assertTrue(all(state.values()))
 
     def test_batch_rejects_untrusted_manifest_before_docker_call(self):
