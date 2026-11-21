@@ -21,6 +21,7 @@ Documents here should stay short and stable. Concrete stack and product decision
 - [Real-time conventions](./realtime-conventions.md)
 - [Realtime topology protocol](./realtime-topology.md) (Socket.IO: snapshot, deltas, revisions)
 - [Analyses API](./analysis-api.md) (HTTP: blast radius, attack paths, critical nodes on the live topology)
+- [Nest ↔ Graph Engine smoke](./nest-graph-engine-smoke.md) (manual Compose → Nest → engine checks)
 - [Incidents API](./incidents-api.md) (HTTP: incidents, timeline and notes, optimistic locking)
 - [Architecture Decision Records](../adr/README.md)
 
