@@ -69,7 +69,7 @@ The `code` is stable and machine-readable. An error that defines its own code us
 | `AVATAR_TOO_LARGE` | 413 | Image or decoded/processed output exceeds size limit | none |
 | `INVALID_ORIGIN` | 403 | Multipart request comes from an untrusted browser origin | none |
 | `PAYLOAD_TOO_LARGE` | 413 | Request body over the size limit | none |
-| `INCIDENT_NOT_FOUND` | 404 | No incident has that id (routes of `/incidents`) | none |
+| `INCIDENT_NOT_FOUND` | 404 | No incident has that id (routes of `/incidents`, and `incident:join`) | none |
 | `INCIDENT_VERSION_CONFLICT` | 409 | `PATCH /incidents/:id` with a `version` that is not the current one | the current incident |
 | `TOPOLOGY_UNKNOWN_ENVIRONMENT` | 404 | An `environmentId` the server does not follow: `topology:subscribe` (in the acknowledgement), the analyses, `POST /incidents` | none |
 | `TOPOLOGY_UNAVAILABLE` | 503 | No topology yet: `topology:subscribe` (in the acknowledgement), the analyses, `POST /incidents` | none |

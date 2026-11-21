@@ -26,6 +26,10 @@ import { createValidationPipe, validationError } from '../../app.setup.js';
 import { toErrorResponse } from '../../shared/api-envelope.js';
 import { AuthService } from '../auth/auth.service.js';
 import { SESSION_COOKIE } from '../auth/session-cookie.js';
+import {
+  type IncidentChange,
+  IncidentsService,
+} from '../incidents/incidents.service.js';
 import type { TopologySnapshot } from '../topology/graph.types.js';
 import { knownSnapshot } from '../topology/known-snapshot.js';
 import {
@@ -34,6 +38,7 @@ import {
 } from '../topology/topology.service.js';
 import { PresenceService, type PresenceChange } from '../presence/presence.service.js';
 import { CommandLimitGuard } from './command-limit.guard.js';
+import { IncidentRoomDto } from './dto/incident-room.dto.js';
 import { SubscribeDto } from './dto/subscribe.dto.js';
 import { disconnectAt } from './session-expiry.js';
 import { WsErrorFilter } from './ws-error.filter.js';
@@ -42,6 +47,10 @@ type AckFn = (response: { data: unknown } | { error: unknown }) => void;
 
 // One room per environment.
 const room = (environmentId: string) => `env:${environmentId}`;
+
+// One room per incident. The id is the one the database gives, in small
+// letters: the same name for a join, a leave and what the server sends.
+const incidentRoom = (incidentId: string) => `incident:${incidentId}`;
 
 // One room per session, to close its sockets when it ends. It is named after
 // the hash of the session token, which is never sent to a client.
@@ -85,6 +94,7 @@ export class RealtimeGateway
     private readonly authService: AuthService,
     private readonly topology: TopologyService,
     private readonly presence: PresenceService,
+    private readonly incidents: IncidentsService,
   ) {}
 
   afterInit(server: Server) {
@@ -134,6 +144,8 @@ export class RealtimeGateway
       this.topology.status$.subscribe((status) =>
         this.toRoom('topology:status', status),
       ),
+      // What the incidents service has committed goes to the room of the incident.
+      this.incidents.changes$.subscribe((change) => this.relayIncident(change)),
       // A logout closes the sockets of that session at once.
       this.authService.sessionEnded$.subscribe((tokenHash) => {
         this.presence.endSession(tokenHash);
@@ -227,6 +239,30 @@ export class RealtimeGateway
     this.answer(socket, ack, snapshot);
   }
 
+  @SubscribeMessage('incident:join')
+  async joinIncident(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody(createValidationPipe()) body: IncidentRoomDto,
+    @Ack() ack?: AckFn,
+  ) {
+    // In v1 every signed-in user may join any incident.
+    const incidentId = await this.incidents.findId(body.incidentId);
+
+    await socket.join(incidentRoom(incidentId));
+    ack?.({ data: { incidentId } });
+  }
+
+  @SubscribeMessage('incident:leave')
+  async leaveIncident(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody(createValidationPipe()) body: IncidentRoomDto,
+    @Ack() ack?: AckFn,
+  ) {
+    // No lookup: leaving a room one is not in does nothing.
+    await socket.leave(incidentRoom(body.incidentId.toLowerCase()));
+    ack?.({ data: {} });
+  }
+
   // The acknowledgement, then the snapshot, then the status: Socket.IO keeps
   // the order of what it sends on one connection.
   private answer(
@@ -245,6 +281,19 @@ export class RealtimeGateway
       this.toRoom('topology:snapshot', change.snapshot);
     } else {
       this.toRoom('topology:delta', change.delta);
+    }
+  }
+
+  // The incident first, then its new entries in the order of the timeline.
+  private relayIncident({ incidentId, incident, entries }: IncidentChange) {
+    const target = this.server.to(incidentRoom(incidentId));
+
+    if (incident) {
+      send(target, 'incident:updated', { incidentId, incident });
+    }
+
+    for (const entry of entries) {
+      send(target, 'timeline:entry_added', { incidentId, entry });
     }
   }
 

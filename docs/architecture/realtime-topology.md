@@ -49,7 +49,7 @@ Socket.IO reconnects by itself after a lost connection. The new socket has a new
 { "error": { "code": "VALIDATION_ERROR", "message": "Request validation failed", "details": { "environmentId": ["environmentId must be a string"] } } }
 ```
 
-Arguments are validated on the server, and a property a command does not accept is refused, as over HTTP. An argument that is not an object is refused too, with `details: { "body": ["body must be an object"] }`.
+Arguments are validated on the server, and a property a command does not accept is refused, as over HTTP. An argument that is not an object is refused too: with `details: { "body": ["body must be an object"] }` for a command whose properties are all optional (`topology:subscribe`), and with the name of the missing property in `details` for the others (`incident:join`).
 
 ## Rooms
 
@@ -57,7 +57,7 @@ One room per environment: `env:<environmentId>`. A client never names a room: it
 
 There is one environment for now. Its id comes from the collector (`ENVIRONMENT_ID`, `env_local_compose` in Compose) and no endpoint gives it to the front, so `environmentId` is optional in `topology:subscribe`.
 
-Every authenticated user may subscribe: there is no permission per environment yet. The `incident:<incidentId>` room and delivery of analysis results are not specified yet. The `user:<userId>` room is reserved for private server-side friend presence notifications (see below).
+Every authenticated user may subscribe: there is no permission per environment yet. The `incident:<incidentId>` room is described in [Incidents API](./incidents-api.md#live-updates). The `user:<userId>` room is reserved for private server-side friend presence notifications (see below).
 
 ## Friend presence notifications
 
@@ -236,6 +236,7 @@ Handshake errors are in [Connection](#connection). The acknowledgement of a comm
 |------|------|
 | `VALIDATION_ERROR` | Invalid argument, or a property the command does not accept; `details` as in the API conventions |
 | `TOO_MANY_REQUESTS` | More than 10 commands in 10 s on one connection |
+| `INCIDENT_NOT_FOUND` | `incident:join` with an id that no incident has |
 | `TOPOLOGY_UNKNOWN_ENVIRONMENT` | `environmentId` is not the one the server follows |
 | `TOPOLOGY_UNAVAILABLE` | The server has no topology yet. The client tries again in 5 s |
 | `TOPOLOGY_NOT_SUBSCRIBED` | `topology:resync` from a socket that has not subscribed |
