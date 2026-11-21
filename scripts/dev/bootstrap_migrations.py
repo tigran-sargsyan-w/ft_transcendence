@@ -44,8 +44,10 @@ SELECT CASE WHEN
                       to_regclass('public.sessions'),
                       to_regclass('public._prisma_migrations'),
                       to_regclass('public.incidents'),
-                      to_regclass('public.incident_events'))
-       AND r.rolname = 'transcendence_migrator') = 5
+                      to_regclass('public.incident_events'),
+                      to_regclass('public.friendships'),
+                      to_regclass('public.user_avatars'))
+       AND r.rolname = 'transcendence_migrator') = 7
   AND EXISTS (
     SELECT 1 FROM pg_class c
     JOIN pg_roles r ON r.oid = c.relowner
@@ -92,6 +94,22 @@ SELECT CASE WHEN
     AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.incident_events'), 'TRUNCATE'), false)
     AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.incident_events'), 'REFERENCES'), false)
     AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.incident_events'), 'TRIGGER'), false)
+
+    AND COALESCE(has_table_privilege(oid, to_regclass('public.friendships'), 'SELECT'), false)
+    AND COALESCE(has_table_privilege(oid, to_regclass('public.friendships'), 'INSERT'), false)
+    AND COALESCE(has_table_privilege(oid, to_regclass('public.friendships'), 'UPDATE'), false)
+    AND COALESCE(has_table_privilege(oid, to_regclass('public.friendships'), 'DELETE'), false)
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.friendships'), 'TRUNCATE'), false)
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.friendships'), 'REFERENCES'), false)
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.friendships'), 'TRIGGER'), false)
+
+    AND COALESCE(has_table_privilege(oid, to_regclass('public.user_avatars'), 'SELECT'), false)
+    AND COALESCE(has_table_privilege(oid, to_regclass('public.user_avatars'), 'INSERT'), false)
+    AND COALESCE(has_table_privilege(oid, to_regclass('public.user_avatars'), 'UPDATE'), false)
+    AND COALESCE(has_table_privilege(oid, to_regclass('public.user_avatars'), 'DELETE'), false)
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.user_avatars'), 'TRUNCATE'), false)
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.user_avatars'), 'REFERENCES'), false)
+    AND NOT COALESCE(has_table_privilege(oid, to_regclass('public.user_avatars'), 'TRIGGER'), false)
 
     AND COALESCE(has_sequence_privilege(oid, to_regclass('public.incident_events_seq_seq'), 'USAGE'), false)
     AND NOT COALESCE(has_sequence_privilege(oid, to_regclass('public.incident_events_seq_seq'), 'SELECT'), false)

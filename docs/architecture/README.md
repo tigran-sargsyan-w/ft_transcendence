@@ -9,6 +9,8 @@ Documents here should stay short and stable. Concrete stack and product decision
 - [Principles and module boundaries](./principles.md)
 - [Authentication and users](./auth-and-users.md)
 - [API conventions](./api-conventions.md)
+- [User Management API](./user-management-v1.md)
+- [User Management frontend integration guide](./user-management-frontend-api.md)
 - [Graph contract](./graph-contract.md) (topology snapshot and analyze API v0)
 - [Graph Engine analyses cheat-sheet](./graph-engine-analyses.md) (which analysis when; frontend→Nest vs Nest→engine)
 - [Collector contract](./collector-contract.md) (Docker collector snapshot and events, draft v0)

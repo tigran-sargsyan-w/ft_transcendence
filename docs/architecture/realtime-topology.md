@@ -57,7 +57,38 @@ One room per environment: `env:<environmentId>`. A client never names a room: it
 
 There is one environment for now. Its id comes from the collector (`ENVIRONMENT_ID`, `env_local_compose` in Compose) and no endpoint gives it to the front, so `environmentId` is optional in `topology:subscribe`.
 
-Every authenticated user may subscribe: there is no permission per environment yet. The room `incident:<incidentId>` is described in [Incidents API](./incidents-api.md#live-updates). The room `user:<userId>` and the delivery of analysis results are not specified yet.
+Every authenticated user may subscribe: there is no permission per environment yet. The `incident:<incidentId>` room is described in [Incidents API](./incidents-api.md#live-updates). The `user:<userId>` room is reserved for private server-side friend presence notifications (see below).
+
+## Friend presence notifications
+
+A successful authenticated handshake joins a server-managed `user:<userId>`
+room for the account identified by its session cookie. The client cannot choose
+this room or subscribe to another user's presence. The same user may have
+multiple sockets in this room. Presence is not inferred from HTTP login.
+
+`presence:changed` is a **server-only** event delivered to the currently
+accepted friends of the user whose online state changed:
+
+```json
+{
+  "event": "presence:changed",
+  "payload": { "userId": "<UUID>", "isOnline": false },
+  "timestamp": "2026-11-20T19:00:00.000Z"
+}
+```
+
+It is sent when the first socket connects (online) or the last socket ends
+(offline). A transient disconnect receives a 5-second grace period; logout or
+session expiry bypasses the grace. Friends are resolved from PostgreSQL at
+notification time, so pending or removed connections do not authorize updates.
+Transitions are broadcast in order. No client-side presence subscribe command
+exists.
+
+On initial load and after Socket.IO reconnect, the UI should refetch
+`GET /api/v1/users/me/friends` to obtain the authoritative `isOnline`
+snapshot. Socket.IO events are not durable, and may be missed while offline.
+The implementation is **single-backend-instance only**; scaling to multiple
+NestJS instances requires a distributed state store and event delivery.
 
 ## Client to server
 

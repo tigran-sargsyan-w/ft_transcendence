@@ -255,6 +255,103 @@ describe('Incident room (e2e)', () => {
     });
   });
 
+  describe('Presence and Incident Room integration', () => {
+    it('keeps Presence and Incident Room working together', async () => {
+      const id = await createIncident(ada);
+
+      // Establish an accepted friendship.
+      const friendRequest = await http()
+        .post('/api/v1/users/me/friend-requests')
+        .set('Cookie', ada.cookie)
+        .send({ targetUserId: bob.id })
+        .expect(201);
+
+      await http()
+        .post(`/api/v1/users/me/friend-requests/${friendRequest.body.data.id}/accept`)
+        .set('Cookie', bob.cookie)
+        .expect(200);
+
+      const adaSocket = await connect(ada);
+      const presenceEvents: Envelope[] = [];
+
+      adaSocket.on('presence:changed', (event: Envelope) => {
+        presenceEvents.push(event);
+      });
+
+      const bobSocket = await connect(bob);
+
+      await vi.waitFor(() => {
+        expect(presenceEvents.some((event) =>
+          event.payload.userId === bob.id &&
+          event.payload.isOnline === true,
+        )).toBe(true);
+      }, { timeout: 4000 });
+
+      // Both friends join the same incident.
+      expect(await join(adaSocket, id)).toEqual({
+        data: { incidentId: id },
+      });
+      expect(await join(bobSocket, id)).toEqual({
+        data: { incidentId: id },
+      });
+
+      const adaMessages = collect(adaSocket);
+      const bobMessages = collect(bobSocket);
+      const incidentMessages = (messages: Envelope[]) =>
+        messages.filter((message) =>
+          message.event === 'incident:updated' ||
+          message.event === 'timeline:entry_added',
+        );
+
+      await patch(ada, id, {
+        version: 1,
+        title: 'Integrated update',
+      }).expect(200);
+
+      await vi.waitFor(() => {
+        expect(incidentMessages(adaMessages)).toHaveLength(2);
+        expect(incidentMessages(bobMessages)).toHaveLength(2);
+      }, { timeout: 4000 });
+
+      expect(incidentMessages(bobMessages).map((message) => message.event))
+        .toEqual(['incident:updated', 'timeline:entry_added']);
+
+      // Logout must disconnect Bob and notify his friend.
+      const disconnected = new Promise<void>((resolve) => {
+        bobSocket.once('disconnect', () => resolve());
+      });
+
+      await http()
+        .post('/api/v1/auth/logout')
+        .set('Cookie', bob.cookie)
+        .expect(204);
+
+      await disconnected;
+
+      await vi.waitFor(() => {
+        expect(presenceEvents.some((event) =>
+          event.payload.userId === bob.id &&
+          event.payload.isOnline === false,
+        )).toBe(true);
+      }, { timeout: 4000 });
+
+      expect(adaSocket.connected).toBe(true);
+      expect(bobSocket.connected).toBe(false);
+
+      // Ada still receives updates; Bob's closed socket does not.
+      await patch(ada, id, {
+        version: 2,
+        title: 'After logout',
+      }).expect(200);
+
+      await vi.waitFor(() => {
+        expect(incidentMessages(adaMessages)).toHaveLength(4);
+      }, { timeout: 4000 });
+
+      expect(incidentMessages(bobMessages)).toHaveLength(2);
+    });
+  });
+
   describe('what the room receives', () => {
     it('sends every socket of the room the update, then its entries in the order of the timeline', async () => {
       const id = await createIncident(ada);

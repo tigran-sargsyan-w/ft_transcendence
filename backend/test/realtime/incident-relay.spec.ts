@@ -12,11 +12,16 @@ vi.mock('../../src/modules/incidents/incidents.service.js', () => ({
   IncidentsService: class IncidentsService {},
 }));
 
+vi.mock('../../src/modules/presence/presence.service.js', () => ({
+  PresenceService: class PresenceService {},
+}));
+
 const ID = '0b0f6f0e-1111-4222-8333-444455556666';
 
 // A gateway wired to fakes: what it sends is `emit` on the room it names.
 function gatewayWithRelay() {
   const changes = new Subject<IncidentChange>();
+  const presenceChanges = new Subject<{ userId: string; isOnline: boolean }>();
   const sent: { room: string; event: string; payload: unknown }[] = [];
   const server = {
     engine: { use: vi.fn() },
@@ -26,9 +31,15 @@ function gatewayWithRelay() {
         sent.push({ room, event, payload: envelope.payload }),
     }),
   };
+  const presence = {
+    changes$: presenceChanges.asObservable(),
+    acceptedFriendIds: vi.fn(async () => ['friend-id']),
+    endSession: vi.fn(),
+  };
   const gateway = new RealtimeGateway(
     { sessionEnded$: EMPTY } as never,
     { changes$: EMPTY, status$: EMPTY } as never,
+    presence as never,
     { changes$: changes.asObservable() } as never,
   );
 
@@ -36,7 +47,7 @@ function gatewayWithRelay() {
   gateway.server = server as never;
   gateway.afterInit(server as never);
 
-  return { gateway, changes, sent };
+  return { gateway, changes, presenceChanges, sent };
 }
 
 const entry = (seq: number) => ({ id: `e${seq}`, seq, incidentId: ID });
@@ -94,5 +105,34 @@ describe('RealtimeGateway incident relay', () => {
     } as never);
 
     expect(sent).toEqual([]);
+  });
+  it('relays incidents and friend presence independently', async () => {
+    const { gateway, changes, presenceChanges, sent } = gatewayWithRelay();
+    const incident = { id: ID, version: 2 };
+
+    changes.next({
+      incidentId: ID,
+      incident,
+      entries: [],
+    } as never);
+
+    presenceChanges.next({ userId: 'online-user', isOnline: true });
+
+    await vi.waitFor(() => expect(sent).toHaveLength(2));
+
+    expect(sent).toEqual([
+      {
+        room: `incident:${ID}`,
+        event: 'incident:updated',
+        payload: { incidentId: ID, incident },
+      },
+      {
+        room: 'user:friend-id',
+        event: 'presence:changed',
+        payload: { userId: 'online-user', isOnline: true },
+      },
+    ]);
+
+    gateway.onModuleDestroy();
   });
 });
