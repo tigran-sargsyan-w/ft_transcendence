@@ -25,7 +25,7 @@ def fixture():
 class IdempotencyAcceptanceTests(unittest.TestCase):
     def test_expected_resource_inventory(self):
         self.assertEqual(len(acceptance.CONTAINERS), 10)
-        self.assertEqual(len(acceptance.VOLUMES), 9)
+        self.assertEqual(len(acceptance.VOLUMES), 11)
         self.assertEqual(len(acceptance.NETWORKS), 3)
 
     def test_healthy_repeated_runs_no_mutation(self):

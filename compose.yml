@@ -42,6 +42,59 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana:13.3.1
+    profiles:
+      - monitoring
+    user: "472:20030"
+
+    entrypoint: ["/bin/sh", "-ec"]
+
+    command:
+      - |
+        for secret in admin_password secret_key; do
+          path="/run/secrets/grafana/$$secret"
+
+          if ! test -s "$$path" || ! test -r "$$path"; then
+            echo "Required Grafana secret unavailable" >&2
+            exit 1
+          fi
+
+          if ! grep -Eq '^[0-9a-f]{64}$$' "$$path"; then
+            echo "Invalid Grafana secret format" >&2
+            exit 1
+          fi
+        done
+
+        exec /run.sh
+
+    environment:
+      GF_PATHS_LOGS: /var/lib/grafana/log
+
+    volumes:
+      - ./infra/monitoring/grafana/grafana.ini:/etc/grafana/grafana.ini:ro
+      - ./infra/monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./infra/monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./infra/monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+      - grafana_vault_rendered:/run/secrets/grafana:ro
+
+    networks:
+      - default
+
+    read_only: true
+
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+
+    cap_drop:
+      - ALL
+
+    security_opt:
+      - no-new-privileges:true
+
+    restart: unless-stopped
+
   collector:
     build:
       context: ./services/collector
@@ -701,6 +754,8 @@ services:
 volumes:
   postgres_data:
   prometheus_data:
+  grafana_data:
+  grafana_vault_rendered:
   migrator_vault_auth:
   migrator_vault_rendered:
   postgres_provisioner_vault_auth:
