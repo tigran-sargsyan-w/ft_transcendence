@@ -308,6 +308,54 @@ services:
 
     restart: unless-stopped
 
+  vault-grafana-agent:
+    image: hashicorp/vault:2.2.1
+    profiles:
+      - monitoring
+
+    user: "100:20030"
+
+    entrypoint:
+      - /bin/sh
+      - /vault/scripts/grafana-agent.sh
+
+    command: ["start"]
+
+    environment:
+      VAULT_ADDR: https://vault:8200
+      VAULT_CACERT: /vault/tls/ca.crt
+
+    volumes:
+      - ./infra/vault/agent/grafana.hcl:/vault/config/grafana.hcl:ro
+      - ./infra/vault/scripts/grafana-agent.sh:/vault/scripts/grafana-agent.sh:ro
+      - ${FT_DEV_TLS_DIR:?Set FT_DEV_TLS_DIR}/ca.crt:/vault/tls/ca.crt:ro
+      - grafana_vault_auth:/vault/auth:ro
+      - grafana_vault_rendered:/vault/rendered
+
+    networks:
+      - vault_private
+
+    read_only: true
+
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,mode=1777,size=32m
+      - /vault/runtime:rw,nosuid,nodev,noexec,mode=1777,size=16m
+
+    cap_drop:
+      - ALL
+
+    security_opt:
+      - no-new-privileges:true
+
+    healthcheck:
+      test: ["CMD", "/bin/sh", "/vault/scripts/grafana-agent.sh", "check"]
+      interval: 15s
+      timeout: 10s
+      retries: 4
+      start_period: 20s
+
+    restart: unless-stopped
+
   vault-grafana-storage-init:
     image: hashicorp/vault:2.2.1
     user: "0:0"
