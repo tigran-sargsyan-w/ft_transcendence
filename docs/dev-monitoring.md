@@ -532,6 +532,38 @@ These results are recorded development acceptance
 evidence, not a claim of production backup/restore,
 high availability or complete penetration testing.
 
+### Final monitoring acceptance — 2026-11-22
+
+Verified implementation commit: `af6b847`.
+
+| Verification | Result |
+| --- | --- |
+| Development regression tests | 593/593 passed |
+| Collector tests | 64/64 previously passed |
+| Final GitHub Actions | 8/8 jobs passed |
+| CI duration | 1m 26s |
+| Isolated datasource requests | 11/11 accepted |
+| Isolated WAF security controls | 8/8 passed |
+| Live HTTPS datasource requests | 11/11 returned metric samples |
+| Live WAF security controls | 8/8 passed |
+| Anonymous datasource access | Rejected |
+| Visual dashboard acceptance | 11/11 panels |
+| Controlled incident | 3 pending, 3 firing, 0 after recovery |
+| Historical incident metrics | Preserved |
+| Final Demo Lab state | db, api and web healthy |
+| Unified health and readiness checks | PASS |
+| Nginx-only WAF cutover | PASS |
+| Unrelated infrastructure lifecycles | Preserved during cutover |
+
+The complete baseline-to-failure-to-recovery sequence was
+observed in Grafana. The failure was injected exclusively
+into the isolated Demo Lab while the application infrastructure
+remained operational.
+
+Final merge preparation found no conflicts with the fetched
+main branch. Independent clean-VM installation and teammate
+upgrade acceptance remain outstanding.
+
 ## Subject compliance
 
 | Subject requirement (section IV.7) | Implementation |
@@ -542,10 +574,15 @@ high availability or complete penetration testing.
 | Set up alerting rules | Two tested Prometheus alerting rules |
 | Secure access to Grafana | Vault-backed credentials, controlled exposure, TLS and WAF |
 
-Actual dashboard rendering and the visual evaluation
-walkthrough should be confirmed in a trusted browser
-before final module sign-off. The school evaluator
-determines final eligibility for the Major module.
+Both dashboards were visually verified in Grafana.
+All eleven panels rendered actual monitoring data.
+The controlled incident demonstration confirmed three pending
+alerts, three firing alerts, successful recovery and retained
+historical metrics.
+
+The datasource requests were independently verified through
+the trusted HTTPS gateway with certificate verification enabled.
+The school evaluator determines final eligibility for the Major module.
 
 ## Known limitations
 
