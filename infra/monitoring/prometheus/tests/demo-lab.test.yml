@@ -1,0 +1,93 @@
+rule_files:
+  - ../rules/demo-lab.rules.yml
+
+evaluation_interval: 15s
+
+tests:
+  - name: collector-unavailable
+    interval: 15s
+    input_series:
+      - series: 'up{job="collector",instance="collector:3001"}'
+        values: '0+0x8'
+    alert_rule_test:
+      - eval_time: 45s
+        alertname: CollectorMetricsUnavailable
+        exp_alerts: []
+      - eval_time: 75s
+        alertname: CollectorMetricsUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: collector
+              instance: collector:3001
+              severity: critical
+            exp_annotations:
+              summary: Collector metrics endpoint is unavailable
+              description: Prometheus cannot scrape Collector metrics.
+
+  - name: demo-db-failure-and-recovery
+    interval: 15s
+    input_series:
+      - series: 'up{job="collector",instance="collector:3001"}'
+        values: '1+0x12'
+      - series: 'ft_demo_lab_present{job="collector",instance="collector:3001"}'
+        values: '1+0x12'
+      - series: 'ft_demo_service_healthy{job="collector",instance="collector:3001",service="db"}'
+        values: '1 0 0 0 0 0 0 0 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 60s
+        alertname: DemoLabServiceNotHealthy
+        exp_alerts: []
+      - eval_time: 75s
+        alertname: DemoLabServiceNotHealthy
+        exp_alerts:
+          - exp_labels:
+              job: collector
+              instance: collector:3001
+              service: db
+              severity: warning
+            exp_annotations:
+              summary: Demo Lab service db is not healthy
+              description: Required Demo Lab service db is missing, stopped, or unhealthy.
+      - eval_time: 120s
+        alertname: DemoLabServiceNotHealthy
+        exp_alerts: []
+
+  - name: demo-lab-absent
+    interval: 15s
+    input_series:
+      - series: 'up{job="collector",instance="collector:3001"}'
+        values: '1+0x8'
+      - series: 'ft_demo_lab_present{job="collector",instance="collector:3001"}'
+        values: '0+0x8'
+      - series: 'ft_demo_service_healthy{job="collector",instance="collector:3001",service="db"}'
+        values: '0+0x8'
+    alert_rule_test:
+      - eval_time: 90s
+        alertname: DemoLabServiceNotHealthy
+        exp_alerts: []
+
+  - name: required-service-missing
+    interval: 15s
+    input_series:
+      - series: 'up{job="collector",instance="collector:3001"}'
+        values: '1+0x8'
+      - series: 'ft_demo_lab_present{job="collector",instance="collector:3001"}'
+        values: '1+0x8'
+      - series: 'ft_demo_service_healthy{job="collector",instance="collector:3001",service="db"}'
+        values: '1+0x8'
+      - series: 'ft_demo_service_healthy{job="collector",instance="collector:3001",service="api"}'
+        values: '0+0x8'
+      - series: 'ft_demo_service_healthy{job="collector",instance="collector:3001",service="web"}'
+        values: '1+0x8'
+    alert_rule_test:
+      - eval_time: 75s
+        alertname: DemoLabServiceNotHealthy
+        exp_alerts:
+          - exp_labels:
+              job: collector
+              instance: collector:3001
+              service: api
+              severity: warning
+            exp_annotations:
+              summary: Demo Lab service api is not healthy
+              description: Required Demo Lab service api is missing, stopped, or unhealthy.
