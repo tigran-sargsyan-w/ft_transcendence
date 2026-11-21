@@ -81,10 +81,17 @@ server {
 
     # Grafana monitoring UI, API and Grafana Live WebSocket.
     location ^~ /grafana/ {
+        # Keep critical gateway diagnostics without WAF matched data.
+        # Transaction metadata remains available in the audit log.
+        error_log /var/log/nginx/error.log crit;
+
         # CRS 953100 falsely detects PHP leakage in Grafana login HTML.
         # Limit the exception to read-only requests for this exact page.
         # Keep inbound inspection and outbound blocking rules enabled.
         modsecurity_rules '
+            # Remove sensitive audit sections for this transaction.
+            SecAction "id:1000045,phase:1,pass,nolog,ctl:auditLogParts=-BCDEFGHIJK"
+
             SecRule REQUEST_METHOD "@rx ^(?:GET|HEAD)$" "id:1000044,phase:1,pass,nolog,t:none,chain"
                 SecRule REQUEST_FILENAME "@streq /grafana/login" "t:none,ctl:ruleRemoveById=953100"
         ';
