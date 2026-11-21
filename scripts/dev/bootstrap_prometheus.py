@@ -39,9 +39,49 @@ HTTP_PROBE = r"""
   const result = await response.json();
   const targets = result?.data?.activeTargets;
 
-  if (!Array.isArray(targets) ||
-      !targets.some(target => target.labels?.job === 'collector')) {
-    throw new Error('Collector scrape target missing');
+  if (!Array.isArray(targets)) {
+    throw new Error('Invalid Prometheus targets');
+  }
+
+  const matching = targets.filter(
+    target =>
+      target.labels?.job === 'collector' &&
+      target.scrapeUrl === 'http://collector:3001/metrics'
+  );
+
+  if (matching.length !== 1) {
+    throw new Error('Collector scrape target missing or duplicated');
+  }
+
+  if (matching[0].health !== 'up') {
+    throw new Error('Collector scrape is not healthy');
+  }
+
+  const metricsResponse = await fetch(
+    base + '/api/v1/query?query=ft_demo_lab_present',
+    options
+  );
+
+  if (!metricsResponse.ok) {
+    throw new Error('Prometheus metrics query failed');
+  }
+
+  const metrics = await metricsResponse.json();
+  const samples = metrics?.data?.result;
+
+  if (
+    metrics?.status !== 'success' ||
+    metrics?.data?.resultType !== 'vector' ||
+    !Array.isArray(samples) ||
+    samples.length !== 1
+  ) {
+    throw new Error('Demo Lab metrics are missing');
+  }
+
+  const value = Number(samples[0]?.value?.[1]);
+
+  if (value !== 0 && value !== 1) {
+    throw new Error('Invalid Demo Lab presence metric');
   }
 })().catch(() => { process.exitCode = 1; });
 """

@@ -137,5 +137,43 @@ class PrometheusBootstrapTests(unittest.TestCase):
         support.assert_not_called()
 
 
+
+    def test_http_probe_requires_healthy_scrape_and_real_metrics(self):
+        with patch.object(prometheus.support, "run") as run:
+            prometheus.probe_http()
+
+        args = run.call_args.args[0]
+
+        self.assertEqual(
+            args[:5],
+            [
+                "docker",
+                "exec",
+                f"{prometheus.pg.PROJECT}-backend-1",
+                "node",
+                "-e",
+            ],
+        )
+
+        script = args[5]
+
+        self.assertIn(
+            "http://collector:3001/metrics",
+            script,
+        )
+        self.assertIn(
+            "matching[0].health !== 'up'",
+            script,
+        )
+        self.assertIn(
+            "ft_demo_lab_present",
+            script,
+        )
+        self.assertIn(
+            "samples.length !== 1",
+            script,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
