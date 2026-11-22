@@ -419,9 +419,9 @@ class Preflight:
         execute([
             sys.executable,
             str(self.root / "scripts/dev/bootstrap_vault_ui.py"),
-            "check",
+            "status",
         ])
-        self.ok("Vault UI gateway identity, isolation and HTTPS")
+        self.ok("Vault UI intended lifecycle state and isolation")
         if self.legacy:
             print("INFO: Legacy Compose provenance detected")
             print("RESULT: PREFLIGHT PASSED (read-only; legacy startup blocked)")

@@ -268,7 +268,7 @@ class PreflightTests(unittest.TestCase):
         expected = [
             preflight.sys.executable,
             str(self.root / "scripts/dev/bootstrap_vault_ui.py"),
-            "check",
+            "status",
         ]
 
         with (
@@ -294,7 +294,7 @@ class PreflightTests(unittest.TestCase):
         expected = [
             preflight.sys.executable,
             str(self.root / "scripts/dev/bootstrap_vault_ui.py"),
-            "check",
+            "status",
         ]
 
         def fake_execute(command, env=None):
