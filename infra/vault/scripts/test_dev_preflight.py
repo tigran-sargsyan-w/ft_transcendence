@@ -145,6 +145,14 @@ class PreflightTests(unittest.TestCase):
                 "backend_vault_auth": {"external": True, "name": self.volume_names[1]},
                 "backend_vault_rendered": {"external": True, "name": self.volume_names[2]},
                 "postgres_data": {"name": self.volume_names[3]},
+                "prometheus_data": {
+                    "name": preflight.APP_PROJECT + "_prometheus_data"},
+                "grafana_data": {
+                    "name": preflight.APP_PROJECT + "_grafana_data"},
+                "grafana_vault_auth": {
+                    "name": preflight.APP_PROJECT + "_grafana_vault_auth"},
+                "grafana_vault_rendered": {
+                    "name": preflight.APP_PROJECT + "_grafana_vault_rendered"},
                 "migrator_vault_auth": {
                     "name": preflight.APP_PROJECT + "_migrator_vault_auth"},
                 "migrator_vault_rendered": {

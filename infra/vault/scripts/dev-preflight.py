@@ -320,7 +320,9 @@ class Preflight:
                     and volumes[key].get("external") is True,
                     "Unexpected shared Vault volume: " + key)
         owned = (
-            "postgres_data", "migrator_vault_auth", "migrator_vault_rendered",
+            "postgres_data", "prometheus_data", "grafana_data",
+            "grafana_vault_auth", "grafana_vault_rendered",
+            "migrator_vault_auth", "migrator_vault_rendered",
             "postgres_provisioner_vault_auth", "postgres_provisioner_rendered",
         )
         require(set(volumes) == set(owned) | {
