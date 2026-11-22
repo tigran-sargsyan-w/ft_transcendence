@@ -1,7 +1,7 @@
 
 # Vault Server — isolated local POC
 
-ui = false
+ui = true
 
 disable_mlock = true
 
