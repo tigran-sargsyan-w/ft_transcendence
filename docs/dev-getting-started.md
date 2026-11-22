@@ -42,6 +42,30 @@ This guide documents the **development VM** startup. Run commands at the reposit
 
    Open `https://transcendence.test:8443` from the configured VM browser and verify that the actual application works. A green infrastructure check does not substitute for login, session or WebSocket functional E2E tests.
 
+### Independent fresh-VM verification (2026-11-22)
+
+The combined `make initialize` path has been exercised successfully on a
+**separate, clean Ubuntu 26.04 LTS (amd64) VirtualBox VM** with 4 vCPUs
+and approximately 3.3 GiB guest RAM, at implementation commit `cd293e8`.
+Initially, Docker was absent. The command installed all missing OS/Docker
+prerequisites, paused for the expected Docker-group login refresh, and
+completed after the operator reran `make initialize`. No separate
+dependency-install, TLS setup or Docker image-pull command was needed.
+
+Full-stack health, three non-destructive repeated startups, Prometheus/Grafana
+dashboard rendering, a Demo Lab failure/alert/recovery cycle and retained
+monitoring history after reboot were verified. The Vault/PostgreSQL container
+IDs were preserved after operator-assisted Shamir unseal.
+
+**Known pre-existing limitation:** the first `make recover` after reboot
+stopped at an already-running but not-yet-ready Nginx; a second attempt
+completed and health/readiness checks passed. Follow up separately in
+[issue #155](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/155).
+This does not demonstrate guaranteed single-attempt recovery or safe upgrade
+of a pre-existing legacy development stack. See the
+[monitoring acceptance record](dev-monitoring.md#independent-clean-vm-acceptance--2026-11-22)
+for detailed evidence.
+
 ## Ordinary development day
 
 On an initialized and **unsealed** VM, the normal one-command entry point is:
