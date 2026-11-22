@@ -45,6 +45,13 @@ class MakefileStartupContractTests(unittest.TestCase):
             "python3 scripts/dev/verify_startup_idempotency.py --runs 3",
         )
 
+    def test_vault_ui_lifecycle_is_explicit(self):
+        for target, mode in (("vault-ui-enable", "enable"),
+                             ("vault-ui-disable", "disable"),
+                             ("vault-ui-status", "status")):
+            self.assertEqual(self.dry_run(target),
+                             f"python3 scripts/dev/bootstrap_vault_ui.py {mode}")
+
     def test_documented_links_and_commands(self):
         readme = (ROOT / "README.md").read_text()
         guide = (ROOT / "docs/dev-getting-started.md").read_text()
