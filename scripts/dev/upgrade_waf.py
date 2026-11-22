@@ -138,7 +138,7 @@ def validate_target():
         or [str(v) for v in svc.get("group_add") or []] != [nginx.TLS_GROUP_GID]
         or (svc.get("environment") or {}).get("MODSEC_RULE_ENGINE") != "On"):
         raise UpgradeError("WAF Compose image/group/blocking mode mismatch")
-    # Lock down the published ports and the two read-only bind mounts.
+    # Lock down the published ports and all three read-only bind mounts.
     ports = {(str(p.get("target")), str(p.get("published")), p.get("host_ip"))
              for p in svc.get("ports") or []}
     if ports != {("8080", "8080", "127.0.0.1"), ("8443", "8443", "127.0.0.1")}:
@@ -146,9 +146,10 @@ def validate_target():
     expected_mounts = {
         (str(nginx.CONFIG), "/etc/nginx/templates/conf.d/default.conf.template"),
         (str(nginx.CERTS), "/etc/nginx/certs"),
+        (str(nginx.PROMQL_RULES), nginx.PROMQL_RULES_RUNTIME),
     }
     vols = svc.get("volumes") or []
-    if (len(vols) != 2 or
+    if (len(vols) != 3 or
         {(v.get("source"), v.get("target")) for v in vols} != expected_mounts or
         any(v.get("type") != "bind" or v.get("read_only") is not True for v in vols)):
         raise UpgradeError("Unexpected WAF configuration/TLS mount")

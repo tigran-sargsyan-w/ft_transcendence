@@ -1,6 +1,17 @@
 # ft_transcendence
 
-An infrastructure intelligence / real-time incident platform built for the 42 `ft_transcendence` project. The development stack uses a React/Vite frontend, NestJS backend, PostgreSQL/Prisma, Docker Socket Proxy, Collector, Graph Engine, Nginx HTTPS and a separate Vault server with a runtime Vault Agent.
+An infrastructure intelligence / real-time incident platform built for the 42 `ft_transcendence` project. The development stack uses a React/Vite frontend, NestJS backend, PostgreSQL/Prisma, Docker Socket Proxy, Collector, Graph Engine, Nginx HTTPS and a separate Vault server with a runtime Vault Agent. Operational monitoring uses Prometheus and Grafana with a dedicated Vault Agent.
+
+## Operational monitoring
+
+Prometheus collects real Collector and monitoring pipeline metrics.
+Grafana provides two provisioned custom dashboards, historical
+metrics and visibility into alert states.
+
+- Grafana: https://transcendence.test:8443/grafana/
+- [Monitoring architecture, operations and evaluation](docs/dev-monitoring.md)
+
+Monitoring is included in the guarded startup and recovery workflow.
 
 ## Development startup (Ubuntu VM)
 
@@ -13,12 +24,20 @@ make up
 
 The guarded entry point verifies the existing Vault-backed stack and starts only known, trusted stopped containers. It does not initialize Vault, create database credentials, run Prisma migrations or recreate persistent volumes. Open `https://transcendence.test:8443` in the browser configured for that VM.
 
-First time on a new VM, install/check the required packages and use the **interactive** initialization workflow:
+For a new Ubuntu development VM, clone the repository, ensure Git and
+GNU Make are available, then run **one interactive first-install command**:
 
 ```sh
-./scripts/install-deps.sh
 make initialize
 ```
+
+It prepares missing system/Docker prerequisites and required images, then
+runs the guarded host, Vault, database, application and monitoring stages.
+Approval is requested before privileged setup operations. If Docker group
+membership changes, log out and back in, then rerun the command.
+
+Do not use `sudo make initialize`. Existing installations and upgrades
+require separate review; initial setup is not a replacement for recovery.
 
 After reboot, single-node Vault using Shamir 2-of-3 normally needs **manual unseal**; run `make recover` from a real terminal, and enter two distinct shares into the hidden Vault CLI prompts. Never provide shares in command arguments, Git, chat, screenshots or logs. This is development-only operator-assisted recovery, **not unattended Auto Unseal**.
 

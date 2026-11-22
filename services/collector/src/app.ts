@@ -8,6 +8,7 @@ import {
   type EventStore,
 } from './event-store.js';
 import type { SnapshotService } from './snapshot.js';
+import { renderDemoLabMetrics } from './metrics.js';
 
 type CollectorAppDependencies = {
   docker: Pick<
@@ -107,6 +108,29 @@ export function createApp({
       }
     },
   );
+
+
+  server.get('/metrics', async (_request, reply) => {
+    try {
+      const snapshot = await snapshots.create();
+
+      return reply
+        .header(
+          'Content-Type',
+          'text/plain; version=0.0.4; charset=utf-8',
+        )
+        .send(renderDemoLabMetrics(snapshot));
+    } catch (error) {
+      server.log.error(error);
+
+      return reply.status(503).send({
+        error: {
+          code: 'COLLECTOR_DOCKER_UNAVAILABLE',
+          message: 'Docker Engine is unavailable',
+        },
+      });
+    }
+  });
 
   server.get<{
     Querystring: {

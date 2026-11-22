@@ -42,9 +42,17 @@ STAGES = (
     ("support-services", "--check-support-services", "--prepare-support-services"),
     ("frontend", "--check-frontend", "--prepare-frontend"),
     ("nginx", "--check-nginx", "--prepare-nginx"),
+    ("prometheus", "--check-prometheus", "--prepare-prometheus"),
+    ("grafana-secrets", "--check-grafana-secrets", "--prepare-grafana-secrets"),
+    ("grafana-agent", "--check-grafana-agent", "--prepare-grafana-agent"),
+    ("grafana", "--check-grafana", "--prepare-grafana"),
+    ("grafana-https", "--check-grafana-https", None),
 )
 STAGE_BY_NAME = {name: (check, prepare) for name, check, prepare in STAGES}
-RESUMABLE = ("postgres", "backend-agent", "backend", "support-services", "frontend", "nginx")
+RESUMABLE = (
+    "postgres", "backend-agent", "backend", "support-services",
+    "frontend", "nginx", "prometheus", "grafana-agent", "grafana",
+)
 READ_ONLY_ATTEMPTS = 3
 READ_ONLY_RETRY_DELAY = 1
 
@@ -55,7 +63,12 @@ class UnifiedStartupError(Exception):
 
 def command(flag, *, quiet=False):
     """Invoke only fixed, reviewed bootstrap flags; no user-controlled argv."""
-    if flag not in {item for _, check, prepare in STAGES for item in (check, prepare)}:
+    if flag is None or flag not in {
+        item
+        for _, check, prepare in STAGES
+        for item in (check, prepare)
+        if item is not None
+    }:
         raise UnifiedStartupError("Refusing unrecognized bootstrap operation")
     kwargs = {"cwd":ROOT, "check":False}
     if quiet:
@@ -143,6 +156,27 @@ def guard_resume(name):
     elif name == "nginx":
         import bootstrap_nginx as nginx
         targets = ((nginx.NAME, nginx.container(), nginx.verify_identity),)
+    elif name == "prometheus":
+        import bootstrap_prometheus as prometheus
+        targets = ((prometheus.NAME, prometheus.container(), prometheus.verify_identity),)
+    elif name == "grafana-agent":
+        import bootstrap_grafana_agent as grafana_agent
+        if grafana_agent.credential_inventory() != "present":
+            raise UnifiedStartupError(
+                "Grafana AppRole missing; manual review required"
+            )
+        targets = ((
+            grafana_agent.NAME,
+            grafana_agent.container(),
+            grafana_agent.verify_identity,
+        ),)
+    elif name == "grafana":
+        import bootstrap_grafana as grafana
+        targets = ((
+            grafana.NAME,
+            grafana.container(),
+            grafana.verify_identity,
+        ),)
     else:
         raise UnifiedStartupError(f"Cannot resume stage {name}")
 
@@ -368,6 +402,10 @@ def initialize():
         if checked(name):
             print(f"KEEP: {name} ready", flush=True)
             continue
+        if prepare is None:
+            raise UnifiedStartupError(
+                f"{name} verification failed; manual review required"
+            )
         if name == "vault":
             vault_seal_guard()
         print(f"PREPARE: {name}", flush=True)
@@ -385,7 +423,12 @@ def start():
     # Nginx's check walks the full trusted dependency chain down to Vault and
     # PostgreSQL. Rechecking each dependency separately is expensive and can
     # saturate a small VM with redundant nested Docker/psql invocations.
-    if checked("nginx"):
+    if (
+        checked("nginx")
+        and checked("prometheus")
+        and checked("grafana")
+        and checked("grafana-https")
+    ):
         print("KEEP: complete Vault-backed stack ready", flush=True)
         print("RESULT: UNIFIED STARTUP READY", flush=True)
         return
@@ -407,6 +450,11 @@ def check():
     require("resources")
     # Nginx's read-only check covers the entire transitive service chain.
     require("nginx")
+    require("prometheus")
+    # Grafana check includes Vault credentials, Agent delivery,
+    # provisioning and authentication.
+    require("grafana")
+    require("grafana-https")
     print("RESULT: UNIFIED STACK READY (read-only)", flush=True)
 
 
@@ -434,6 +482,42 @@ def health_report():
     # Vault configuration. Do not repeat this expensive chain on success.
     if checked("nginx"):
         print("PASS: end-to-end Nginx HTTPS, application and trusted dependencies", flush=True)
+        if not checked("prometheus"):
+            print("FAIL: prometheus; inspect --check-prometheus", flush=True)
+            raise UnifiedStartupError("Health report failed at prometheus")
+
+        print("PASS: Prometheus readiness and trusted identity", flush=True)
+
+        if not checked("grafana"):
+            # Locate a failed Grafana dependency without provisioning.
+            for dependency in ("grafana-secrets", "grafana-agent"):
+                if not checked(dependency):
+                    print(
+                        f"FAIL: {dependency}; inspect "
+                        f"{STAGE_BY_NAME[dependency][0]}",
+                        flush=True,
+                    )
+                    raise UnifiedStartupError(
+                        f"Health report failed at {dependency}"
+                    )
+
+            print("FAIL: grafana; inspect --check-grafana", flush=True)
+            raise UnifiedStartupError(
+                "Health report failed at grafana or its checked dependencies"
+            )
+
+        print("PASS: Grafana authentication and provisioning", flush=True)
+
+        if not checked("grafana-https"):
+            print(
+                "FAIL: grafana-https; inspect --check-grafana-https",
+                flush=True,
+            )
+            raise UnifiedStartupError(
+                "Health report failed at grafana-https"
+            )
+
+        print("PASS: Grafana HTTPS and WAF protection", flush=True)
         print("RESULT: DEVELOPMENT HEALTHY (read-only)", flush=True)
         return
 

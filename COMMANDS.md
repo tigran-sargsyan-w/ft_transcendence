@@ -11,7 +11,7 @@
 | --- | --- | --- |
 | `./scripts/install-deps.sh --check` | Verify development prerequisites | No |
 | `./scripts/install-deps.sh` | Install prerequisites (interactive) | Yes: host packages/configuration |
-| `make initialize` | **First-time only** trusted bootstrap of a fresh VM | **Yes**: host, Vault, database, app; confirmations required |
+| `make initialize` | **First-time only** install prerequisites/images and initialize the complete trusted stack | **Yes**: OS/Docker preparation, host, Vault, database, app and monitoring; confirmations required |
 | `make up` / `make start` | Start/check **existing** trusted containers | Starts stopped containers only |
 | `make recover` | Resume existing sealed Vault using **manual** unseal prompts | Unseals Vault; resumes existing containers |
 | `make health` | Read-only health report, with failing dependency | No |
@@ -42,12 +42,16 @@ While Issue #115 is under review, its unified bootstrap lives on `feat/vault-uni
 ## B. First-time setup — NEW Ubuntu VM only
 
 ```bash
-./scripts/install-deps.sh --check
-./scripts/install-deps.sh         # If packages/configuration are missing
-make initialize                   # Interactive operator-approved first setup
-make health
+make initialize                   # Single interactive first-install entry point
+make health                       # Verify the initialized stack
 make check-all
 ```
+
+Git and GNU Make must already be available to clone the repository and
+invoke this entry point. Missing remaining OS/Docker prerequisites and
+required container images are prepared by `make initialize`, with operator
+confirmation. If Docker group access requires a new login, sign out and
+back in before resuming. Do not use sudo to run Make or bootstrap.
 
 The complete initial flow creates/validates Vault Raft with Shamir 2-of-3, TLS, AppRoles, PostgreSQL, restricted roles and Prisma migrations, and the application. It stores initial recovery material under `~/.local/state/transcendence/dev/private/` and requires secure **off-VM** custody of the necessary shares. The combined first-install path still needs independent acceptance on a separate clean VM: stop on unexpected errors and contact the infrastructure owner.
 
@@ -108,6 +112,24 @@ docker inspect --format '{{.State.Health.Status}}' transcendence-app-dev-backend
 ```
 
 If `make health` reports a failing stage, run its corresponding `--check-*` command first. Inspect logs locally and redact sensitive data; never print or share Vault tokens, Shamir shares, AppRole SecretIDs, rendered PostgreSQL DSNs or private key files.
+
+## Monitoring — Issue #142
+
+```bash
+make health
+./scripts/bootstrap.sh --check-prometheus
+./scripts/bootstrap.sh --check-grafana-secrets
+./scripts/bootstrap.sh --check-grafana-agent
+./scripts/bootstrap.sh --check-grafana
+./scripts/bootstrap.sh --check-grafana-https
+```
+
+Open Grafana at https://transcendence.test:8443/grafana/
+using authorized credentials on the configured trusted host.
+
+For initial provisioning, recovery limitations, dashboards
+and controlled failure demonstrations, see the
+[monitoring guide](docs/dev-monitoring.md).
 
 ## F. Development & tests
 

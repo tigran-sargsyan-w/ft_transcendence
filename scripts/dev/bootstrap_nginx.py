@@ -27,6 +27,8 @@ DEFAULT_NETWORK = f"{pg.PROJECT}_default"
 DOMAIN = "transcendence.test"
 CERTS = pg.ROOT / "infra/nginx/certs"
 CONFIG = pg.ROOT / "infra/nginx/default.conf.template"
+PROMQL_RULES = pg.ROOT / "infra/nginx/waf/REQUEST-900-FT-GRAFANA-PROMQL.conf"
+PROMQL_RULES_RUNTIME = "/opt/owasp-crs/rules/REQUEST-900-FT-GRAFANA-PROMQL.conf"
 TLS_GROUP_GID = "43043"
 PORTS = {
     "8080/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8080"}],
@@ -87,12 +89,15 @@ def verify_identity(item):
         raise NginxBootstrapError("Unexpected Nginx network, ports or privileges")
 
     mounts = item.get("Mounts") or []
-    if (len(mounts) != 2 or not support.backend.required_mount(
+    if (len(mounts) != 3 or not support.backend.required_mount(
             item, "/etc/nginx/templates/conf.d/default.conf.template", kind="bind",
             source=CONFIG, readonly=True)
             or not support.backend.required_mount(
             item, "/etc/nginx/certs", kind="bind",
-            source=CERTS, readonly=True)):
+            source=CERTS, readonly=True)
+            or not support.backend.required_mount(
+            item, PROMQL_RULES_RUNTIME, kind="bind",
+            source=PROMQL_RULES, readonly=True)):
         raise NginxBootstrapError("Unexpected Nginx configuration or certificate mounts")
 
     if any(str(entry).startswith(FORBIDDEN_ENV) for entry in cfg.get("Env") or []):
