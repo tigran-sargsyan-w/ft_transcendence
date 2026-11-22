@@ -2,7 +2,7 @@ name: transcendence-vault-dev
 
 services:
   vault-storage-permissions:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
     command:
@@ -47,7 +47,7 @@ services:
     restart: "no"
 
   vault:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     command: ["server"]
 
     environment:
@@ -65,8 +65,6 @@ services:
     expose:
       - "8200"
 
-    ports:
-      - "127.0.0.1:8200:8200"
 
     depends_on:
       vault-storage-permissions:
@@ -75,7 +73,7 @@ services:
     restart: unless-stopped
 
   vault-backend-provision:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
 
     profiles:
       - setup
@@ -162,7 +160,7 @@ services:
     restart: "no"
 
   vault-bootstrap:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     profiles:
       - setup
 
@@ -207,7 +205,7 @@ services:
     restart: "no"
 
   vault-tls-files:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     profiles:
       - maintenance
 

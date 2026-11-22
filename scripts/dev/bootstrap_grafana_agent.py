@@ -15,7 +15,7 @@ import bootstrap_vault_config as config
 SERVICE = "vault-grafana-agent"
 NAME = f"{pg.PROJECT}-{SERVICE}-1"
 
-IMAGE = "hashicorp/vault:2.2.1"
+IMAGE = "hashicorp/vault:2.1.2"
 NETWORK = "transcendence-vault-dev_vault_private"
 
 AUTH_VOLUME = f"{pg.PROJECT}_grafana_vault_auth"
