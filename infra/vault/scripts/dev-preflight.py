@@ -163,12 +163,9 @@ class Preflight:
                         "Unexpected Compose working directory: " + name)
                 self.containers[service if kind == "app" else "vault"] = container
         vault_host = self.containers["vault"].get("HostConfig") or {}
-        allowed_ports = {
-            "8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}]
-        }
         require(
             vault_host.get("Privileged") is False
-            and vault_host.get("PortBindings") in ({}, allowed_ports),
+            and not vault_host.get("PortBindings"),
             "Unexpected existing Vault published ports or privileges",
         )
         self.ok("Existing container identities and Compose provenance")
@@ -371,16 +368,9 @@ class Preflight:
         self.ok("Full application runtime model, isolation and file secrets")
 
         vault_services = vault.get("services", {})
-        expected_ports = [{
-            "host_ip": "127.0.0.1",
-            "mode": "ingress",
-            "protocol": "tcp",
-            "published": "8200",
-            "target": 8200,
-        }]
         require(
-            vault_services.get("vault", {}).get("ports") == expected_ports,
-            "Unexpected target Vault published ports",
+            not vault_services.get("vault", {}).get("ports"),
+            "Vault must not publish host ports directly",
         )
         vault_volumes = vault.get("volumes", {})
         require(set(vault_volumes) == {
@@ -426,6 +416,12 @@ class Preflight:
         self.volumes_and_network()
         self.tls_mounts()
         self.target_models()
+        execute([
+            sys.executable,
+            str(self.root / "scripts/dev/bootstrap_vault_ui.py"),
+            "check",
+        ])
+        self.ok("Vault UI gateway identity, isolation and HTTPS")
         if self.legacy:
             print("INFO: Legacy Compose provenance detected")
             print("RESULT: PREFLIGHT PASSED (read-only; legacy startup blocked)")

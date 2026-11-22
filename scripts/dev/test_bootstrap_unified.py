@@ -15,7 +15,7 @@ import bootstrap_unified as unified
 class UnifiedTests(unittest.TestCase):
     def test_fixed_stage_order(self):
         self.assertEqual([s[0] for s in unified.STAGES], [
-            "host", "resources", "vault", "vault-config", "vault-secrets",
+            "host", "resources", "vault", "vault-ui", "vault-config", "vault-secrets",
             "postgres", "postgres-roles", "migrations", "backend-agent",
             "backend", "support-services", "frontend", "nginx",
             "prometheus", "grafana-secrets", "grafana-agent",
@@ -41,7 +41,7 @@ class UnifiedTests(unittest.TestCase):
         with patch.object(unified, "command", return_value=True) as cmd, contextlib.redirect_stdout(io.StringIO()):
             unified.check()
         self.assertEqual([call.args[0] for call in cmd.call_args_list],
-                         ["--check-host", "--check-resources", "--check-nginx", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
+                         ["--check-host", "--check-resources", "--check-vault-ui", "--check-nginx", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
         self.assertTrue(all(call.kwargs["quiet"] for call in cmd.call_args_list))
 
     def test_check_stops_on_first_failure(self):
@@ -57,7 +57,7 @@ class UnifiedTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()) as output:
             unified.health_report()
         self.assertEqual([call.args[0] for call in command.call_args_list],
-                         ["--check-host", "--check-resources", "--check-nginx", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
+                         ["--check-host", "--check-resources", "--check-nginx", "--check-vault-ui", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
         self.assertTrue(all(call.kwargs["quiet"] for call in command.call_args_list))
         self.assertIn("RESULT: DEVELOPMENT HEALTHY", output.getvalue())
 
@@ -68,7 +68,7 @@ class UnifiedTests(unittest.TestCase):
             with self.assertRaisesRegex(unified.UnifiedStartupError, "postgres"):
                 unified.health_report()
         self.assertEqual([c.args[0] for c in ck.call_args_list],
-                         ["host", "resources", "nginx", "vault", "vault-config", "vault-secrets", "postgres"])
+                         ["host", "resources", "nginx", "vault", "vault-ui", "vault-config", "vault-secrets", "postgres"])
         self.assertIn("FAIL: postgres; inspect --check-postgres", output.getvalue())
         self.assertNotIn("RESULT: DEVELOPMENT HEALTHY", output.getvalue())
 
@@ -143,7 +143,7 @@ class UnifiedTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             unified.start()
         self.assertEqual([call.args[0] for call in ck.call_args_list],
-                         ["host", "resources", "nginx", "prometheus", "grafana", "grafana-https"])
+                         ["host", "resources", "vault-ui", "nginx", "prometheus", "grafana", "grafana-https"])
         vault.assert_called_once()
 
     def test_routine_fails_before_database_if_vault_sealed(self):
@@ -160,6 +160,45 @@ class UnifiedTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(unified.UnifiedStartupError, "migrations"):
                 unified.start()
+
+    def test_guard_resume_vault_ui_verifies_identity(self):
+        ui = types.ModuleType("bootstrap_vault_ui")
+        ui.NAME = "trusted-vault-ui"
+
+        item = {
+            "Id": "original-gateway-id",
+            "State": {
+                "Running": False,
+                "Status": "exited",
+            },
+        }
+
+        ui.inspect = MagicMock(return_value=item)
+        ui.verify_identity = MagicMock()
+
+        with patch.dict("sys.modules", {"bootstrap_vault_ui": ui}):
+            targets = unified.guard_resume("vault-ui")
+
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(
+            targets[0][:2],
+            ("trusted-vault-ui", "original-gateway-id"),
+        )
+        ui.verify_identity.assert_called_once_with(item)
+
+    def test_missing_vault_ui_refuses_resume(self):
+        ui = types.ModuleType("bootstrap_vault_ui")
+        ui.NAME = "trusted-vault-ui"
+        ui.inspect = MagicMock(return_value=None)
+        ui.verify_identity = MagicMock()
+
+        with patch.dict("sys.modules", {"bootstrap_vault_ui": ui}):
+            with self.assertRaisesRegex(
+                unified.UnifiedStartupError, "Missing"
+            ):
+                unified.guard_resume("vault-ui")
+
+        ui.verify_identity.assert_not_called()
 
     def test_resume_ready_is_keep(self):
         with patch.object(unified, "checked", return_value=True), \
@@ -373,7 +412,7 @@ class UnifiedTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             unified.start()
         self.assertEqual([item.args[0] for item in command.call_args_list],
-                         ["--check-host", "--check-resources", "--check-nginx", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
+                         ["--check-host", "--check-resources", "--check-vault-ui", "--check-nginx", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
         guard.assert_called_once()
         resume.assert_not_called()
 
@@ -445,11 +484,8 @@ class UnifiedTests(unittest.TestCase):
         self.assertNotIn("sensitive internal info", str(caught.exception))
         cmd.assert_not_called()
 
-    def test_recovery_accepts_localhost_vault_ui_port(self):
+    def test_recovery_accepts_vault_without_published_ports(self):
         vault, item = self.recovery_fixture(sealed=False)
-        item["HostConfig"]["PortBindings"] = {
-            "8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}]
-        }
         with patch.dict("sys.modules", {"bootstrap_vault": vault}), \
              patch.object(unified.subprocess, "run") as cmd, \
              contextlib.redirect_stdout(io.StringIO()):
@@ -460,6 +496,7 @@ class UnifiedTests(unittest.TestCase):
 
     def test_recovery_rejects_unexpected_vault_ui_ports(self):
         unsafe = [
+            {"8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}]},
             {"8200/tcp": [{"HostIp": "::", "HostPort": "8200"}]},
             {"8200/tcp": [{"HostIp": "127.0.0.2", "HostPort": "8200"}]},
             {"8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8201"}]},

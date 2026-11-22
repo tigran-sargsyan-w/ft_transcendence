@@ -32,6 +32,7 @@ STAGES = (
     ("host", "--check-host", "--prepare-host"),
     ("resources", "--check-resources", "--prepare-resources"),
     ("vault", "--check-vault", "--prepare-vault"),
+    ("vault-ui", "--check-vault-ui", "--prepare-vault-ui"),
     ("vault-config", "--check-vault-config", "--prepare-vault-config"),
     ("vault-secrets", "--check-vault-secrets", "--prepare-vault-secrets"),
     ("postgres", "--check-postgres", "--prepare-postgres"),
@@ -50,7 +51,7 @@ STAGES = (
 )
 STAGE_BY_NAME = {name: (check, prepare) for name, check, prepare in STAGES}
 RESUMABLE = (
-    "postgres", "backend-agent", "backend", "support-services",
+    "vault-ui", "postgres", "backend-agent", "backend", "support-services",
     "frontend", "nginx", "prometheus", "grafana-agent", "grafana",
 )
 READ_ONLY_ATTEMPTS = 3
@@ -132,7 +133,10 @@ def guard_resume(name):
     No `up`, image builds, provisioning, unseal or migrations are allowed in
     routine recovery. Each target retains its exact inspected Docker ID.
     """
-    if name == "postgres":
+    if name == "vault-ui":
+        import bootstrap_vault_ui as ui
+        targets = ((ui.NAME, ui.inspect(), ui.verify_identity),)
+    elif name == "postgres":
         import bootstrap_postgres as pg
         targets = ((pg.NAME, pg.exact_container(pg.NAME), pg.verify_identity),)
     elif name == "backend-agent":
@@ -297,11 +301,7 @@ def recovery_vault():
             )
         vault.verify_identity(before)
         host = before.get("HostConfig") or {}
-        ports = host.get("PortBindings")
-        allowed_ports = {
-            "8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}]
-        }
-        if host.get("Privileged") is not False or ports not in ({}, allowed_ports):
+        if host.get("Privileged") is not False or host.get("PortBindings"):
             raise UnifiedStartupError("Unexpected Vault host privileges/ports")
         state = before.get("State") or {}
         if state.get("Running") is True and state.get("Status") == "running":
@@ -428,7 +428,8 @@ def start():
     # PostgreSQL. Rechecking each dependency separately is expensive and can
     # saturate a small VM with redundant nested Docker/psql invocations.
     if (
-        checked("nginx")
+        checked("vault-ui")
+        and checked("nginx")
         and checked("prometheus")
         and checked("grafana")
         and checked("grafana-https")
@@ -452,6 +453,8 @@ def check():
     print("=== Unified read-only readiness check ===", flush=True)
     require("host")
     require("resources")
+    # The Vault UI gateway is an independent HTTPS entry point.
+    require("vault-ui")
     # Nginx's read-only check covers the entire transitive service chain.
     require("nginx")
     require("prometheus")
@@ -486,6 +489,10 @@ def health_report():
     # Vault configuration. Do not repeat this expensive chain on success.
     if checked("nginx"):
         print("PASS: end-to-end Nginx HTTPS, application and trusted dependencies", flush=True)
+        if not checked("vault-ui"):
+            print("FAIL: vault-ui; inspect --check-vault-ui", flush=True)
+            raise UnifiedStartupError("Health report failed at vault-ui")
+        print("PASS: Vault UI HTTPS gateway and Docker isolation", flush=True)
         if not checked("prometheus"):
             print("FAIL: prometheus; inspect --check-prometheus", flush=True)
             raise UnifiedStartupError("Health report failed at prometheus")

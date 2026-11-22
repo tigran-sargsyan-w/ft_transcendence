@@ -187,13 +187,6 @@ class PreflightTests(unittest.TestCase):
                 "type": "bind", "source": str(self.state / "tls"),
                 "target": "/vault/tls", "read_only": readonly,
             }]}
-        services["vault"]["ports"] = [{
-            "host_ip": "127.0.0.1",
-            "mode": "ingress",
-            "protocol": "tcp",
-            "published": "8200",
-            "target": 8200,
-        }]
         return {
             "name": preflight.VAULT_PROJECT,
             "services": services,
@@ -270,6 +263,62 @@ class PreflightTests(unittest.TestCase):
         self.assertIn("migrator_vault_auth", app["volumes"])
         self.assertIn("postgres_provisioner_rendered", app["volumes"])
         self.assertIn("backend_agent_auth", vault["volumes"])
+
+    def test_gateway_security_check_is_invoked(self):
+        expected = [
+            preflight.sys.executable,
+            str(self.root / "scripts/dev/bootstrap_vault_ui.py"),
+            "check",
+        ]
+
+        with (
+            patch.object(
+                preflight, "json_command",
+                side_effect=self.fake_json,
+            ),
+            patch.object(
+                preflight, "execute",
+                return_value="",
+            ) as execute,
+        ):
+            self.pre.run()
+
+        commands = [
+            call.args[0]
+            for call in execute.call_args_list
+        ]
+
+        self.assertEqual(commands.count(expected), 1)
+
+    def test_gateway_failure_blocks_preflight(self):
+        expected = [
+            preflight.sys.executable,
+            str(self.root / "scripts/dev/bootstrap_vault_ui.py"),
+            "check",
+        ]
+
+        def fake_execute(command, env=None):
+            if command == expected:
+                raise preflight.PreflightError(
+                    "Gateway security check failed"
+                )
+            return ""
+
+        with (
+            patch.object(
+                preflight, "json_command",
+                side_effect=self.fake_json,
+            ),
+            patch.object(
+                preflight, "execute",
+                side_effect=fake_execute,
+            ),
+        ):
+            with self.assertRaisesRegex(
+                preflight.PreflightError,
+                "Gateway security check failed",
+            ):
+                self.pre.run()
 
     def test_existing_installation_passes(self):
         self.run_preflight()
@@ -446,7 +495,13 @@ class PreflightTests(unittest.TestCase):
 
     def test_unsafe_target_vault_ports_rejected(self):
         unsafe_ports = [
-            [],
+            [{
+                "host_ip": "127.0.0.1",
+                "mode": "ingress",
+                "protocol": "tcp",
+                "published": "8200",
+                "target": 8200,
+            }],
             [{
                 "host_ip": "0.0.0.0",
                 "mode": "ingress",
@@ -466,16 +521,20 @@ class PreflightTests(unittest.TestCase):
             with self.subTest(ports=ports):
                 self.vault_model["services"]["vault"]["ports"] = ports
                 with self.assertRaisesRegex(
-                    preflight.PreflightError, "Vault published ports"
+                    preflight.PreflightError, "Vault must not publish"
                 ):
                     self.run_preflight()
 
-    def test_existing_vault_localhost_port_accepted(self):
+    def test_existing_vault_localhost_port_rejected(self):
         vault = self.containers[preflight.VAULT_PROJECT + "-vault-1"]
         vault["HostConfig"]["PortBindings"] = {
             "8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}]
         }
-        self.run_preflight()
+        with self.assertRaisesRegex(
+            preflight.PreflightError,
+            "Unexpected existing Vault published ports",
+        ):
+            self.run_preflight()
 
     def test_existing_vault_unsafe_ports_rejected(self):
         vault = self.containers[preflight.VAULT_PROJECT + "-vault-1"]
