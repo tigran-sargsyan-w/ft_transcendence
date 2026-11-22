@@ -65,6 +65,9 @@ services:
     expose:
       - "8200"
 
+    ports:
+      - "127.0.0.1:8200:8200"
+
     depends_on:
       vault-storage-permissions:
         condition: service_completed_successfully
