@@ -107,7 +107,8 @@ python3 scripts/dev/bootstrap_images.py plan
 python3 scripts/dev/bootstrap_images.py check
 ```
 
-Independent full-stack acceptance on a clean Ubuntu VM is still required.
+Independent full-stack acceptance on a clean Ubuntu VM was completed
+successfully on 2026-11-22 (see the acceptance record below).
 Image preparation alone does not initialize Vault.
 
 On an already initialized, unsealed development VM:
@@ -564,8 +565,44 @@ into the isolated Demo Lab while the application infrastructure
 remained operational.
 
 Final merge preparation found no conflicts with the fetched
-main branch. Independent clean-VM installation and teammate
-upgrade acceptance remain outstanding.
+main branch. Independent clean-VM installation acceptance was
+subsequently completed on 2026-11-22; teammate upgrade/cutover
+acceptance remains a separate coordination task.
+
+### Independent clean-VM acceptance — 2026-11-22
+
+**Environment:** separate, newly provisioned VirtualBox Ubuntu 26.04 LTS
+(amd64) VM, 4 vCPUs, approximately 3.3 GiB guest RAM, and an empty
+Docker/Transcendence state. **Verified implementation commit:**
+`cd293e8` (`feat/prometheus-grafana`).
+
+| Verification | Observed result |
+| --- | --- |
+| First-install entry point | `make initialize` installed missing `mkcert`, `libnss3-tools`, Docker Engine/Compose/Buildx; after the expected Docker-group re-login, rerunning the same command resumed successfully |
+| Container images | All nine missing required images downloaded automatically after operator confirmation; no manual `docker pull` |
+| Trusted provisioning | Host TLS/CA, Docker resources, Vault Raft and Shamir 2-of-3, KV/AppRoles, PostgreSQL 18, Prisma migrations, Vault Agents, application, Prometheus, Grafana and Nginx/WAF succeeded |
+| Overall readiness | `RESULT: UNIFIED INITIALIZATION READY`, `make health` and `make check-all` passed |
+| Routine startup | `make up` passed; `make acceptance` verified 3/3 guarded starts without container recreation, restart or migration-history drift |
+| Browser and monitoring | Trusted HTTPS application/API and Grafana login worked; both provisioned dashboards displayed actual Prometheus and Collector time series and reported `UP` scrapes |
+| Isolated Demo Lab | `make demo-up` started healthy `db`, `api` and `web`; controlled `db` failure produced three firing alerts and historical unhealthy samples |
+| Incident recovery | `make demo-recover SERVICE=db` restored healthy service state and resolved alerts; historical incident samples remained visible |
+| VM reboot | Vault required two manually entered, distinct unseal shares; the second `make recover` returned `REBOOT RECOVERY READY`; post-reboot health/readiness passed |
+| Resource persistence | Vault and PostgreSQL Docker container IDs matched pre-reboot records; historical monitoring data remained visible in Grafana |
+| Demo Lab after reboot | Because the disposable lab has `restart: "no"`, it was not automatically started; `make demo-reset` restored its baseline and alerts returned to zero |
+
+**Existing, separately tracked recovery issue:** on this constrained VM,
+the first post-reboot `make recover` stopped with
+`ERROR: nginx is already running but unhealthy; manual review required`.
+A second invocation completed without provisioning or container replacement.
+The precise cause remains unconfirmed. This pre-existing behavior is
+tracked in [issue #155](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/155)
+and is not addressed by PR #154. Do not bypass the fail-closed guard.
+
+This record demonstrates a successful **independent clean installation**,
+monitoring incident lifecycle and eventual guarded reboot recovery. It is
+not evidence of a one-attempt reboot recovery guarantee, legacy-VM
+upgrade/cutover, production disaster recovery or complete application
+authentication/WebSocket E2E coverage.
 
 ## Subject compliance
 
@@ -601,8 +638,9 @@ The school evaluator determines final eligibility for the Major module.
 - Grafana-specific AppRole rotation is not implemented
   by the existing rotation workflow. SecretID expiry
   requires an explicitly reviewed maintenance procedure.
-- A complete first-time installation on an independent
-  clean VM remains to be accepted.
+- Existing developer installations require a separately reviewed
+  monitoring cutover; clean-VM acceptance does not validate a
+  non-destructive upgrade of legacy local Docker resources.
 - Resource identity preservation is not a substitute for
   independent backup and disaster recovery testing.
 
