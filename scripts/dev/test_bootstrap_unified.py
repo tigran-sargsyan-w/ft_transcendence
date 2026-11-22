@@ -445,6 +445,41 @@ class UnifiedTests(unittest.TestCase):
         self.assertNotIn("sensitive internal info", str(caught.exception))
         cmd.assert_not_called()
 
+    def test_recovery_accepts_localhost_vault_ui_port(self):
+        vault, item = self.recovery_fixture(sealed=False)
+        item["HostConfig"]["PortBindings"] = {
+            "8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}]
+        }
+        with patch.dict("sys.modules", {"bootstrap_vault": vault}), \
+             patch.object(unified.subprocess, "run") as cmd, \
+             contextlib.redirect_stdout(io.StringIO()):
+            found, state = unified.recovery_vault()
+        self.assertIs(found, vault)
+        self.assertFalse(state["sealed"])
+        cmd.assert_not_called()
+
+    def test_recovery_rejects_unexpected_vault_ui_ports(self):
+        unsafe = [
+            {"8200/tcp": [{"HostIp": "::", "HostPort": "8200"}]},
+            {"8200/tcp": [{"HostIp": "127.0.0.2", "HostPort": "8200"}]},
+            {"8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8201"}]},
+            {
+                "8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}],
+                "8201/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8201"}],
+            },
+        ]
+        for bindings in unsafe:
+            with self.subTest(bindings=bindings):
+                vault, item = self.recovery_fixture()
+                item["HostConfig"]["PortBindings"] = bindings
+                with patch.dict("sys.modules", {"bootstrap_vault": vault}), \
+                     patch.object(unified.subprocess, "run") as cmd:
+                    with self.assertRaisesRegex(
+                        unified.UnifiedStartupError, "privileges/ports"
+                    ):
+                        unified.recovery_vault()
+                cmd.assert_not_called()
+
     def test_recovery_rejects_public_vault_ports(self):
         vault, item = self.recovery_fixture()
         item["HostConfig"]["PortBindings"] = {"8200/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8200"}]}

@@ -297,7 +297,11 @@ def recovery_vault():
             )
         vault.verify_identity(before)
         host = before.get("HostConfig") or {}
-        if host.get("Privileged") is not False or host.get("PortBindings"):
+        ports = host.get("PortBindings")
+        allowed_ports = {
+            "8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}]
+        }
+        if host.get("Privileged") is not False or ports not in ({}, allowed_ports):
             raise UnifiedStartupError("Unexpected Vault host privileges/ports")
         state = before.get("State") or {}
         if state.get("Running") is True and state.get("Status") == "running":
