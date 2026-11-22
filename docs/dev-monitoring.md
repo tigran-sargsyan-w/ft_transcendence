@@ -94,18 +94,21 @@ Configuration is version-controlled:
 Use the guarded development workflow described in
 [developer onboarding](dev-getting-started.md).
 
-For a genuinely new development VM, the operator must have
-the required monitoring images available. Grafana's creation
-helper explicitly uses `--pull never`.
+On a genuinely new development VM, `make initialize` prepares
+missing required Docker images before running the guarded provisioning
+stages. This includes Prometheus, Grafana and the Python helper image
+needed by Grafana's `--pull never` startup. Existing local image tags
+are preserved.
+
+For optional image diagnostics (no image downloads), run:
 
 ```sh
-docker pull prom/prometheus:v3.15.0
-docker pull grafana/grafana:13.3.1
-docker pull python:3.12-alpine
+python3 scripts/dev/bootstrap_images.py plan
+python3 scripts/dev/bootstrap_images.py check
 ```
 
-The full first-install path must be accepted separately on
-a clean VM. Image prefetching does not initialize Vault.
+Independent full-stack acceptance on a clean Ubuntu VM is still required.
+Image preparation alone does not initialize Vault.
 
 On an already initialized, unsealed development VM:
 

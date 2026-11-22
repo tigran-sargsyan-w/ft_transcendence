@@ -22,7 +22,7 @@ usage() {
   cat <<'HELP'
 Usage: ./scripts/bootstrap.sh [--initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--prepare-prometheus|--check-prometheus|--prepare-grafana-secrets|--check-grafana-secrets|--prepare-grafana-agent|--check-grafana-agent|--prepare-grafana|--check-grafana|--check-grafana-https|--plan-waf-upgrade|--upgrade-waf|--help]
 
-  --initialize    Trusted first install: sequential stages with per-step confirmation.
+  --initialize    Install dependencies/images, then initialize guarded stages.
   --start         Resume only existing verified containers (Vault must be unsealed).
   --recover       Resume existing Vault, prompt for manual unseal, then start stack.
   --check-all     Read-only complete-stack health verification.
@@ -220,16 +220,18 @@ inventory_docker() {
 }
 
 say "=== Fresh Ubuntu bootstrap: host + Docker resources ==="
-if [[ "$MODE" == --upgrade-waf ]]; then
-  # Operator-approved workflow: install any missing prerequisites (e.g. acl)
-  # using the existing interactive installer before attempting migration.
-  ./scripts/install-deps.sh || fail "Prerequisites not ready for WAF upgrade"
+if [[ "$MODE" == --initialize || "$MODE" == --upgrade-waf ]]; then
+  # Only explicitly approved initialization/maintenance installs packages.
+  ./scripts/install-deps.sh || fail "Dependency installation stopped; inspect the installer and rerun"
+  ./scripts/install-deps.sh --check || fail "Docker dependencies or access still unavailable"
 else
-  ./scripts/install-deps.sh --check || fail "Dependencies not ready; run ./scripts/install-deps.sh first"
+  # Routine start, recovery and read-only commands never install packages.
+  ./scripts/install-deps.sh --check || fail "Dependencies not ready; use make initialize on a fresh VM"
 fi
 
 case "$MODE" in
   --initialize)
+    python3 scripts/dev/bootstrap_images.py apply || fail "Required images unavailable"
     python3 scripts/dev/bootstrap_unified.py initialize
     ;;
   --start)

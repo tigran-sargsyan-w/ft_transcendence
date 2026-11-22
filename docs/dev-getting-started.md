@@ -13,13 +13,15 @@ This guide documents the **development VM** startup. Run commands at the reposit
 ## First-time trusted setup: new VM only
 
 1. Check out the project on the dedicated Ubuntu VM, including the intended reviewed commit. Keep local work and sensitive materials outside Git.
-2. Install prerequisites **interactively** if needed, then verify the environment:
+2. Ensure the repository has been cloned and Git and GNU Make are
+   available. `make initialize` installs missing OS/Docker prerequisites
+   and downloads required container images with confirmation. There is
+   no mandatory separate `install-deps.sh`, `make setup` or manual
+   `docker pull` step. Existing local image tags are preserved.
 
-   ```sh
-   ./scripts/install-deps.sh
-   ./scripts/install-deps.sh --check
-   ./scripts/bootstrap.sh --plan
-   ```
+   If Docker group membership changes, log out and back in before
+   rerunning initialization. This is an operator-approved, resumable
+   first-install flow, not a silent privilege escalation.
 
 3. Run the single first-time entry point **in an interactive terminal**:
 
