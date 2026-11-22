@@ -78,12 +78,15 @@ class BootstrapVaultTests(unittest.TestCase):
         with self.assertRaises(v.VaultBootstrapError):
             v.verify_identity(item)
 
-    def test_localhost_vault_ui_port_accepted(self):
+    def test_localhost_vault_ui_port_rejected(self):
         item = self.valid_inspect()
         item["HostConfig"]["PortBindings"] = {
             "8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}]
         }
-        self.assertIsNotNone(v.verify_identity(item))
+        with self.assertRaisesRegex(
+            v.VaultBootstrapError, "privileges/ports"
+        ):
+            v.verify_identity(item)
 
     def test_unsafe_vault_ports_rejected(self):
         cases = [

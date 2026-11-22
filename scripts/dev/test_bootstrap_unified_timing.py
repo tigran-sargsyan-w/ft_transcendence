@@ -66,8 +66,8 @@ class StageTimingTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()) as output:
             unified.health_report()
         self.assertEqual([x.args[0] for x in cmd.call_args_list],
-                         ["--check-host", "--check-resources", "--check-nginx", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
-        self.assertEqual(output.getvalue().count("TIMING:"), 6)
+                         ["--check-host", "--check-resources", "--check-nginx", "--check-vault-ui", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
+        self.assertEqual(output.getvalue().count("TIMING:"), 7)
         self.assertIn("RESULT: DEVELOPMENT HEALTHY (read-only)", output.getvalue())
 
 
