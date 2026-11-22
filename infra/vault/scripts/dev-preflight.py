@@ -162,6 +162,15 @@ class Preflight:
                         == str(working_dir),
                         "Unexpected Compose working directory: " + name)
                 self.containers[service if kind == "app" else "vault"] = container
+        vault_host = self.containers["vault"].get("HostConfig") or {}
+        allowed_ports = {
+            "8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}]
+        }
+        require(
+            vault_host.get("Privileged") is False
+            and vault_host.get("PortBindings") in ({}, allowed_ports),
+            "Unexpected existing Vault published ports or privileges",
+        )
         self.ok("Existing container identities and Compose provenance")
 
     def volumes_and_network(self):

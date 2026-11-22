@@ -74,6 +74,7 @@ class PreflightTests(unittest.TestCase):
                     }},
                 }
         vault = self.containers[preflight.VAULT_PROJECT + "-vault-1"]
+        vault["HostConfig"] = {"Privileged": False, "PortBindings": {}}
         agent = self.containers[preflight.APP_PROJECT + "-vault-backend-agent-1"]
         backend = self.containers[preflight.APP_PROJECT + "-backend-1"]
         postgres = self.containers[preflight.APP_PROJECT + "-postgres-1"]
@@ -456,6 +457,28 @@ class PreflightTests(unittest.TestCase):
         for ports in unsafe_ports:
             with self.subTest(ports=ports):
                 self.vault_model["services"]["vault"]["ports"] = ports
+                with self.assertRaisesRegex(
+                    preflight.PreflightError, "Vault published ports"
+                ):
+                    self.run_preflight()
+
+    def test_existing_vault_localhost_port_accepted(self):
+        vault = self.containers[preflight.VAULT_PROJECT + "-vault-1"]
+        vault["HostConfig"]["PortBindings"] = {
+            "8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}]
+        }
+        self.run_preflight()
+
+    def test_existing_vault_unsafe_ports_rejected(self):
+        vault = self.containers[preflight.VAULT_PROJECT + "-vault-1"]
+        cases = [
+            {"8200/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8200"}]},
+            {"8200/tcp": [{"HostIp": "::", "HostPort": "8200"}]},
+            {"8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8201"}]},
+        ]
+        for ports in cases:
+            with self.subTest(ports=ports):
+                vault["HostConfig"]["PortBindings"] = ports
                 with self.assertRaisesRegex(
                     preflight.PreflightError, "Vault published ports"
                 ):
