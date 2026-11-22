@@ -27,6 +27,7 @@ class BootstrapVaultTests(unittest.TestCase):
                 "com.docker.compose.project.working_dir": str(v.COMPOSE.parent),
             }},
             "State": {"Running": True, "Status": "running"},
+            "HostConfig": {"Privileged": False, "PortBindings": {}},
             "Mounts": [
                 {"Destination": "/vault/data", "Type": "volume", "Name": v.PROJECT + "_vault_data"},
                 {"Destination": "/vault/tls", "Type": "bind", "Source": str(v.STATE / "tls"), "RW": False},
@@ -76,6 +77,32 @@ class BootstrapVaultTests(unittest.TestCase):
         item["Mounts"][0]["Name"] = "foreign_vault_data"
         with self.assertRaises(v.VaultBootstrapError):
             v.verify_identity(item)
+
+    def test_localhost_vault_ui_port_accepted(self):
+        item = self.valid_inspect()
+        item["HostConfig"]["PortBindings"] = {
+            "8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}]
+        }
+        self.assertIsNotNone(v.verify_identity(item))
+
+    def test_unsafe_vault_ports_rejected(self):
+        cases = [
+            {"8200/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8200"}]},
+            {"8200/tcp": [{"HostIp": "::", "HostPort": "8200"}]},
+            {"8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8201"}]},
+            {
+                "8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}],
+                "8201/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8201"}],
+            },
+        ]
+        for ports in cases:
+            with self.subTest(ports=ports):
+                item = self.valid_inspect()
+                item["HostConfig"]["PortBindings"] = ports
+                with self.assertRaisesRegex(
+                    v.VaultBootstrapError, "privileges/ports"
+                ):
+                    v.verify_identity(item)
 
     def test_existing_initialized_vault_does_not_reinit(self):
         state = {"initialized": True, "sealed": False, "n": 3, "t": 2,
