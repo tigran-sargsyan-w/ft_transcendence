@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import stat
 import ssl
 import subprocess
 import sys
@@ -24,6 +25,8 @@ CA = (
     / "transcendence/dev/tls/ca.crt"
 )
 TARGET = "/usr/local/etc/haproxy/haproxy.cfg"
+STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "transcendence/dev"
+ENABLED = STATE / "vault-ui.enabled"
 
 EXPECTED_CONFIG = """global
     maxconn 64
@@ -260,6 +263,125 @@ def verify_identity(item):
         raise GatewayError("Credentials found in gateway environment")
 
 
+def desired_enabled():
+    """Persistent operator intent; absent marker means intentionally disabled.
+
+    Invalid or unsafe state NEVER counts as disabled.
+    """
+    if STATE.is_symlink():
+        raise GatewayError("Unsafe Vault UI state directory")
+    if not STATE.exists():
+        return False
+    parent = STATE.stat()
+    if (
+        not stat.S_ISDIR(parent.st_mode)
+        or parent.st_uid != os.getuid()
+        or parent.st_mode & 0o077
+    ):
+        raise GatewayError("Unsafe Vault UI state directory")
+    try:
+        fd = os.open(ENABLED, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError:
+        return False
+    except OSError:
+        raise GatewayError("Cannot safely read Vault UI intent") from None
+    try:
+        meta = os.fstat(fd)
+        if (
+            not stat.S_ISREG(meta.st_mode)
+            or meta.st_uid != os.getuid()
+            or stat.S_IMODE(meta.st_mode) != 0o600
+            or os.read(fd, 32) != b"enabled\n"
+        ):
+            raise GatewayError("Untrusted Vault UI intent marker")
+    finally:
+        os.close(fd)
+    return True
+
+
+def mark_enabled():
+    STATE.mkdir(parents=True, mode=0o700, exist_ok=True)
+    if desired_enabled():
+        return
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(ENABLED, flags, 0o600)
+    except OSError:
+        raise GatewayError("Cannot safely enable Vault UI intent") from None
+    with os.fdopen(fd, "wb") as output:
+        output.write(b"enabled\n")
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def mark_disabled():
+    if desired_enabled():
+        try:
+            ENABLED.unlink()
+        except OSError:
+            raise GatewayError("Cannot clear Vault UI intent") from None
+
+
+def check_disabled():
+    """Disabled is healthy only when the gateway really cannot serve UI."""
+    compose()
+    item = inspect()
+    if item is not None:
+        verify_identity(item)
+        verify_network(PRIVATE, "transcendence-vault-dev", True)
+        verify_network(EDGE, PROJECT, False)
+        state = item.get("State") or {}
+        if state.get("Running") is not False or state.get("Status") not in ("exited", "created"):
+            raise GatewayError("Vault UI unexpectedly running or in an unsafe state")
+    print("RESULT: VAULT UI DISABLED (expected, read-only)")
+
+
+def status():
+    if desired_enabled():
+        check()
+        print("STATUS: VAULT UI ENABLED (healthy)")
+    else:
+        check_disabled()
+        print("STATUS: VAULT UI DISABLED (expected)")
+
+
+def enable():
+    # Validate the exact Compose model and any existing gateway BEFORE
+    # writing operator intent. A failed subsequent start stays enabled/failed.
+    compose()
+    item = inspect()
+    if item is not None:
+        verify_identity(item)
+    mark_enabled()
+    apply()
+    print("RESULT: VAULT UI ENABLED")
+
+
+def disable():
+    # Stop only the known, fully verified gateway, never Vault itself.
+    compose()
+    item = inspect()
+    if item is not None:
+        verify_identity(item)
+        verify_network(PRIVATE, "transcendence-vault-dev", True)
+        verify_network(EDGE, PROJECT, False)
+        state = item.get("State") or {}
+        if state.get("Running") is True and state.get("Status") == "running":
+            old_id = item.get("Id")
+            command(["docker", "stop", "--time", "10", NAME], timeout=35)
+            after = inspect()
+            if after is None or after.get("Id") != old_id:
+                raise GatewayError("Gateway identity changed during stop")
+            verify_identity(after)
+            state = after.get("State") or {}
+        if state.get("Running") is not False or state.get("Status") not in ("created", "exited"):
+            raise GatewayError("Cannot verify that Vault UI is stopped")
+    # Clear intent only after stop is verified; failures stay visible to health.
+    mark_disabled()
+    check_disabled()
+    print("RESULT: VAULT UI DISABLED")
+
+
 def probe_ui():
     if not CA.is_file() or CA.is_symlink():
         raise GatewayError("Vault CA certificate missing")
@@ -352,7 +474,7 @@ def apply():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("plan", "check", "apply"))
+    parser.add_argument("mode", choices=("plan", "check", "apply", "enable", "disable", "status"))
     args = parser.parse_args()
 
     try:
@@ -370,9 +492,23 @@ def main():
             return 0
 
         if args.mode == "check":
+            if not desired_enabled():
+                raise GatewayError("Vault UI is intentionally disabled")
             check()
+        elif args.mode == "status":
+            status()
         else:
-            apply()
+            # Shared startup lock prevents a concurrent make start/initialize
+            # from racing the explicit administrative lifecycle transition.
+            import bootstrap_unified as unified
+            try:
+                with unified.exclusive_orchestrator_lock():
+                    if args.mode == "disable":
+                        disable()
+                    else:
+                        enable()  # Legacy `apply` also records enabled intent.
+            except unified.UnifiedStartupError:
+                raise GatewayError("Trusted startup lock unavailable") from None
         return 0
 
     except GatewayError as exc:

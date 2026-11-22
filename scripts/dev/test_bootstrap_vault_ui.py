@@ -201,6 +201,18 @@ class GatewaySecurityTests(unittest.TestCase):
                 self.assertNotIn("start", args)
                 self.assertNotIn("up", args)
 
+    def test_strict_cli_check_refuses_disabled_intent_without_docker_changes(self):
+        with (
+            patch.object(gateway.os, "geteuid", return_value=1000),
+            patch.object(gateway, "desired_enabled", return_value=False),
+            patch.object(gateway, "check") as check,
+            patch.object(gateway, "command") as command,
+        ):
+            with patch("sys.argv", ["bootstrap_vault_ui.py", "check"]):
+                self.assertEqual(gateway.main(), 1)
+        check.assert_not_called()
+        command.assert_not_called()
+
     def test_check_refuses_stopped_gateway(self):
         item = fixture()
         item["State"] = {
