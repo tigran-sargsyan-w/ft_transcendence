@@ -53,7 +53,7 @@ openssl req -new \
     -subj "/CN=vault"
 
 cat > "$TLS_DIR/vault.ext" <<'EOF'
-subjectAltName = DNS:vault
+subjectAltName = DNS:vault,DNS:localhost,IP:127.0.0.1
 basicConstraints = critical,CA:FALSE
 keyUsage = critical,digitalSignature,keyEncipherment
 extendedKeyUsage = serverAuth
