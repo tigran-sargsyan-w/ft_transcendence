@@ -360,6 +360,17 @@ class Preflight:
         self.ok("Full application runtime model, isolation and file secrets")
 
         vault_services = vault.get("services", {})
+        expected_ports = [{
+            "host_ip": "127.0.0.1",
+            "mode": "ingress",
+            "protocol": "tcp",
+            "published": "8200",
+            "target": 8200,
+        }]
+        require(
+            vault_services.get("vault", {}).get("ports") == expected_ports,
+            "Unexpected target Vault published ports",
+        )
         vault_volumes = vault.get("volumes", {})
         require(set(vault_volumes) == {
             "vault_data", "backend_agent_auth", "backend_rendered",

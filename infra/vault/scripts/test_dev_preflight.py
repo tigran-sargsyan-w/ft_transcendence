@@ -178,6 +178,13 @@ class PreflightTests(unittest.TestCase):
                 "type": "bind", "source": str(self.state / "tls"),
                 "target": "/vault/tls", "read_only": readonly,
             }]}
+        services["vault"]["ports"] = [{
+            "host_ip": "127.0.0.1",
+            "mode": "ingress",
+            "protocol": "tcp",
+            "published": "8200",
+            "target": 8200,
+        }]
         return {
             "name": preflight.VAULT_PROJECT,
             "services": services,
@@ -427,6 +434,32 @@ class PreflightTests(unittest.TestCase):
             "Existing Collector network attachment"
         ):
             self.run_preflight()
+
+    def test_unsafe_target_vault_ports_rejected(self):
+        unsafe_ports = [
+            [],
+            [{
+                "host_ip": "0.0.0.0",
+                "mode": "ingress",
+                "protocol": "tcp",
+                "published": "8200",
+                "target": 8200,
+            }],
+            [{
+                "host_ip": "127.0.0.1",
+                "mode": "ingress",
+                "protocol": "tcp",
+                "published": "8201",
+                "target": 8200,
+            }],
+        ]
+        for ports in unsafe_ports:
+            with self.subTest(ports=ports):
+                self.vault_model["services"]["vault"]["ports"] = ports
+                with self.assertRaisesRegex(
+                    preflight.PreflightError, "Vault published ports"
+                ):
+                    self.run_preflight()
 
     def test_published_postgres_port_rejected(self):
         self.app_model["services"]["postgres"]["ports"] = [{
