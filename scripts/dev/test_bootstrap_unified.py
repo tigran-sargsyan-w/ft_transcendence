@@ -41,7 +41,7 @@ class UnifiedTests(unittest.TestCase):
         with patch.object(unified, "command", return_value=True) as cmd, contextlib.redirect_stdout(io.StringIO()):
             unified.check()
         self.assertEqual([call.args[0] for call in cmd.call_args_list],
-                         ["--check-host", "--check-resources", "--check-vault-ui", "--check-nginx", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
+                         ["--check-host", "--check-resources", "--check-vault-ui-optional", "--check-nginx", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
         self.assertTrue(all(call.kwargs["quiet"] for call in cmd.call_args_list))
 
     def test_check_stops_on_first_failure(self):
@@ -57,7 +57,7 @@ class UnifiedTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()) as output:
             unified.health_report()
         self.assertEqual([call.args[0] for call in command.call_args_list],
-                         ["--check-host", "--check-resources", "--check-nginx", "--check-vault-ui", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
+                         ["--check-host", "--check-resources", "--check-nginx", "--check-vault-ui-optional", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
         self.assertTrue(all(call.kwargs["quiet"] for call in command.call_args_list))
         self.assertIn("RESULT: DEVELOPMENT HEALTHY", output.getvalue())
 
@@ -116,7 +116,7 @@ class UnifiedTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             unified.initialize()
         self.assertEqual([call.args[0] for call in cmd.call_args_list],
-                         [stage[1] for stage in unified.STAGES])
+                         [stage[1] for stage in unified.STAGES if stage[0] != "vault-ui"])
 
     def test_initialization_prepares_only_missing_stage(self):
         responses = [False] * unified.READ_ONLY_ATTEMPTS + [True, True] + [True] * (len(unified.STAGES) - 1)
@@ -160,6 +160,45 @@ class UnifiedTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(unified.UnifiedStartupError, "migrations"):
                 unified.start()
+
+    def test_reboot_with_enabled_but_stopped_ui_does_not_block_core_start(self):
+        # Simulates a persisted enabled marker and restart:no HAProxy after VM reboot.
+        # The core stack must still reach READY without starting the gateway.
+        with (
+            patch.object(unified, "checked", side_effect=lambda name: name != "vault-ui") as probe,
+            patch.object(unified, "vault_seal_guard"),
+            patch.object(unified, "resume") as resume,
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            unified.start()
+        resume.assert_not_called()
+        self.assertIn("WARN: optional Vault UI state unhealthy", output.getvalue())
+        self.assertIn("RESULT: UNIFIED STARTUP READY", output.getvalue())
+        self.assertEqual([call.args[0] for call in probe.call_args_list],
+                         ["host", "resources", "vault-ui", "nginx",
+                          "prometheus", "grafana", "grafana-https"])
+
+    def test_initialize_never_requires_optional_gateway(self):
+        with (
+            patch.object(unified.sys.stdin, "isatty", return_value=True),
+            patch.object(unified, "checked", side_effect=lambda name: name != "vault-ui") as probe,
+            patch.object(unified, "command") as command,
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            unified.initialize()
+        command.assert_not_called()
+        self.assertNotIn("vault-ui", [call.args[0] for call in probe.call_args_list])
+        self.assertIn("SKIP: optional vault-ui", output.getvalue())
+
+    def test_health_report_rejects_missing_enabled_gateway(self):
+        with (
+            patch.object(unified, "checked", side_effect=lambda name: name != "vault-ui"),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "vault-ui"):
+                unified.health_report()
+        self.assertIn("FAIL: vault-ui", output.getvalue())
+        self.assertNotIn("RESULT: DEVELOPMENT HEALTHY", output.getvalue())
 
     def test_guard_resume_vault_ui_verifies_identity(self):
         ui = types.ModuleType("bootstrap_vault_ui")
@@ -412,7 +451,7 @@ class UnifiedTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             unified.start()
         self.assertEqual([item.args[0] for item in command.call_args_list],
-                         ["--check-host", "--check-resources", "--check-vault-ui", "--check-nginx", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
+                         ["--check-host", "--check-resources", "--check-vault-ui-optional", "--check-nginx", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
         guard.assert_called_once()
         resume.assert_not_called()
 

@@ -32,7 +32,7 @@ STAGES = (
     ("host", "--check-host", "--prepare-host"),
     ("resources", "--check-resources", "--prepare-resources"),
     ("vault", "--check-vault", "--prepare-vault"),
-    ("vault-ui", "--check-vault-ui", "--prepare-vault-ui"),
+    ("vault-ui", "--check-vault-ui-optional", None),
     ("vault-config", "--check-vault-config", "--prepare-vault-config"),
     ("vault-secrets", "--check-vault-secrets", "--prepare-vault-secrets"),
     ("postgres", "--check-postgres", "--prepare-postgres"),
@@ -51,7 +51,7 @@ STAGES = (
 )
 STAGE_BY_NAME = {name: (check, prepare) for name, check, prepare in STAGES}
 RESUMABLE = (
-    "vault-ui", "postgres", "backend-agent", "backend", "support-services",
+    "postgres", "backend-agent", "backend", "support-services",
     "frontend", "nginx", "prometheus", "grafana-agent", "grafana",
 )
 READ_ONLY_ATTEMPTS = 3
@@ -403,6 +403,11 @@ def initialize():
         raise UnifiedStartupError("--initialize requires an interactive terminal")
     print("=== Trusted first-time bootstrap (individual confirmations required) ===", flush=True)
     for name, check, prepare in STAGES:
+        if name == "vault-ui":
+            # The administrative UI never gates core initialization.
+            # Its separate read-only status and make health remain strict.
+            print("SKIP: optional vault-ui; use make vault-ui-enable", flush=True)
+            continue
         if checked(name):
             print(f"KEEP: {name} ready", flush=True)
             continue
@@ -424,12 +429,16 @@ def start():
     require("host")
     require("resources")
     vault_seal_guard()
+    # Report optional gateway drift without preventing core recovery after a
+    # reboot: HAProxy has restart: no and its enabled marker may persist.
+    # Full health remains fail-closed for unexpected UI lifecycle state.
+    if not checked("vault-ui"):
+        print("WARN: optional Vault UI state unhealthy; run make vault-ui-status", flush=True)
     # Nginx's check walks the full trusted dependency chain down to Vault and
     # PostgreSQL. Rechecking each dependency separately is expensive and can
     # saturate a small VM with redundant nested Docker/psql invocations.
     if (
-        checked("vault-ui")
-        and checked("nginx")
+        checked("nginx")
         and checked("prometheus")
         and checked("grafana")
         and checked("grafana-https")
@@ -440,6 +449,11 @@ def start():
     # Recover only existing trusted stopped containers, in dependency order.
     # A running but persistently unhealthy container still fails closed.
     for name, _, _ in STAGES[2:]:
+        if name == "vault-ui":
+            # Never provision, start or require the administrative gateway.
+            # A warning above and strict make health report any UI failure.
+            print("SKIP: optional vault-ui lifecycle", flush=True)
+            continue
         if name == "vault":
             require(name)
         elif name in RESUMABLE:
@@ -453,7 +467,7 @@ def check():
     print("=== Unified read-only readiness check ===", flush=True)
     require("host")
     require("resources")
-    # The Vault UI gateway is an independent HTTPS entry point.
+    # The administrative gateway may be explicitly disabled.
     require("vault-ui")
     # Nginx's read-only check covers the entire transitive service chain.
     require("nginx")
@@ -490,9 +504,9 @@ def health_report():
     if checked("nginx"):
         print("PASS: end-to-end Nginx HTTPS, application and trusted dependencies", flush=True)
         if not checked("vault-ui"):
-            print("FAIL: vault-ui; inspect --check-vault-ui", flush=True)
+            print("FAIL: vault-ui; inspect --check-vault-ui-optional", flush=True)
             raise UnifiedStartupError("Health report failed at vault-ui")
-        print("PASS: Vault UI HTTPS gateway and Docker isolation", flush=True)
+        print("PASS: Vault UI expected lifecycle state and Docker isolation", flush=True)
         if not checked("prometheus"):
             print("FAIL: prometheus; inspect --check-prometheus", flush=True)
             raise UnifiedStartupError("Health report failed at prometheus")
