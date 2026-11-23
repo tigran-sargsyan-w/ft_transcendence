@@ -29,7 +29,12 @@ class UnifiedTests(unittest.TestCase):
     def test_command_check_is_quiet(self):
         with patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as run:
             self.assertTrue(unified.command("--check-nginx", quiet=True))
-        self.assertEqual(run.call_args.args[0], [str(unified.BOOTSTRAP), "--check-nginx"])
+        self.assertEqual(run.call_args.args[0], [
+            unified.sys.executable,
+            str(unified.ROOT / "scripts/dev/bootstrap_nginx.py"),
+            "check",
+        ])
+        self.assertIn("FT_DEV_TLS_DIR", run.call_args.kwargs["env"])
         self.assertEqual(run.call_args.kwargs["stdout"], unified.subprocess.DEVNULL)
         self.assertEqual(run.call_args.kwargs["stderr"], unified.subprocess.DEVNULL)
 
@@ -100,9 +105,11 @@ class UnifiedTests(unittest.TestCase):
     def test_health_report_main_read_only_no_lock_or_mutation(self):
         with patch.object(unified.os, "geteuid", return_value=1000), \
              patch.object(unified, "health_report") as report, \
+             patch.object(unified, "preflight_once") as preflight, \
              patch.object(unified, "exclusive_orchestrator_lock") as lock:
             self.assertEqual(unified.main(["health-report"]), 0)
         report.assert_called_once()
+        preflight.assert_called_once_with()
         lock.assert_not_called()
 
     def test_initialization_requires_tty(self):
@@ -165,7 +172,7 @@ class UnifiedTests(unittest.TestCase):
         # Simulates a persisted enabled marker and restart:no HAProxy after VM reboot.
         # The core stack must still reach READY without starting the gateway.
         with (
-            patch.object(unified, "checked", side_effect=lambda name: name != "vault-ui") as probe,
+            patch.object(unified, "checked", side_effect=lambda name, **_: name != "vault-ui") as probe,
             patch.object(unified, "vault_seal_guard"),
             patch.object(unified, "resume") as resume,
             contextlib.redirect_stdout(io.StringIO()) as output,
@@ -181,7 +188,7 @@ class UnifiedTests(unittest.TestCase):
     def test_initialize_never_requires_optional_gateway(self):
         with (
             patch.object(unified.sys.stdin, "isatty", return_value=True),
-            patch.object(unified, "checked", side_effect=lambda name: name != "vault-ui") as probe,
+            patch.object(unified, "checked", side_effect=lambda name, **_: name != "vault-ui") as probe,
             patch.object(unified, "command") as command,
             contextlib.redirect_stdout(io.StringIO()) as output,
         ):
@@ -691,10 +698,12 @@ class UnifiedTests(unittest.TestCase):
     def test_recover_main_uses_existing_lock(self):
         with patch.object(unified.os, "geteuid", return_value=1000), \
              patch.object(unified, "exclusive_orchestrator_lock") as lock, \
-             patch.object(unified, "recover") as recover:
+             patch.object(unified, "recover") as recover, \
+             patch.object(unified, "preflight_once") as preflight:
             self.assertEqual(unified.main(["recover"]), 0)
         lock.assert_called_once_with()
         recover.assert_called_once_with()
+        preflight.assert_called_once_with()
 
     def test_main_refuses_root(self):
         with patch.object(unified.os, "geteuid", return_value=0):
@@ -777,7 +786,7 @@ class UnifiedTests(unittest.TestCase):
             patch.object(unified.sys.stdin, "isatty", return_value=True),
             patch.object(
                 unified, "checked",
-                side_effect=lambda name: name != "grafana-https",
+                side_effect=lambda name, **_: name != "grafana-https",
             ),
             patch.object(unified, "command") as command,
             contextlib.redirect_stdout(io.StringIO()),
@@ -847,7 +856,7 @@ class UnifiedTests(unittest.TestCase):
         with (
             patch.object(
                 unified, "checked",
-                side_effect=lambda name: name != "grafana-https",
+                side_effect=lambda name, **_: name != "grafana-https",
             ),
             contextlib.redirect_stdout(io.StringIO()) as output,
         ):

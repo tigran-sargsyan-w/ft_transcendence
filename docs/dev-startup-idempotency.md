@@ -52,8 +52,10 @@ python3 scripts/dev/verify_startup_idempotency.py --runs 3
 The runner performs:
 
 1. Trusted complete-stack health preflight; abort if unhealthy.
-2. Memory-only inventory of nine main containers, eight named persistent
-   volumes, three networks, and the *metadata-only* Prisma migration history.
+2. Memory-only inventory of twelve core containers, twelve named
+   volumes, three core networks, the optional Vault UI HAProxy gateway
+   and its edge network, and *metadata-only* Prisma migration history.
+   The gateway is checked against its operator-enabled state.
 3. For each attempt: `./scripts/bootstrap.sh --start`, compare snapshots,
    `--health-report`, compare again. Stop immediately if anything changes.
 4. Verify container IDs, creation time, restart counts and `StartedAt`;

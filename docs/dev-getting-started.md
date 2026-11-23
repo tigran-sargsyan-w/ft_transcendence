@@ -127,6 +127,7 @@ See [development monitoring](dev-monitoring.md).
 - [Read-only end-to-end health and diagnostics](dev-health-report.md)
 - [Reboot recovery with manual Shamir unseal](dev-reboot-recovery.md)
 - [Non-destructive startup idempotency checks](dev-startup-idempotency.md)
+- [First-run reliability and performance](dev-initialize-reliability.md)
 - [Phase 6E final acceptance checklist](dev-final-acceptance.md)
 
 This document describes the development environment only; it is not a production deployment, automated Auto Unseal, credential rotation plan, or full functional E2E test suite.

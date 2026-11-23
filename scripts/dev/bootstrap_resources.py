@@ -158,7 +158,8 @@ def validate_compose_contract():
             if item.get("name") != name or item.get("external") is not True:
                 raise ResourceError(f"Unexpected external Compose network model: {project}/{internal}")
 
-    print("PASS: Compose resource inventory and external network contract", flush=True)
+    if os.environ.get("FT_DEV_BOOTSTRAP_VERBOSE") == "1":
+        print("PASS: Compose resource inventory and external network contract", flush=True)
 
 
 def inspect(kind, name):
@@ -244,7 +245,7 @@ def validate_existing_network(name, data):
         raise ResourceError(f"Refusing incompatible existing network: {name}")
 
 
-def scan(*, batch=False):
+def scan(*, batch=False, detailed=False):
     existing = {}
     for kind, manifest in (("network", NETWORKS), ("volume", VOLUMES)):
         snapshot = inspect_many(kind, manifest) if batch else None
@@ -255,8 +256,9 @@ def scan(*, batch=False):
                     validate_existing_network(name, data)
                 else:
                     validate_existing_volume(name, data)
-                print(f"KEEP: {kind} {name}", flush=True)
-            else:
+                if detailed:
+                    print(f"KEEP: {kind} {name}", flush=True)
+            elif detailed:
                 print(f"TODO: {kind} {name}", flush=True)
             existing[(kind, name)] = data is not None
     return existing
@@ -306,8 +308,13 @@ def main():
 
     try:
         validate_compose_contract()
-        print("=== Docker resource inventory ===", flush=True)
-        existing = scan(batch=(args.mode == "check"))
+        detailed = (
+            args.mode == "plan"
+            or os.environ.get("FT_DEV_BOOTSTRAP_VERBOSE") == "1"
+        )
+        if detailed:
+            print("=== Docker resource inventory ===", flush=True)
+        existing = scan(batch=(args.mode == "check"), detailed=detailed)
         if args.mode == "plan":
             print("RESULT: RESOURCE PLAN COMPLETE (read-only)")
             return 0
@@ -318,7 +325,7 @@ def main():
             print("RESULT: DOCKER RESOURCES READY (read-only)")
             return 0
         create_missing(existing)
-        verified = scan()
+        verified = scan(detailed=detailed)
         if not all(verified.values()):
             raise ResourceError("Missing required Docker resources after creation")
         print("RESULT: DOCKER RESOURCES READY")
