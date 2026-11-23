@@ -25,11 +25,11 @@ export const ActiveIncidents = ({ incidents }: ActiveIncidentsProps) => {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Severity</TableHead>
-            <TableHead>Incident</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Duration</TableHead>
-            <TableHead>Commander</TableHead>
+            <TableHead className="w-px">Severity</TableHead>
+            <TableHead className="w-full">Incident</TableHead>
+            <TableHead className="w-px">Status</TableHead>
+            <TableHead className="hidden md:table-cell">Duration</TableHead>
+            <TableHead className="hidden md:table-cell">Commander</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -38,14 +38,20 @@ export const ActiveIncidents = ({ incidents }: ActiveIncidentsProps) => {
               <TableCell>
                 <Badge variant={i.severity}>{i.severity.toUpperCase()}</Badge>
               </TableCell>
-              <TableCell>{i.title}</TableCell>
+              <TableCell className="max-w-0 w-full truncate">
+                {i.title}
+              </TableCell>
               <TableCell>
                 <Badge variant={i.status} className="uppercase">
                   {i.status}
                 </Badge>
               </TableCell>
-              <TableCell>{formatElapsedSince(i.startedAt)}</TableCell>
-              <TableCell>{i.commander?.displayName}</TableCell>
+              <TableCell className="hidden md:table-cell">
+                {formatElapsedSince(i.startedAt)}
+              </TableCell>
+              <TableCell className="hidden md:table-cell">
+                {i.commander?.displayName}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
