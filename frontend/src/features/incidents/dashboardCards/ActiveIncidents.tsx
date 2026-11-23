@@ -16,6 +16,10 @@ interface ActiveIncidentsProps {
 }
 
 export const ActiveIncidents = ({ incidents }: ActiveIncidentsProps) => {
+  const activeIncidents = incidents.filter(
+    (incident) => incident.status != "resolved",
+  );
+
   return (
     <MainCard
       title="Active incidents"
@@ -33,7 +37,7 @@ export const ActiveIncidents = ({ incidents }: ActiveIncidentsProps) => {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {incidents.map((i) => (
+          {activeIncidents.map((i) => (
             <TableRow key={i.id}>
               <TableCell>
                 <Badge variant={i.severity}>{i.severity.toUpperCase()}</Badge>
