@@ -12,6 +12,7 @@ import verify_startup_idempotency as acceptance
 
 def fixture():
     return {
+        "vault_ui_enabled": False,
         "container_inventory": tuple(sorted(acceptance.CONTAINERS)),
         "volume_inventory": tuple(sorted(acceptance.VOLUMES)),
         "network_inventory": tuple(sorted(acceptance.NETWORKS)),
@@ -179,7 +180,8 @@ class IdempotencyAcceptanceTests(unittest.TestCase):
             return {"container": containers, "volume": volumes, "network": networks}[args[0]]
         with patch.object(acceptance, "docker_json", side_effect=fake_json), \
              patch.object(acceptance, "names_for", side_effect=lambda kind: fixture()[kind + "_inventory"]), \
-             patch.object(acceptance, "migration_fingerprint", return_value="a" * 32):
+             patch.object(acceptance, "migration_fingerprint", return_value="a" * 32), \
+             patch.object(acceptance, "vault_ui_inventory", return_value=(False, None, False)):
             state = acceptance.snapshot()
         self.assertEqual(state, fixture())
         self.assertNotIn("should-not-be-persisted", repr(state))

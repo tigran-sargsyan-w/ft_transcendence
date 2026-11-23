@@ -114,7 +114,7 @@ class BatchResourceInspectionTests(unittest.TestCase):
                 patch.object(sys, "argv", ["bootstrap_resources.py", "check"]), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(mod.main(), 0)
-        scan.assert_called_once_with(batch=True)
+        scan.assert_called_once_with(batch=True, detailed=False)
 
 
 if __name__ == "__main__":
