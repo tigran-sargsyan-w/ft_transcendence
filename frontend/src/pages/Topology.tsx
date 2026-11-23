@@ -11,6 +11,8 @@ import {
   getServices,
 } from "@/features/topology/utils";
 import { mockCriticalNodes } from "@/features/topology/mockCriticalNodes";
+import { useState } from "react";
+import type { GraphNode } from "@/features/topology/types";
 
 export default function Topology() {
   const services = getServices(mockTopology.nodes);
@@ -18,6 +20,10 @@ export default function Topology() {
   const totalHealthyServices = getHealthyServices.length;
   const totalImpactedServices = getImpactedServices.length;
   const totalDownServices = getDownServices.length;
+
+  const [selectedService, setSelectedService] = useState<GraphNode | undefined>(
+    undefined,
+  );
 
   return (
     <section className="flex flex-col gap-4 w-screen p-4">
@@ -48,7 +54,11 @@ export default function Topology() {
         <TopologyCard />
         <SelectedServiceCard />
       </div>
-      <ServicesListCard services={services} criticalNodes={mockCriticalNodes} />
+      <ServicesListCard
+        services={services}
+        criticalNodes={mockCriticalNodes}
+        onClick={(service: GraphNode) => setSelectedService(service)}
+      />
     </section>
   );
 }
