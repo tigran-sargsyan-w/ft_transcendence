@@ -7,12 +7,7 @@ import {
 } from "@/components/ui/navigation-menu";
 import { NavLink } from "react-router";
 import { cn } from "@/lib/utils";
-
-const NAV_ITEMS = [
-  { label: "Dashboard", to: "/dashboard" },
-  { label: "Topology", to: "/topology" },
-  { label: "Incidents", to: "/incidents" },
-] as const;
+import { NAV_ITEMS } from "./navItems";
 
 export function Navbar() {
   return (
