@@ -136,7 +136,7 @@ Do not run concurrently with deployment or maintenance.
 The repository includes:
 
 - `scripts/dev/benchmark_initialize.py`
-- `tests/dev/test_benchmark_initialize.py`
+- `tests/benchmarks/test_benchmark_initialize.py`
 
 The benchmark runs the guarded `make initialize` workflow using
 an interactive PTY, measures wall-clock time and stage checks,
