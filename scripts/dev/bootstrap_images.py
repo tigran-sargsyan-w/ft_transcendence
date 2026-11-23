@@ -7,7 +7,8 @@ import subprocess
 import sys
 
 IMAGES = (
-    "hashicorp/vault:2.2.1",
+    "hashicorp/vault:2.1.2",
+    "haproxy:3.2.27-alpine",
     "postgres:18-bookworm",
     "node:22-bookworm-slim",
     "python:3.12-slim-bookworm",

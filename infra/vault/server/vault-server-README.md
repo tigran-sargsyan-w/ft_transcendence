@@ -75,7 +75,7 @@ The Vault Compose file deliberately retains the project name **`transcendence-va
 - Docker Engine, Docker Compose v2, Bash, OpenSSL, `flock` (util-linux), and permission to operate Docker.
 - An existing initialized PostgreSQL data volume for routine startup; bootstrap is an independently controlled operation.
 - A safe place **outside Git and Docker** for the Shamir shares and initial administrative token. Never paste these into chat, tickets, shell history, container logs, or CI.
-- Vault image version currently pinned to `hashicorp/vault:2.2.1`.
+- Vault image version currently pinned to `hashicorp/vault:2.1.2`.
 
 The Vault API is reachable over the private Docker network; its port is not published on the host. The current setup is **single node, manually unsealed, development only**, not a highly available or auto-unsealed deployment.
 

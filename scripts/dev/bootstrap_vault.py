@@ -103,6 +103,9 @@ def verify_identity(item):
     networks = (item.get("NetworkSettings") or {}).get("Networks") or {}
     if set(networks) != {PROJECT + "_vault_private"}:
         raise VaultBootstrapError("Unexpected Vault network attachment")
+    host = item.get("HostConfig") or {}
+    if host.get("Privileged") is not False or host.get("PortBindings"):
+        raise VaultBootstrapError("Unexpected Vault host privileges/ports")
     return item
 
 

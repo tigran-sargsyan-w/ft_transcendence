@@ -5,7 +5,8 @@ COMPOSE := docker compose -f compose.yml
 BOOTSTRAP := ./scripts/bootstrap.sh
 
 .PHONY: up start initialize recover health check-all plan acceptance \
-        setup check down clean domain-cleanup cert-cleanup trust-uninstall
+        setup check down clean domain-cleanup cert-cleanup trust-uninstall \
+        vault-ui-enable vault-ui-disable vault-ui-status
 
 # Default entry point: use the guarded Vault-only startup, never raw Compose up.
 up start:
@@ -32,6 +33,16 @@ plan:
 # Operator-initiated, non-destructive repeated-start acceptance on a healthy VM.
 acceptance:
 	$(PYTHON) scripts/dev/verify_startup_idempotency.py --runs 3
+
+# Administrative Vault UI only. Never modifies Vault, DB or app containers.
+vault-ui-enable:
+	$(PYTHON) scripts/dev/bootstrap_vault_ui.py enable
+
+vault-ui-disable:
+	$(PYTHON) scripts/dev/bootstrap_vault_ui.py disable
+
+vault-ui-status:
+	$(PYTHON) scripts/dev/bootstrap_vault_ui.py status
 
 # Legacy host-only helpers (not a substitute for --initialize).
 setup:

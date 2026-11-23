@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = ROOT / "backend/prisma/migrations"
 MIGRATOR_VOLUME = "transcendence-app-dev_migrator_vault_auth"
 WORKFLOW = ROOT / "infra/vault/scripts/run-migrations.sh"
-VAULT_IMAGE = "hashicorp/vault:2.2.1"
+VAULT_IMAGE = "hashicorp/vault:2.1.2"
 
 # Never query application rows, Vault values or any PostgreSQL password hash.
 # Use the database administrator via a local Unix socket to inspect only

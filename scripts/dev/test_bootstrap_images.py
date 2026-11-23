@@ -18,6 +18,7 @@ class ImageTests(unittest.TestCase):
         for file in (
             ROOT / "compose.yml",
             ROOT / "infra/vault/server/compose.yml",
+            ROOT / "infra/vault/ui/compose.yml",
         ):
             declared.update(re.findall(
                 r"(?m)^\s*image:\s*([^\s#]+)",
@@ -36,8 +37,8 @@ class ImageTests(unittest.TestCase):
                 (ROOT / file).read_text(),
             ))
 
-        self.assertEqual(len(images.IMAGES), 9)
-        self.assertEqual(len(set(images.IMAGES)), 9)
+        self.assertEqual(len(images.IMAGES), 10)
+        self.assertEqual(len(set(images.IMAGES)), 10)
         self.assertFalse(declared - set(images.IMAGES))
 
     def test_only_initialize_installs_images(self):
@@ -139,11 +140,11 @@ class ImageTests(unittest.TestCase):
             ),
         ) as runner:
             self.assertTrue(images.available(
-                "hashicorp/vault:2.2.1"
+                "hashicorp/vault:2.1.2"
             ))
 
         runner.assert_called_once_with(
             "image", "inspect",
             "--format", "{{.Id}}",
-            "hashicorp/vault:2.2.1",
+            "hashicorp/vault:2.1.2",
         )
