@@ -131,221 +131,191 @@ Do not run concurrently with deployment or maintenance.
 
 ## Performance evidence — 2026-11-23
 
-### Benchmark environment and methodology
+### Reproducible benchmark tool
 
-The benchmark compares the original and optimized first-run
-initialization using a disposable VirtualBox VM:
+The repository includes:
 
-- OS: Ubuntu 26.04 LTS (amd64).
-- Hardware: 4 vCPUs, approximately 3.3 GiB guest RAM.
-- Initial state: `PRE-INIT-DEPS-READY` VirtualBox snapshot.
-- Baseline commit:
-  `dca1e38dc0e78a3e67b42b588a9922b325b076b6`.
-- Optimized commit:
-  `9e8222e9e4e90761a87b6a4f26998ce8cbc326d6`.
+- `scripts/dev/benchmark_initialize.py`
+- `tests/dev/test_benchmark_initialize.py`
 
-The same initial VM snapshot was restored independently before
-each measured installation.
+The benchmark runs the guarded `make initialize` workflow using
+an interactive PTY, measures wall-clock time and stage checks,
+and saves structured JSON metrics outside the repository.
 
-The corresponding Git commit was checked out before executing
-the benchmark. The repository working tree was clean.
+It supports an arbitrary expected Git commit SHA and a result
+label, allowing baseline and optimized runs to use the same tool.
 
-Both versions used the same benchmark procedure:
+The runner requires a clean Git working tree and refuses detected
+existing project containers, volumes, networks and local Vault
+initialization material. It also requires an explicit disposable-VM
+authorization before an installation benchmark.
 
-1. Restore the original VM snapshot.
-2. Check out and verify the intended Git commit.
-3. Run the first-install benchmark once, without manually
-   restarting initialization after a failure.
-4. Automatically approve only the explicitly allowlisted
-   operator confirmation prompts.
-5. Record total wall-clock time, exit status, stage check
-   timings and confirmation count.
-6. Validate the initialized stack using the trusted
-   read-only checks and startup-idempotency acceptance.
+Only the reviewed sequence of 20 operator confirmations is
+automatically approved. Unexpected prompts are refused.
+The operator must still independently verify the restored snapshot.
 
-The benchmark invokes:
+Example on a deliberately restored disposable VM:
 
 ```sh
-./scripts/bootstrap.sh --initialize
+SHA=$(git rev-parse HEAD)
+
+python3 scripts/dev/benchmark_initialize.py \
+  --expected-commit "$SHA" \
+  --preflight-only
+
+python3 scripts/dev/benchmark_initialize.py \
+  --expected-commit "$SHA" \
+  --label optimized \
+  --run \
+  --approve-disposable-vm
 ```
 
-This is the implementation used by `make initialize`.
+The full run also requires the operator to type `DISPOSABLE VM`.
 
-The original helper was `~/ft_initialize_bench.py`.
-The optimized runs used a copy with the expected Git SHA
-updated to the optimized commit.
+Never use this benchmark to repair or reinitialize an existing
+Vault installation. It is not intended for production.
 
-The benchmark includes package and Docker image preparation,
-TLS setup, Vault initialization, PostgreSQL provisioning,
-migrations, application startup and monitoring setup.
+### Test environment and methodology
 
-All measurements were taken on the same VM configuration.
+- Virtualization: VirtualBox.
+- Guest: Ubuntu 26.04 LTS, amd64.
+- VM resources: 4 vCPUs and approximately 3.3 GiB RAM.
+- Initial snapshot: `PRE-INIT-DEPS-READY`.
+- Baseline Git commit:
+  `dca1e38dc0e78a3e67b42b588a9922b325b076b6`.
+- Optimized Git commit:
+  `9e8222e9e4e90761a87b6a4f26998ce8cbc326d6`.
+
+Each run began from the same restored snapshot, with the
+corresponding Git commit checked out and a clean working tree.
+
+All five historical measurements used the original benchmark
+helper, with its expected SHA adjusted for the optimized runs.
+The repository-integrated benchmark tool was added afterward
+and was not used to produce these historical measurements.
+
+The measured wall-clock interval covers the complete first-run
+initialization, including prerequisite checks, Docker image pulls,
+host TLS configuration, Vault, PostgreSQL, Prisma migrations,
+application services, Prometheus and Grafana.
+
+Each run used the reviewed set of 20 operator confirmations.
+No manual second initialization attempt was needed for the
+five successful measured runs.
 
 ### Individual results
 
-| Run | Version | Total | Exit | Outer checks | Confirmations |
+| Run | Version | Total seconds | Exit | Outer checks | Confirmations |
 | --- | --- | ---: | ---: | ---: | ---: |
-| B1 | Baseline | 646.890 s | 0 | 69 | 20 |
-| B2 | Baseline | 668.871 s | 0 | 69 | 20 |
-| O1 | Optimized | 506.431 s | 0 | 49 | 20 |
-| O2 | Optimized | 510.478 s | 0 | 49 | 20 |
-| O3 | Optimized | 499.376 s | 0 | 49 | 20 |
+| B1 | Baseline | 646.890 | 0 | 69 | 20 |
+| B2 | Baseline | 668.871 | 0 | 69 | 20 |
+| O1 | Optimized | 506.431 | 0 | 49 | 20 |
+| O2 | Optimized | 510.478 | 0 | 49 | 20 |
+| O3 | Optimized | 499.376 | 0 | 49 | 20 |
 
-Every recorded installation completed with:
+All five runs finished with:
 
 ```text
 RESULT: UNIFIED INITIALIZATION READY
 ```
 
-Each optimized run completed successfully in one invocation.
+The optimized run metrics files were:
 
-The optimized benchmark's copied script retains historical
-labels such as `FIRST-RUN BASELINE`, `baseline_commit` and
-`baseline-*.json`. These labels do not indicate that baseline
-code was executed: the recorded commit SHA identifies the
-optimized implementation.
+- `baseline-20261123T152602Z.json`
+- `baseline-20261123T154809Z.json`
+- `baseline-20261123T160506Z.json`
 
-The three optimized safe-metrics JSON files were:
+These files were produced by the original helper, which retained
+the historical `baseline-*` naming even for optimized runs.
+The commit SHA inside each JSON identifies the actual version.
 
-```text
-baseline-20261123T152602Z.json
-baseline-20261123T154809Z.json
-baseline-20261123T160506Z.json
-```
-
-These JSON records contain non-secret benchmark metrics.
-They are external benchmark evidence, not repository fixtures.
+The metrics contain no raw command output and are stored
+outside Git.
 
 ### Aggregate comparison
 
 | Metric | Baseline | Optimized |
 | --- | ---: | ---: |
-| Successful installations | 2/2 | 3/3 |
-| Mean initialization time | 657.881 s | 505.428 s |
-| Median initialization time | 657.881 s | 506.431 s |
-| Fastest initialization | 646.890 s | 499.376 s |
-| Slowest initialization | 668.871 s | 510.478 s |
-| Observed time range | 21.981 s | 11.102 s |
+| Successful clean installs | 2/2 | 3/3 |
+| Mean duration | 657.881 s | 505.428 s |
+| Median duration | 657.881 s | 506.431 s |
+| Fastest run | 646.890 s | 499.376 s |
+| Slowest run | 668.871 s | 510.478 s |
+| Time range | 21.981 s | 11.102 s |
 | Outer-stage checks | 69 | 49 |
 | Operator confirmations | 20 | 20 |
 
 Observed mean improvement:
 
-- **152.452 seconds saved** per initialization.
-- **23.17% reduction** in initialization time.
-- Approximately **1.30x faster** initialization.
-- **20 fewer outer-stage checks**, a 28.99% reduction.
+- **152.452 seconds saved**, approximately 2 minutes 32 seconds.
+- **23.17% reduction** in initialization duration.
+- Approximately **1.30x faster**.
+- **20 fewer outer checks**, a 28.99% reduction.
 
-The unchanged confirmation count demonstrates that the
-optimization did not eliminate operator approval prompts.
+### Verification and acceptance
 
-### Post-installation acceptance
+After each of the three optimized clean installations:
 
-After each of the three optimized installations, the same
-VM successfully passed:
+- `make health`: PASS.
+- `make check-all`: PASS.
+- `make vault-ui-status`: expected disabled state.
+- `make acceptance`: PASS, three guarded startup attempts.
+- Git working tree: clean.
 
-| Verification | Result |
-| --- | --- |
-| `make initialize` | PASS, first invocation |
-| `make health` | PASS |
-| `make check-all` | PASS |
-| `make vault-ui-status` | PASS, intentionally disabled |
-| `make acceptance` | PASS, 3 guarded starts |
-| Git working tree | Clean |
+Nine guarded startup attempts were verified in total.
+The acceptance runner found no detected resource-identity,
+container-restart or Prisma migration-history drift.
 
-The acceptance runner found no container recreation,
-container restart or drift in the tracked Docker resources
-and Prisma migration-history metadata.
-
-Across three optimized installations, this represents nine
-successful guarded startup-idempotency attempts.
-
-Offline regression verification also completed:
+Offline regression results after the bootstrap improvements:
 
 ```text
 Ran 131 tests
 OK (skipped=6)
 ```
 
-This corresponds to 125 passing tests and six skips.
+After introducing the reusable benchmark tool and its
+12 offline regression tests:
 
-Tests cover first-run stage behavior, dispatch, readiness
-failure classification, bounded Grafana/Prometheus retries,
-resource inventory, and optional Vault UI gateway acceptance.
+```text
+Ran 143 tests
+OK (skipped=6)
+```
 
-### Limitations and remaining work
+The new benchmark tool has passed offline tests but has
+not yet been exercised in a complete clean-VM installation.
 
-**Reliability**
+### Limitations
 
-Three independent successful clean installations provide
-useful engineering acceptance evidence. They do not establish
-a statistical guarantee of zero future first-run failures.
+The original intermittent Prometheus probe failure was not
+conclusively reproduced. Three successful optimized first-run
+installations provide engineering evidence, not a statistical
+guarantee that rare failures cannot recur.
 
-The original intermittent nested Prometheus HTTP-probe
-failure was not conclusively reproduced. Bounded readiness
-retries and regression tests address the observed failure
-class, while permanent trust and prerequisite errors remain
-fail-closed.
+The benchmark sample is small: two baseline runs and three
+optimized runs. Image download speed, VM scheduling, caching
+and external conditions can affect the result.
 
-**Timing**
+The 69-to-49 comparison covers outer orchestrator checks.
+It does not count all nested Docker or transitive service probes.
 
-The benchmark records wall-clock initialization duration.
-Docker image downloading, container builds, VM scheduling,
-filesystem caching and network conditions can influence it.
+Stage preparation durations reported by the original helper
+are approximate, inferred from neighboring timed checks.
 
-The baseline has two measurements and the optimized version
-has three. The observed improvement is reproducible in
-these tests, but is not a universal performance guarantee.
+The unchanged confirmation count documents that operator
+approvals were retained. Separate checks and regression tests
+are required to assess the preservation of security guarantees.
 
-Preparation durations reported by the helper are estimates
-derived from neighboring timed checks.
+Vault UI HAProxy remained intentionally disabled during the
+clean-install runs. The enabled gateway lifecycle was covered
+by offline tests, not by live enabled-gateway acceptance here.
 
-The check counts represent outer orchestrator checks.
-They are not counts of every nested Docker command or
-transitive service probe.
+Some preparation stages still print repeated dependency
+messages. Output cleanup remains separate work and must not
+suppress validation, confirmations or failure diagnostics.
 
-**Security and acceptance scope**
-
-All normal operator confirmations were preserved.
-The benchmark did not deliberately bypass Vault, TLS,
-Docker identity, network isolation or database validation.
-
-Vault UI HAProxy was intentionally disabled during the
-clean-install acceptance. Its enabled lifecycle is covered
-by offline regression tests, not by a separate live
-enabled-gateway acceptance in this benchmark.
-
-Startup-idempotency verification tracks resource identity
-and migration history; it does not prove that arbitrary
-database rows, Vault secret values or host files are
-unchanged.
-
-**Output quality**
-
-Although repeated successful package preflight messages
-and resource inventory output were reduced, some
-`--prepare-*` stages still print repeated transitive
-dependency results.
-
-Further output cleanup must preserve real validation,
-operator prompts and useful error diagnostics.
-
-### Conclusion
-
-The optimized implementation completed three independent
-clean installations successfully on the same disposable
-Ubuntu VM snapshot.
-
-Its mean initialization time decreased from 657.881 seconds
-to 505.428 seconds, an observed improvement of 23.17%.
-
-The three post-installation acceptance runs all verified
-healthy services and startup idempotency.
-
-The benchmark and reliability evidence support the
-first-run performance improvements in Issue #157.
-Remaining diagnostic and output-quality limitations are
-documented above.
+Do not store raw terminal recordings, Vault recovery material,
+SecretIDs, root tokens, DSNs or other credentials in Git or
+benchmark artifacts.
 
 ## Scope and limitations
 
