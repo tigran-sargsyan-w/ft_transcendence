@@ -4,12 +4,14 @@ const features = [
   {
     icon: Network,
     title: "Live topology",
-    description: "Your Docker containers and their dependencies, as a real-time graph.",
+    description:
+      "Your Docker containers and their dependencies, as a real-time graph.",
   },
   {
     icon: Radar,
     title: "Blast radius",
-    description: "When a service goes down, instantly see everything it affects.",
+    description:
+      "When a service goes down, instantly see everything it affects.",
   },
   {
     icon: ShieldAlert,
@@ -99,7 +101,7 @@ function TopologyPreview() {
 
 export function Hero() {
   return (
-    <section className="flex max-w-xl flex-col gap-8 px-10 text-stone-100">
+    <section className="flex max-w-xl flex-col gap-8 text-stone-100">
       <div className="flex flex-col gap-3">
         <span className="w-fit rounded-full border border-stone-600 px-3 py-1 text-xs uppercase tracking-widest text-stone-400">
           Real-Time Incident Platform
@@ -108,25 +110,25 @@ export function Hero() {
           Infrastructure Intelligence
         </h1>
         <p className="text-stone-400">
-          A subway map of your infrastructure: every station is a service,
-          every line a dependency. When a station closes, you know exactly
-          which lines are affected.
+          A subway map of your infrastructure: every station is a service, every
+          line a dependency. When a station closes, you know exactly which lines
+          are affected.
         </p>
       </div>
-
-      <TopologyPreview />
-
-      <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {features.map(({ icon: Icon, title, description }) => (
-          <li key={title} className="flex gap-3">
-            <Icon className="mt-0.5 size-5 shrink-0 text-amber-400" />
-            <div>
-              <p className="font-medium">{title}</p>
-              <p className="text-sm text-stone-400">{description}</p>
-            </div>
-          </li>
-        ))}
-      </ul>
+      <div className="hidden md:flex flex-col gap-8">
+        <TopologyPreview />
+        <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {features.map(({ icon: Icon, title, description }) => (
+            <li key={title} className="flex gap-3">
+              <Icon className="mt-0.5 size-5 shrink-0 text-amber-400" />
+              <div>
+                <p className="font-medium">{title}</p>
+                <p className="text-sm text-stone-400">{description}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
     </section>
   );
 }

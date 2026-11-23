@@ -9,11 +9,11 @@ export function HomePage() {
   const [mode, setMode] = useState<Mode>("login");
 
   return (
-    <main className="flex w-screen">
-      <div className="hidden md:flex flex-1 justify-center items-center h-screen">
+    <main className="flex flex-col gap-6 md:flex-row justify-center align-middle p-6 h-screen w-full">
+      <div className="flex md:flex-1 justify-center items-center md:my-auto">
         <Hero />
       </div>
-      <div className="p-6 flex-1 flex justify-center items-center h-screen">
+      <div className="flex md:flex-1 justify-center items-center md:my-auto">
         {mode === "login" ? (
           <LoginCard onSwitch={() => setMode("register")} />
         ) : (
