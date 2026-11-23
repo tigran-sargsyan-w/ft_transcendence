@@ -58,6 +58,51 @@ READ_ONLY_ATTEMPTS = 3
 READ_ONLY_RETRY_DELAY = 1
 
 
+
+# Exact, reviewed equivalents of bootstrap.sh's read-only dispatch.
+# Host and optional Vault UI checks retain their shell entry points.
+DIRECT_READ_ONLY_CHECKS = {
+    "--check-resources": "bootstrap_resources.py",
+    "--check-vault": "bootstrap_vault.py",
+    "--check-vault-config": "bootstrap_vault_config.py",
+    "--check-vault-secrets": "bootstrap_vault_secrets.py",
+    "--check-postgres": "bootstrap_postgres.py",
+    "--check-postgres-roles": "bootstrap_postgres_roles.py",
+    "--check-migrations": "bootstrap_migrations.py",
+    "--check-backend-agent": "bootstrap_backend_agent.py",
+    "--check-backend": "bootstrap_backend.py",
+    "--check-support-services": "bootstrap_support_services.py",
+    "--check-frontend": "bootstrap_frontend.py",
+    "--check-nginx": "bootstrap_nginx.py",
+    "--check-prometheus": "bootstrap_prometheus.py",
+    "--check-grafana-secrets": "bootstrap_grafana_secrets.py",
+    "--check-grafana-agent": "bootstrap_grafana_agent.py",
+    "--check-grafana": "bootstrap_grafana.py",
+    "--check-grafana-https": "bootstrap_grafana_https.py",
+}
+
+
+def preflight_once():
+    """Run standard shell/platform/dependency guards before direct probes."""
+    try:
+        result = subprocess.run(
+            [str(BOOTSTRAP), "--orchestrator-preflight"],
+            cwd=ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        raise UnifiedStartupError(
+            "Cannot complete trusted orchestrator preflight"
+        ) from None
+    if result.returncode:
+        raise UnifiedStartupError(
+            "Orchestrator prerequisites failed; inspect bootstrap preflight"
+        )
+
+
 class UnifiedStartupError(Exception):
     """Public diagnostic intentionally contains no subprocess output or secrets."""
 
@@ -74,14 +119,81 @@ def command(flag, *, quiet=False):
     kwargs = {"cwd":ROOT, "check":False}
     if quiet:
         kwargs.update(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if flag in DIRECT_READ_ONLY_CHECKS:
+        script = ROOT / "scripts/dev" / DIRECT_READ_ONLY_CHECKS[flag]
+        argv = [sys.executable, str(script), "check"]
+        tls = Path(os.environ.get(
+            "XDG_STATE_HOME", str(Path.home() / ".local/state")
+        )) / "transcendence/dev/tls"
+        kwargs["env"] = {
+            **os.environ,
+            "FT_DEV_TLS_DIR": str(tls),
+        }
+    else:
+        argv = [str(BOOTSTRAP), flag]
     try:
-        result = subprocess.run([str(BOOTSTRAP), flag], **kwargs)
+        result = subprocess.run(argv, **kwargs)
     except OSError:
-        raise UnifiedStartupError("Cannot execute trusted bootstrap.sh") from None
+        raise UnifiedStartupError(
+            "Cannot execute trusted bootstrap operation"
+        ) from None
     return result.returncode == 0
 
 
-def checked(name):
+# Names are fixed by the reviewed Compose contracts.
+# This inventory is a performance hint, never an identity check.
+FIRST_RUN_CONTAINERS = {
+    "vault": ("transcendence-vault-dev-vault-1",),
+    "postgres": ("transcendence-app-dev-postgres-1",),
+    "backend-agent": ("transcendence-app-dev-vault-backend-agent-1",),
+    "backend": ("transcendence-app-dev-backend-1",),
+    "support-services": (
+        "transcendence-app-dev-docker-proxy-1",
+        "transcendence-app-dev-collector-1",
+        "transcendence-app-dev-graph-engine-1",
+    ),
+    "frontend": ("transcendence-app-dev-frontend-1",),
+    "nginx": ("transcendence-app-dev-nginx-1",),
+    "prometheus": ("transcendence-app-dev-prometheus-1",),
+    "grafana-agent": ("transcendence-app-dev-vault-grafana-agent-1",),
+    "grafana": ("transcendence-app-dev-grafana-1",),
+}
+
+
+def definitely_missing_container(name):
+    """True only when Docker confirms a required container is absent.
+
+    Unknown Docker state, failed inventory and unlisted stages retain
+    the existing retry behavior. This never establishes trust.
+    """
+    expected = FIRST_RUN_CONTAINERS.get(name)
+    if expected is None:
+        return False
+
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "-a", "--format", "{{.Names}}"],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+    if result.returncode != 0:
+        return False
+
+    try:
+        existing = set(result.stdout.decode("utf-8").splitlines())
+    except UnicodeError:
+        return False
+
+    return all(item not in existing for item in expected)
+
+
+def checked(name, *, first_run=False):
     """Retry read-only probes; optionally trace safe stage names and durations.
 
     FT_DEV_STAGE_TIMING=1 is diagnostic-only: it changes neither the number of
@@ -99,6 +211,8 @@ def checked(name):
                   f"result={outcome} elapsed={elapsed:.2f}s", flush=True)
         if result:
             return True
+        if first_run and attempt == 0 and definitely_missing_container(name):
+            return False
         if attempt + 1 < READ_ONLY_ATTEMPTS:
             time.sleep(READ_ONLY_RETRY_DELAY)
     return False
@@ -408,7 +522,7 @@ def initialize():
             # Its separate read-only status and make health remain strict.
             print("SKIP: optional vault-ui; use make vault-ui-enable", flush=True)
             continue
-        if checked(name):
+        if checked(name, first_run=True):
             print(f"KEEP: {name} ready", flush=True)
             continue
         if prepare is None:
@@ -596,6 +710,7 @@ def main(argv=None):
     try:
         if os.geteuid() == 0:
             raise UnifiedStartupError("Run as an ordinary user, not with sudo")
+        preflight_once()
         if args.mode == "check":
             check()
         elif args.mode == "health-report":

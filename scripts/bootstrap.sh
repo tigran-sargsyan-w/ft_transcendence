@@ -83,7 +83,7 @@ HELP
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-ui|--check-vault-ui|--check-vault-ui-optional|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--prepare-prometheus|--check-prometheus|--prepare-grafana-secrets|--check-grafana-secrets|--prepare-grafana-agent|--check-grafana-agent|--prepare-grafana|--check-grafana|--check-grafana-https|--plan-waf-upgrade|--upgrade-waf) ;;
+  --orchestrator-preflight|--initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-ui|--check-vault-ui|--check-vault-ui-optional|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--prepare-prometheus|--check-prometheus|--prepare-grafana-secrets|--check-grafana-secrets|--prepare-grafana-agent|--check-grafana-agent|--prepare-grafana|--check-grafana|--check-grafana-https|--plan-waf-upgrade|--upgrade-waf) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -227,12 +227,28 @@ if [[ "$MODE" == --initialize || "$MODE" == --upgrade-waf ]]; then
   # Only explicitly approved initialization/maintenance installs packages.
   ./scripts/install-deps.sh || fail "Dependency installation stopped; inspect the installer and rerun"
   ./scripts/install-deps.sh --check || fail "Docker dependencies or access still unavailable"
+elif [[ "$MODE" == --prepare-* ]]; then
+  # Provisioning still verifies packages and Docker on every entry.
+  # Hide repeated success details, never hide a prerequisite failure.
+  if [[ "${FT_DEV_BOOTSTRAP_VERBOSE:-0}" == 1 ]]; then
+    ./scripts/install-deps.sh --check ||
+      fail "Dependencies not ready; inspect the prerequisite report"
+  else
+    deps_report="$(./scripts/install-deps.sh --check 2>&1)" || {
+      printf '%s\n' "$deps_report" >&2
+      fail "Dependencies not ready; inspect the prerequisite report"
+    }
+  fi
 else
   # Routine start, recovery and read-only commands never install packages.
   ./scripts/install-deps.sh --check || fail "Dependencies not ready; use make initialize on a fresh VM"
 fi
 
 case "$MODE" in
+  --orchestrator-preflight)
+    # Internal read-only entry: all standard shell guards above still run.
+    say "RESULT: ORCHESTRATOR PREFLIGHT READY (read-only)"
+    ;;
   --initialize)
     python3 scripts/dev/bootstrap_images.py apply || fail "Required images unavailable"
     python3 scripts/dev/bootstrap_unified.py initialize
