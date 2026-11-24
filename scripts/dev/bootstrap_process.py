@@ -15,6 +15,10 @@ class InitializationCancelled(Exception):
         super().__init__('Initialization interrupted; inspect existing state')
 
 
+class UnexpectedApproval(Exception):
+    """An approval prompt in this path is a regression, not a failed probe."""
+
+
 class Cancellation:
     def __init__(self):
         self.signum = None
@@ -54,6 +58,16 @@ NOTICES = {
         'ERROR: Local CA identity differs from the recorded fingerprint.',
     b'ERROR: Incomplete local CA; refusing replacement':
         'ERROR: Incomplete local CA; refusing replacement.',
+    b'ERROR: Incomplete browser TLS state; refusing replacement':
+        'ERROR: Incomplete browser TLS state; refusing replacement.',
+    b'ERROR: Unexpected Docker context; manual Docker access review required':
+        'ERROR: Unexpected Docker context; manual Docker access review required.',
+    b'ERROR: Unexpected DOCKER_HOST; manual Docker access review required':
+        'ERROR: Remote or unexpected Docker endpoint; manual review required.',
+    b'ERROR: Unexpected Docker socket ownership':
+        'ERROR: Unexpected Docker socket ownership.',
+    b'ERROR: Vault is sealed: use ./scripts/dev-start.sh for manual unseal':
+        'ERROR: Vault is sealed; use make recover with existing shares.',
     b'CANCELLED: Vault recovery material persisted privately; review Vault seal state before continuing':
         'CANCELLED: Vault recovery material persisted privately; review seal state.',
 }
@@ -98,6 +112,8 @@ class Diagnostics:
                     self.buffers[stream] = b''
                 else:
                     self.buffers[stream] = combined
+                    if re.search(rb'\[[yYnN]/[yYnN]\]', combined):
+                        self.prompt_seen = True
 
     def finish(self, stream):
         if self.truncated[stream]:
@@ -133,16 +149,18 @@ class ChildRunner:
                     for index, pipe in enumerate((child.stdout, child.stderr)):
                         sel.register(pipe, selectors.EVENT_READ, index)
                     while sel.get_map() or child.poll() is None:
-                        if self.cancellation.signum is not None:
+                        if self.cancellation.signum is not None or diagnostics.prompt_seen:
                             now = time.monotonic()
                             if interrupted is None:
                                 interrupted = now
-                                self.progress.notice('Cancellation requested; waiting for active operation.')
+                                signum = self.cancellation.signum or signal.SIGINT
+                                if self.cancellation.signum is not None:
+                                    self.progress.notice('Cancellation requested; waiting for active operation.')
                                 try:
                                     if foreground:
-                                        child.send_signal(self.cancellation.signum)
+                                        child.send_signal(signum)
                                     else:
-                                        os.killpg(child.pid, self.cancellation.signum)
+                                        os.killpg(child.pid, signum)
                                 except ProcessLookupError:
                                     pass
                             elif not critical and not foreground and now - interrupted > 10 and not escalated:
@@ -169,7 +187,7 @@ class ChildRunner:
         counts = diagnostics.counts
         if diagnostics.prompt_seen:
             self.progress.notice('ERROR: Unexpected initialization approval prompt; stopped safely.')
-            self.last_returncode = self.last_returncode or 1
+            raise UnexpectedApproval()
         if self.verbose or (not probe and (self.last_returncode != 0 or counts['stderr'])) or counts['warning']:
             self.progress.notice(f"Child exit {self.last_returncode}; stdout {counts['stdout']} lines, "
                                  f"stderr {counts['stderr']} lines, warnings {counts['warning']}, "

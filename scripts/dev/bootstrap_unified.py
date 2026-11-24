@@ -24,10 +24,10 @@ import time
 
 if __package__:
     from .bootstrap_progress import Phase, Progress, Status
-    from .bootstrap_process import Cancellation, ChildRunner, InitializationCancelled
+    from .bootstrap_process import Cancellation, ChildRunner, InitializationCancelled, UnexpectedApproval
 else:
     from bootstrap_progress import Phase, Progress, Status
-    from bootstrap_process import Cancellation, ChildRunner, InitializationCancelled
+    from bootstrap_process import Cancellation, ChildRunner, InitializationCancelled, UnexpectedApproval
 
 ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP = ROOT / "scripts/bootstrap.sh"
@@ -542,7 +542,8 @@ def prepare_prerequisites(runner, progress):
     """System authentication may still be required; never feed sudo credentials."""
     for index, operations in enumerate((
         (([str(ROOT / "scripts/install-deps.sh"), "--initialize-dev"], True),
-         ([str(BOOTSTRAP), "--orchestrator-preflight"], False)),
+         ([str(BOOTSTRAP), "--orchestrator-preflight"], False),
+         ([sys.executable, "-m", "scripts.dev.bootstrap_linux_ca", "preflight"], False)),
         (([sys.executable, str(ROOT / "scripts/dev/bootstrap_images.py"), "initialize"], False),),
     )):
         progress.begin(index)
@@ -601,7 +602,7 @@ def initialize(lock_fd, *, cancellation=None):
             progress.finish(Status.CANCELLED)
             progress.summary()
         raise
-    except (UnifiedStartupError, OSError):
+    except (UnifiedStartupError, OSError, UnexpectedApproval):
         if progress.active is not None:
             progress.finish(Status.FAILED)
             progress.summary()
@@ -808,6 +809,10 @@ def main(argv=None):
         print("RESULT: INITIALIZATION CANCELLED (no automatic rollback; inspect existing state)",
               file=sys.stderr, flush=True)
         return 128 + exc.signum
+    except UnexpectedApproval:
+        print("RESULT: UNIFIED BOOTSTRAP STOPPED (unexpected approval; no automatic rollback)",
+              file=sys.stderr, flush=True)
+        return 1
     except OSError:
         print("ERROR: Local bootstrap operation failed; inspect the active stage", file=sys.stderr)
         return 1

@@ -57,6 +57,18 @@ class LinuxCATests(unittest.TestCase):
             with self.assertRaisesRegex(ca.LinuxCAError, "differs"):
                 ca.inspect_ca(self.root)
 
+    def test_missing_ca_with_existing_browser_pair_is_refused(self):
+        self.pair()
+        with patch.object(ca, "native_linux"), \
+             patch.object(ca, "ca_root", return_value=self.root), \
+             patch.object(ca, "inspect_ca", return_value=None), \
+             patch.object(ca.linux_hosts, "read_hosts", return_value=""), \
+             patch.object(ca.linux_hosts, "append_text", return_value=""), \
+             patch.object(ca.certificates, "CERT_FILE", self.cert), \
+             patch.object(ca.certificates, "KEY_FILE", self.key):
+            with self.assertRaisesRegex(ca.LinuxCAError, "Incomplete browser TLS"):
+                ca.guard_existing()
+
     def test_private_symlink_is_refused(self):
         self.pair()
         link = self.root / "link"

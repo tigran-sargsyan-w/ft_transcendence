@@ -6,7 +6,7 @@ import threading
 import unittest
 from pathlib import Path
 
-from bootstrap_process import Cancellation, ChildRunner, Diagnostics, InitializationCancelled
+from bootstrap_process import Cancellation, ChildRunner, Diagnostics, InitializationCancelled, UnexpectedApproval
 
 
 class Display:
@@ -56,6 +56,15 @@ class ChildRunnerTests(unittest.TestCase):
             finally:
                 timer.cancel()
         self.assertNotEqual(runner.last_returncode, 0)
+
+    def test_approval_is_fatal_even_for_read_only_probe(self):
+        display = Display()
+        runner = ChildRunner(display, Cancellation())
+        code = "print('Unexpected? [y/N]', flush=True)"
+        with self.assertRaises(UnexpectedApproval):
+            runner.run([sys.executable, '-c', code], cwd=Path.cwd(), probe=True)
+        self.assertIn('ERROR: Unexpected initialization approval prompt; stopped safely.',
+                      display.notices)
 
     def test_critical_child_can_commit_after_interrupt(self):
         with tempfile.TemporaryDirectory() as tmp:

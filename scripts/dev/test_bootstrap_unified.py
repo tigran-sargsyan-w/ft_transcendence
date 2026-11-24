@@ -146,6 +146,29 @@ class UnifiedTests(unittest.TestCase):
                 unified.initialize(9)
         self.assertEqual(cmd.call_count, unified.READ_ONLY_ATTEMPTS + 1)
 
+    def test_initialize_dispatch_passes_lock_only_for_prepare(self):
+        runner = MagicMock()
+        runner.run.return_value = 0
+        self.assertTrue(unified.command("--prepare-vault", runner=runner, lock_fd=9))
+        self.assertEqual(runner.run.call_args.args[0],
+                         [str(unified.BOOTSTRAP), "--initialize-stage", "--prepare-vault", "9"])
+        self.assertEqual(runner.run.call_args.kwargs["pass_fds"], (9,))
+        self.assertTrue(runner.run.call_args.kwargs["critical"])
+        self.assertTrue(unified.command("--check-vault", runner=runner))
+        self.assertEqual(runner.run.call_args.kwargs["pass_fds"], ())
+        self.assertFalse(runner.run.call_args.kwargs["critical"])
+        with self.assertRaises(unified.UnifiedStartupError):
+            unified.command("--prepare-host", runner=runner)
+
+    def test_unexpected_prompt_never_triggers_preparation(self):
+        with patch.object(unified, "prepare_prerequisites", side_effect=self.fake_prerequisites), \
+             patch.object(unified, "command", side_effect=unified.UnexpectedApproval) as cmd, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(unified.UnexpectedApproval):
+                unified.initialize(9)
+        self.assertEqual(cmd.call_count, 1)
+        self.assertIn("host FAILED", output.getvalue())
+
     def test_routine_does_not_run_any_prepare_flag(self):
         with patch.object(unified, "checked", return_value=True) as ck, \
              patch.object(unified, "vault_seal_guard") as vault, \

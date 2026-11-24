@@ -1,4 +1,5 @@
 """Guarded browser TLS setup on native Linux. No automatic Windows trust."""
+import argparse
 import hashlib
 import os
 from pathlib import Path
@@ -116,7 +117,8 @@ def inspect_ca(root):
     return value
 
 
-def prepare():
+def guard_existing():
+    """Refuse unsafe existing host state, including on a cached run."""
     native_linux()
     root = ca_root()
     previous = inspect_ca(root)
@@ -126,6 +128,17 @@ def prepare():
                  certificates.CERT_DIR, certificates.CERT_FILE, certificates.KEY_FILE):
         if path.is_symlink():
             raise LinuxCAError('Refusing symlink in browser TLS path')
+    cert_exists = present(certificates.CERT_FILE)
+    key_exists = present(certificates.KEY_FILE)
+    if cert_exists != key_exists or (cert_exists and previous is None):
+        raise LinuxCAError("Incomplete browser TLS state; refusing replacement")
+    if cert_exists:
+        nginx_tls_access.check_files()
+    return root, previous
+
+
+def prepare():
+    root, previous = guard_existing()
     if certificates.setup() != 0:
         raise LinuxCAError("Browser TLS setup failed; existing files retained")
     nginx_tls_access.check_files()
@@ -147,11 +160,17 @@ def prepare():
     return 0
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("mode", nargs="?", default="prepare", choices=("prepare", "preflight"))
+    args = parser.parse_args(argv)
     try:
+        if args.mode == "preflight":
+            guard_existing()
+            return 0
         return prepare()
     except (LinuxCAError, OSError, ValueError, subprocess.SubprocessError,
-            nginx_tls_access.TLSAccessError) as exc:
+            linux_hosts.HostsConflictError, nginx_tls_access.TLSAccessError) as exc:
         print("ERROR:", str(exc) if isinstance(exc, LinuxCAError)
               else "Linux host preparation failed; inspect with --prepare-host")
         return 1
