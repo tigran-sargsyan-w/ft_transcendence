@@ -4,6 +4,7 @@ import type {
   TopologySnapshot,
   CriticalNodeRow,
 } from "./types";
+import { mockServiceDetails } from "./mockServiceDetails";
 
 // Worst first: the services that need attention come at the top.
 export const STATUS_ORDER: NodeStatus[] = [
@@ -75,3 +76,18 @@ export function getCriticality(
   const criticality = criticalNodes.find((n) => n.id == nodesId)?.score;
   return criticality;
 }
+
+export function getServiceDetails(node: GraphNode) {
+  const details = mockServiceDetails[node.id];
+  return {
+    node,
+    id: node.id,
+    name: node.label,
+    status: node.status,
+    image: node.metadata?.image as string | undefined,
+    role: details?.role,
+    lastEvent: details?.lastEvent,
+  };
+}
+
+export type DetailedService = ReturnType<typeof getServiceDetails>;

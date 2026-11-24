@@ -5,6 +5,7 @@ import { ServicesListCard } from "@/features/topology/Cards/ServicesListCard";
 import { TopologyCard } from "@/features/topology/Cards/TopologyCard";
 import { mockTopology } from "@/features/topology/mockTopology";
 import {
+  getCriticality,
   getDownServices,
   getHealthyServices,
   getImpactedServices,
@@ -52,12 +53,19 @@ export default function Topology() {
       </div>
       <div className="flex gap-4">
         <TopologyCard />
-        <SelectedServiceCard />
+        <SelectedServiceCard
+          service={selectedService}
+          criticality={
+            selectedService
+              ? getCriticality(mockCriticalNodes, selectedService?.id)
+              : undefined
+          }
+        />
       </div>
       <ServicesListCard
         services={services}
         criticalNodes={mockCriticalNodes}
-        onClick={(service: GraphNode) => setSelectedService(service)}
+        onServiceClick={(service: GraphNode) => setSelectedService(service)}
       />
     </section>
   );

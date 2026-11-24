@@ -8,32 +8,22 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { mockServiceDetails } from "../mockServiceDetails";
 import type { GraphNode, CriticalNodeRow } from "../types";
 import { formateDate } from "@/lib/date";
-import { getCriticality } from "../utils";
-import { CriticalNodes } from "../dashboardCards/CriticalNodes";
+import { getCriticality, getServiceDetails } from "../utils";
 
 interface ServicesListCardProps {
   services: GraphNode[];
   criticalNodes: CriticalNodeRow[];
+  onServiceClick: (service: GraphNode) => void;
 }
 
 export const ServicesListCard = ({
   services,
   criticalNodes,
+  onServiceClick,
 }: ServicesListCardProps) => {
-  const detailedServices = services.map((node) => {
-    const details = mockServiceDetails[node.id];
-    return {
-      id: node.id,
-      name: node.label,
-      status: node.status,
-      image: node.metadata?.image as string | undefined,
-      role: details?.role,
-      lastEvent: details?.lastEvent,
-    };
-  });
+  const detailedServices = services.map(getServiceDetails);
 
   return (
     <MainCard title="Services environment_name">
@@ -51,7 +41,11 @@ export const ServicesListCard = ({
         </TableHeader>
         <TableBody>
           {detailedServices.map((s) => (
-            <TableRow key={s.id}>
+            <TableRow
+              key={s.id}
+              onClick={() => onServiceClick(s.node)}
+              className="cursor-pointer"
+            >
               <TableCell>{s.name}</TableCell>
               <TableCell>
                 <Badge variant={s.status} className="uppercase">
@@ -60,7 +54,9 @@ export const ServicesListCard = ({
               </TableCell>
               <TableCell>{s.role}</TableCell>
               <TableCell>{s.image}</TableCell>
-              <TableCell>{getCriticality(criticalNodes, s.id)}</TableCell>
+              <TableCell>
+                {getCriticality(criticalNodes, s.id)?.toFixed(2) ?? "-"}
+              </TableCell>
               <TableCell>{"used by"}</TableCell>
               <TableCell>
                 {formateDate(s.lastEvent.at)} : {s.lastEvent.type}
