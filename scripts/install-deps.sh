@@ -5,9 +5,10 @@ set -Eeuo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/install-deps.sh [--check|--help]
+Usage: ./scripts/install-deps.sh [--check|--initialize-dev|--help]
 
   (default)   Install missing Ubuntu packages with confirmation.
+  --initialize-dev  Explicit development initialization (packages and local Docker access).
   --check     Read-only prerequisites report; no sudo or mutations.
   --help      Print this help.
 
@@ -20,6 +21,7 @@ MODE=install
 case "${1:-}" in
   "") ;;
   --check) MODE=check ;;
+  --initialize-dev) MODE=initialize-dev ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -131,7 +133,7 @@ if (( ${#missing_base[@]} || docker_packages_needed )); then
   say ""
   say "Missing packages will be installed through Ubuntu APT and (if needed) Docker's official APT repository."
   say "No existing Docker installation, containers, images or volumes will be removed."
-  if ! confirm "Proceed with OS package installation?"; then
+  if [[ "$MODE" != initialize-dev ]] && ! confirm "Proceed with OS package installation?"; then
     say "CANCELLED: No packages installed"
     exit 1
   fi
@@ -202,10 +204,29 @@ if ! systemctl is-active --quiet docker; then
   sudo systemctl enable --now docker
 fi
 
-# No automatic root-equivalent group enrollment.
+# Only the explicit development initialization mode may enroll the current
+# user automatically. The default maintenance installer still asks.
 if ! docker info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
   if ! command_exists docker; then fail "Docker CLI still missing"; fi
-  if ! sudo docker info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
+  if [[ "$MODE" == initialize-dev ]]; then
+    # Do not enroll users based on a remote, rootless or unexpected socket.
+    [[ -z ${DOCKER_HOST:-} || "$DOCKER_HOST" == unix:///var/run/docker.sock ]] \
+      || fail "Unexpected DOCKER_HOST; manual Docker access review required"
+    endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}')" \
+      || fail "Cannot inspect Docker context"
+    [[ "$endpoint" == unix:///var/run/docker.sock ]] \
+      || fail "Unexpected Docker context; manual Docker access review required"
+    [[ -S /var/run/docker.sock ]] || fail "Expected local Docker socket missing"
+    docker_group="$(getent group docker)" || fail "Docker group missing"
+    IFS=: read -r group_name group_password group_gid group_members <<< "$docker_group"
+    [[ "$group_name" == docker && "$group_gid" =~ ^[0-9]+$ && "$group_gid" != 0 ]] \
+      || fail "Unexpected Docker group identity"
+    [[ "$(stat -Lc '%u:%g' /var/run/docker.sock)" == "0:$group_gid" ]] \
+      || fail "Unexpected Docker socket ownership"
+    if ! sudo docker --host unix:///var/run/docker.sock info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
+      fail "Local Docker daemon is not responding via sudo"
+    fi
+  elif ! sudo docker info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
     fail "Docker daemon is not responding even via sudo; inspect systemctl status docker"
   fi
   say ""
@@ -218,13 +239,19 @@ if ! docker info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
   getent group docker >/dev/null || fail "Docker group is absent; review Docker installation"
   if id -nG "$(id -un)" | tr ' ' '\n' | grep -qx docker; then
     say "ACTION REQUIRED: Docker group membership exists but is not active in this session."
-  elif confirm "Add $(id -un) to the root-equivalent docker group?"; then
+  elif [[ "$MODE" == initialize-dev ]] || confirm "Add $(id -un) to the root-equivalent docker group?"; then
     sudo usermod -aG docker "$(id -un)"
+    id -nG "$(id -un)" | tr ' ' '\n' | grep -qx docker \
+      || fail "Docker group enrollment could not be verified"
     say "ACTION REQUIRED: Sign out and back in (or reboot the VM), then rerun:"
   else
     say "ACTION REQUIRED: You declined Docker group access. Configure rootless Docker or operator-approved access."
   fi
-  say "  ./scripts/install-deps.sh --check"
+  if [[ "$MODE" == initialize-dev ]]; then
+    say "  make initialize"
+  else
+    say "  ./scripts/install-deps.sh --check"
+  fi
   exit 2
 fi
 

@@ -56,25 +56,27 @@ def available(image):
     return True
 
 
-def apply_missing(missing):
+def apply_missing(missing, *, initializing=False):
     if not missing:
         print("KEEP: All required Docker images already available.")
         return
 
-    if not sys.stdin.isatty():
-        raise ImageError(
-            "Interactive confirmation required for image pulls"
-        )
+    if any(image not in IMAGES for image in missing):
+        raise ImageError("Unexpected image outside the reviewed inventory")
 
     for image in missing:
         print("MISSING:", image)
 
-    answer = input(
-        "Download these missing Docker images? [y/N] "
-    ).strip().lower()
-
-    if answer not in ("y", "yes"):
-        raise ImageError("Image download declined")
+    if not initializing:
+        if not sys.stdin.isatty():
+            raise ImageError(
+                "Interactive confirmation required for image pulls"
+            )
+        answer = input(
+            "Download these missing Docker images? [y/N] "
+        ).strip().lower()
+        if answer not in ("y", "yes"):
+            raise ImageError("Image download declined")
 
     for image in missing:
         print("PULL:", image, flush=True)
@@ -94,7 +96,7 @@ def apply_missing(missing):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "mode", choices=("plan", "check", "apply"),
+        "mode", choices=("plan", "check", "apply", "initialize"),
     )
     args = parser.parse_args(argv)
 
@@ -136,8 +138,8 @@ def main(argv=None):
                 "Required images missing: " + ", ".join(missing)
             )
 
-        if args.mode == "apply":
-            apply_missing(missing)
+        if args.mode in ("apply", "initialize"):
+            apply_missing(missing, initializing=args.mode == "initialize")
 
             if any(not available(image) for image in IMAGES):
                 raise ImageError("Image preparation incomplete")

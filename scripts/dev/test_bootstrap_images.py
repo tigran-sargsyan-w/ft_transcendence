@@ -53,7 +53,7 @@ class ImageTests(unittest.TestCase):
         section = "\n".join(lines[start:end])
 
         self.assertLess(
-            section.index("bootstrap_images.py apply"),
+            section.index("bootstrap_images.py initialize"),
             section.index("bootstrap_unified.py initialize"),
         )
 
@@ -130,6 +130,25 @@ class ImageTests(unittest.TestCase):
             "pull", "--quiet", image, timeout=900,
         )
         inspect.assert_called_once_with(image)
+
+    def test_initialize_pulls_only_reviewed_missing_images_without_tty(self):
+        image = "grafana/grafana:13.3.1"
+        with (
+            patch.object(images.sys.stdin, "isatty", return_value=False),
+            patch("builtins.input", side_effect=AssertionError("unexpected prompt")),
+            patch.object(images, "run", return_value=types.SimpleNamespace(
+                returncode=0,
+            )) as runner,
+            patch.object(images, "available", return_value=True),
+        ):
+            images.apply_missing([image], initializing=True)
+        runner.assert_called_once_with("pull", "--quiet", image, timeout=900)
+
+    def test_initialize_rejects_unreviewed_image(self):
+        with patch.object(images, "run") as runner:
+            with self.assertRaises(images.ImageError):
+                images.apply_missing(["unexpected:latest"], initializing=True)
+            runner.assert_not_called()
 
     def test_image_inspection_read_only(self):
         with patch.object(

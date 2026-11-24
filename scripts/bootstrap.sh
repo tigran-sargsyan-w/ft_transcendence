@@ -225,7 +225,11 @@ inventory_docker() {
 say "=== Fresh Ubuntu bootstrap: host + Docker resources ==="
 if [[ "$MODE" == --initialize || "$MODE" == --upgrade-waf ]]; then
   # Only explicitly approved initialization/maintenance installs packages.
-  ./scripts/install-deps.sh || fail "Dependency installation stopped; inspect the installer and rerun"
+  if [[ "$MODE" == --initialize ]]; then
+    ./scripts/install-deps.sh --initialize-dev || fail "Dependency initialization stopped; inspect the installer and rerun"
+  else
+    ./scripts/install-deps.sh || fail "Dependency installation stopped; inspect the installer and rerun"
+  fi
   ./scripts/install-deps.sh --check || fail "Docker dependencies or access still unavailable"
 elif [[ "$MODE" == --prepare-* ]]; then
   # Provisioning still verifies packages and Docker on every entry.
@@ -250,7 +254,7 @@ case "$MODE" in
     say "RESULT: ORCHESTRATOR PREFLIGHT READY (read-only)"
     ;;
   --initialize)
-    python3 scripts/dev/bootstrap_images.py apply || fail "Required images unavailable"
+    python3 scripts/dev/bootstrap_images.py initialize || fail "Required images unavailable"
     python3 scripts/dev/bootstrap_unified.py initialize
     ;;
   --start)
