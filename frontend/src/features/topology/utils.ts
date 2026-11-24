@@ -120,4 +120,13 @@ export function getIsUsedBy(
   return usedByLabel;
 }
 
+export function getServiceGraph(topology: TopologySnapshot): TopologySnapshot {
+  const nodes = topology.nodes.filter((n) => n.kind === "service");
+  const ids = new Set(nodes.map((n) => n.id));
+  const edges = topology.edges.filter(
+    (e) => e.kind === "depends_on" && ids.has(e.source) && ids.has(e.target),
+  );
+  return { ...topology, nodes, edges };
+}
+
 export type DetailedService = ReturnType<typeof getServiceDetails>;

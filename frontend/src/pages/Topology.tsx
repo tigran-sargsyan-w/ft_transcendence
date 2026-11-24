@@ -12,9 +12,10 @@ import {
   getImpactedServices,
   getServices,
   getIsUsedBy,
+  getServiceGraph,
 } from "@/features/topology/utils";
 import { mockCriticalNodes } from "@/features/topology/mockCriticalNodes";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { GraphNode } from "@/features/topology/types";
 import { getRunningIncidents } from "@/features/incidents/utils";
 import { mockIncidents } from "@/features/incidents/mockIncidents";
@@ -22,13 +23,20 @@ import { mockIncidents } from "@/features/incidents/mockIncidents";
 export default function Topology() {
   const services = getServices(mockTopology.nodes);
   const totalServices = services.length;
-  const totalHealthyServices = getHealthyServices.length;
-  const totalImpactedServices = getImpactedServices.length;
-  const totalDownServices = getDownServices.length;
+  const totalHealthyServices = getHealthyServices(mockTopology).length;
+  const totalImpactedServices = getImpactedServices(mockTopology).length;
+  const totalDownServices = getDownServices(mockTopology).length;
 
   const [selectedService, setSelectedService] = useState<GraphNode | undefined>(
     undefined,
   );
+
+  const serviceGraph = useMemo(() => getServiceGraph(mockTopology), []);
+
+  function handleNodeClick(nodeId: string) {
+    const node = services.find((service) => service.id === nodeId);
+    setSelectedService(node);
+  }
 
   return (
     <section className="flex flex-col gap-4 w-screen p-4">
@@ -56,7 +64,7 @@ export default function Topology() {
         <StatCard title="Last Scan" value={5} description="" />
       </div>
       <div className="flex gap-4">
-        <TopologyCard />
+        <TopologyCard topology={serviceGraph} onNodeClick={handleNodeClick} />
         <SelectedServiceCard
           service={selectedService}
           criticality={
