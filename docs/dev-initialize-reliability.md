@@ -335,7 +335,7 @@ Related guides:
 
 The fixed 21-stage display includes system dependencies and Docker images before the 19 existing service stages. CACHED means a fresh readiness check passed, not an on-disk cache. DONE means the guarded preparation and required verification succeeded. Optional Vault UI remains SKIPPED. FAILED, CANCELLED and ACTION REQUIRED stop the sequence; later stages are not executed. ACTION REQUIRED is used only for verified Docker group enrollment/session refresh and preserves a nonzero exit status.
 
-An interactive terminal colors only the status field, uses adaptive-width stage columns and a completed-stage progress bar, commits one final row per stage and previews transient reviewed substeps. The renderer limits updates to five frames per second (apart from phase transitions and notices) and overwrites only changed rows. Pending stages are previewed within the available terminal height. MISSING means a reviewed absence event; NOT READY means a probe did not establish readiness. Neither authorizes provisioning or changes an exit code. UNCONFIRMED means a named child event did not report completion; no success is inferred. A terminal-stage failure still stops the sequence. CI, NO_COLOR, redirected output, verbose mode and timing mode use plain append-only text. The installer authenticates using sudo -v on the controlling terminal, then uses sudo -n for actual package/service operations so their progress stays live. Host operations that may invoke sudo indirectly (mkcert) clear the transient region and pause repainting until the foreground command returns; elapsed time still includes authentication and execution. This avoids interfering with the controlling terminal or intercepting passwords. Noninteractive initialization requires any necessary sudo authorization to be available already; it never requests or stores a password itself.
+An interactive terminal colors only the status field, uses adaptive-width stage columns and a completed-stage progress bar, commits one final row per stage and previews transient reviewed substeps. The renderer limits timer updates to five frames per second (apart from phase transitions, notices and resize) and overwrites only changed rows. Supported xterm-compatible terminals use a separate alternate screen for the live viewport. SIGWINCH invalidates the cached geometry, and a resize repaints only that screen. Final stage rows and reviewed notices are retained in memory and appended once to normal terminal history before foreground sudo authentication or on exit. Normal scrollback is never erased. Unsupported terminals fall back to plain text. Pending stages are previewed within the available terminal height. MISSING means a reviewed absence event; NOT READY means a probe did not establish readiness. Neither authorizes provisioning or changes an exit code. UNCONFIRMED means a named child event did not report completion; no success is inferred. A terminal-stage failure still stops the sequence. CI, NO_COLOR, redirected output, verbose mode and timing mode use plain append-only text. The installer authenticates using sudo -v on the controlling terminal, then uses sudo -n for actual package/service operations so their progress stays live. Host operations that may invoke sudo indirectly (mkcert) clear the transient region and pause repainting until the foreground command returns; elapsed time still includes authentication and execution. This avoids interfering with the controlling terminal or intercepting passwords. Noninteractive initialization requires any necessary sudo authorization to be available already; it never requests or stores a password itself.
 
 Each operation retains its existing security checks. The internal stage dispatch is allowlisted and receives the held orchestrator lock descriptor, not a global yes flag. The Linux CA workflow will trust only an already trusted CA or a newly generated, recorded and validated CA. Unexpected CA paths, files and untrusted existing CAs are refused. Windows trust is outside this automatic path. Docker enrollment is restricted to a checked local socket and still requires normal sudo; sign out/in when instructed.
 
@@ -412,3 +412,49 @@ network access and measures writes and bytes, not end-to-end initialization.
 ```sh
 python3 tests/benchmarks/benchmark_progress_renderer.py --baseline a2786a6
 ```
+
+
+## Issue #160 third-round VM findings and V4 follow-up
+
+At 28f5654, the Ubuntu VM completed 861 offline tests with six skips and
+no failures (867 total). A cold post-enrollment installation completed
+21/21 stages in 563.1 s without approval prompts. Both application and
+Grafana HTTPS opened in the browser without untrusted-certificate warnings.
+Repeated initialize and routine startup acceptance each passed 3/3 with no
+resource identity, restart or migration-history drift. Read-only cancellation
+returned 130 and left the full health report passing. Redirected output had
+46 lines and no ANSI escape or carriage-return bytes. The synthetic renderer
+benchmark (120 columns, 32 rows, seven repetitions) measured 464 writes,
+240188 bytes and 336 full-row erases versus V2's 1745, 849016 and 12432.
+The operator confirmed that steady-size terminal flicker disappeared.
+
+A live terminal resize, however, reflowed old lines and broke the V3 cursor
+anchor even though initialization completed successfully. V4 confines
+repaint operations to the alternate screen and retains complete stage names,
+actual elapsed and cumulative times, and notices for the final primary-screen
+log. Only the viewport is redrawn on resize; small viewports show a bounded
+selection of history and pending operations. Ctrl+C and normal exception
+paths restore the primary screen. SIGKILL or a terminal crash cannot run
+cleanup; if necessary, restore the terminal locally with `reset`.
+
+In a separate reboot/recovery run, the sealed Vault guard and manual Shamir
+unseal succeeded, but the already-running backend-agent initially failed
+readiness and two recovery attempts stopped. A later health report passed
+the agent but failed the backend. The exact cause was not captured. V4 adds
+a read-only polling budget of up to 60 seconds for the verified, existing,
+running backend-agent in explicit `make recover` only. Existing Docker
+inspection and full-readiness check timeouts are additional. Every poll
+pins the inspected ID and revalidates identity and running state; once Docker
+health is healthy, the original transitive check must pass. No automatic
+restart, recreation, credential provisioning, migration or unseal is added.
+Ordinary `make up` retains its fail-closed policy. This is a targeted readiness
+improvement, not proof that all reboot-recovery failures are fixed.
+
+Manual Docker-pull and pre-init Vault cancellation/resume evidence is from
+V2; those scenarios were not repeated in V3. Live critical-section Vault
+cancellation and sealed recovery after that cancellation remain unverified.
+V4 acceptance should focus on resize (including cancellation), regression
+tests, normal startup/initialize identity and the targeted reboot-recovery
+case if an appropriate disposable VM is available. A new cold-install run is
+not required merely to verify resize. Final end-to-end timing measurements
+remain separate from the renderer-only benchmark.

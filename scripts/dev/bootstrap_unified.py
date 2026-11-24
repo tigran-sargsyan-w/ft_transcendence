@@ -447,6 +447,8 @@ def wait_recovery_backend_agent(targets):
     # Bound polling even if a clock is mocked or a check returns immediately.
     attempts = RECOVERY_AGENT_WAIT // RECOVERY_AGENT_POLL + 1
     for attempt in range(attempts):
+        if attempt and time.monotonic() >= deadline:
+            break
         health = inspect_health()
         if health == "healthy":
             if time.monotonic() > deadline:

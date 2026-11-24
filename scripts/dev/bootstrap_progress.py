@@ -283,7 +283,10 @@ class Progress:
         rows = [self._line(self.active, width, now)]
         if budget >= 2:
             pending = list(range(self.active+1, len(self.stages)))
-            reserve = min(len(self._history), max(0, budget-3))
+            # Reserve at most half of a short viewport for history; active
+            # operations must remain visible even near the end of the run.
+            reserve = min(len(self._history), max(0, budget-3),
+                          max(budget//2, budget-2-min(6, len(self.steps))-1))
             remaining = max(0, budget-reserve-2)
             step_budget = min(6, remaining, len(self.steps))
             if step_budget:

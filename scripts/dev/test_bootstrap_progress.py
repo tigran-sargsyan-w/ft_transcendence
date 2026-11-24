@@ -212,7 +212,8 @@ class ProgressTests(unittest.TestCase):
         self.assertNotIn("PENDING", screen)
         self.assertNotIn("RUNNING", screen)
         self.assertNotIn("Verify operation", screen)
-        self.assertEqual(screen.count("SECURITY: Preserve recovery material."), 1)
+        visible = re.sub(r"\x1b\[[0-9;]*m", "", screen)
+        self.assertEqual(visible.count("SECURITY: Preserve recovery material."), 1)
         self.assertEqual(screen.count("CANCELLED"), 1)
         self.assertIn("Finished 16/21", screen)
 
@@ -291,7 +292,7 @@ class ProgressTests(unittest.TestCase):
         self.assertIn("CACHED", screen)
         self.assertIn("total 1.0s", screen)
         self.assertIn("CANCELLED", screen)
-        self.assertIn("SECURITY:", screen)
+        self.assertIn("SECURITY:", re.sub(r"\x1b\[[0-9;]*m", "", screen))
         self.assertNotIn("PENDING", screen)
         self.assertNotIn("Verify identity", screen)
         self.assertNotIn("\x1b[2J", screen)
