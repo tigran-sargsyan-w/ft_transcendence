@@ -88,7 +88,49 @@ make health
 make check-all
 ```
 
-`make check` checks **only** the host domain, Nginx certificate and OS CA trust (legacy helper); use `make health` for the full runtime. `make acceptance` is an **opt-in** validation that repeatedly calls safe `--start` on an already healthy VM and compares container, persistent volume, network and Prisma migration-history metadata. It is not needed on every login.
+`make check` checks **only** the host domain, Nginx certificate and OS CA trust; use `make health` for the full runtime. `make acceptance` is an **opt-in** validation that repeatedly calls safe `--start` on an already healthy VM and compares container, persistent volume, network and Prisma migration-history metadata. It is not needed on every login.
+
+### Shared bootstrap progress (Issue #165)
+
+`make up` / `make start`, `make recover`, `make health`, `make check-all`
+and the host-only `make check` reuse the V3 inline progress renderer from
+#160. Their stages describe real operations and use actual elapsed time.
+The startup fast path still uses the existing transitive Nginx and
+monitoring checks; it does not run extra per-service probes just to
+populate the display. If necessary, the existing-container resume path
+appears as a separate stage with nested checks and operations.
+
+CACHED means an existing check established readiness without a change.
+DONE means the represented operation completed; SKIPPED is an unneeded
+operation, not a readiness assertion. NOT READY is a nonfatal intermediate
+stage result only in routine startup/recovery when the existing optional
+UI or fast-path policy permits continuing. The overall RESULT marker and
+exit code remain authoritative. Health/check commands still fail closed.
+The progress count measures completed stages, not the number of healthy
+services.
+
+Redirected output, CI, NO_COLOR, verbose and timing modes use plain logs.
+For example:
+
+```sh
+FT_DEV_BOOTSTRAP_VERBOSE=1 make health
+FT_DEV_STAGE_TIMING=1 make up
+NO_COLOR=1 make check-all
+```
+
+Verbose mode includes reviewed orchestration events, retry attempts and
+safe existing lifecycle messages. It does not forward raw subprocess
+output. If a host-only check fails, run the named `python3 -m
+scripts.dev.<module> check` helper locally for detailed diagnostics. For
+runtime failures use the indicated `./scripts/bootstrap.sh --check-*`
+entry point. Do not share unreviewed output or recovery material.
+
+The renderer pauses for manual Shamir unseal; Vault CLI retains the real
+controlling terminal and hidden prompts. The timer thread is presentation
+only and is joined at exit. The original V3 visual limitation during
+terminal resize remains; keep terminal dimensions stable. The separate
+plan/acceptance and Vault UI presentation follow-ups are #166 and #167;
+their behavior is not changed by #165.
 
 ## After a VM restart: operator-assisted recovery
 

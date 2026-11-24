@@ -49,8 +49,12 @@ Vault container identity. If stopped, it only starts that same trusted container
 If initialized but sealed, it invokes `docker exec -it ... vault operator unseal`
 **without a key argument**. Vault CLI prompts for two different keys with
 hidden input. The orchestrator does not read or log the shares. It validates
-unseal progress after each input. Once Vault is ready, it resumes only existing
-trusted application containers in dependency order and verifies HTTPS health.
+unseal progress after each input. The shared inline progress view pauses
+before Vault CLI owns the controlling terminal and resumes only after its
+existing unseal validation succeeds. No renderer reads or captures the
+hidden input. A failed or interrupted prompt stops later startup work.
+Once Vault is ready, the command resumes only existing trusted application
+containers in dependency order and verifies HTTPS health.
 
 When Vault is already unsealed, `--recover` will skip prompts and may simply
 report that the stack is ready. The ordinary fast path remains:

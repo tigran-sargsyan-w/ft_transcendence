@@ -36,21 +36,29 @@ Monitoring failures are localized to the relevant check where possible.
 See the [monitoring operator guide](dev-monitoring.md).
 
 Nested dependency probes are kept sequential to avoid unnecessary
-parallel Docker workloads on small VMs.
+parallel Docker workloads on small VMs. The shared progress view displays
+these existing check groups and retry events; it does not add probes or
+claim independent success for unchecked sub-dependencies. `make health`
+and `make check-all` retain their distinct original check order.
 
 ## Diagnostic path
 
 If the fast end-to-end probe fails after three read-only attempts, the command
 runs the existing trusted per-stage checks in dependency order and stops at the
-**first failing composite check**. Output looks like:
+**first failing composite check**. The progress view retains the initial
+failure and the diagnostic localization. The final output includes the
+existing failure notices and result marker, for example:
 
 ```text
 WARN: end-to-end check failed; locating the first failing dependency
-PASS: vault
 ...
 FAIL: postgres; inspect --check-postgres
 RESULT: UNIFIED BOOTSTRAP STOPPED (no resources removed)
 ```
+
+Use `FT_DEV_BOOTSTRAP_VERBOSE=1 make health` for reviewed individual
+orchestration events and retry results in plain text. Direct stage checks
+remain available for detailed local diagnosis.
 
 To investigate, run the named command **manually**, for example:
 
