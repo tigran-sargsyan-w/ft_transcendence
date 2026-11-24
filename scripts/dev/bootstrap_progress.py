@@ -198,6 +198,7 @@ class Progress:
             return
         if len(self.steps) >= 128 and label not in self.steps:
             self.steps.pop(next(iter(self.steps)))
+        self.steps.pop(label, None)
         self.steps[label] = status
         if self.verbose:
             self._write(self._step_line(label, status) + "\n")
@@ -205,7 +206,7 @@ class Progress:
     def pause(self):
         if self.live:
             self._erase()
-            line = "    => => Host authentication may be required (sudo)"
+            line = "    Authentication may be required (sudo)"
             self._write(line[:max(1, self.width()-1)] + "\n")
         self.paused = True
 

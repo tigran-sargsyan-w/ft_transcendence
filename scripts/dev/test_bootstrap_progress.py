@@ -135,6 +135,47 @@ class ProgressTests(unittest.TestCase):
         self.assertEqual(progress.steps, {})
         self.assertIn("DONE 2.0s", output.getvalue())
 
+    def test_terminal_screen_has_only_final_stage_rows(self):
+        import re
+        output = Terminal()
+        progress = self.progress(output)
+        progress.begin(0, Phase.PREPARE)
+        progress.substep("Pulling image", Status.RUNNING)
+        self.now = 1
+        progress.refresh()
+        progress.pause()
+        progress.resume()
+        progress.finish(Status.DONE)
+        progress.begin(1, Phase.CHECK)
+        progress.finish(Status.CACHED)
+        progress.summary()
+        # Minimal terminal interpretation of the renderer's exact CSI set.
+        rows, row, col = [""], 0, 0
+        for token in re.findall(r"\x1b\[[0-9;]*[A-Za-z]|[\s\S]", output.getvalue()):
+            if token == "\x1b[1A":
+                row = max(0, row - 1)
+            elif token == "\x1b[2K":
+                rows[row] = ""
+            elif token.startswith("\x1b"):
+                continue
+            elif token == "\r":
+                col = 0
+            elif token == "\n":
+                row += 1
+                col = 0
+                if row == len(rows):
+                    rows.append("")
+            else:
+                line = rows[row].ljust(col)
+                rows[row] = line[:col] + token + line[col+1:]
+                col += 1
+        screen = "\n".join(rows)
+        self.assertEqual(screen.count("[01/02]"), 1)
+        self.assertEqual(screen.count("[02/02]"), 1)
+        self.assertNotIn("Pulling image", screen)
+        self.assertNotIn("PENDING", screen)
+        self.assertNotIn("RUNNING", screen)
+
     def test_plain_no_duplicate_start_and_verbose_keeps_substeps(self):
         output = io.StringIO()
         progress = self.progress(output, {"FT_DEV_BOOTSTRAP_VERBOSE": "1"})

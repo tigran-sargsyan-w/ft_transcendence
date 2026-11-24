@@ -129,11 +129,20 @@ class UnifiedTests(unittest.TestCase):
 
     def test_session_refresh_does_not_continue_to_images(self):
         runner = MagicMock()
-        runner.run.side_effect = [1, 2]
+        runner.run.side_effect = [1, 0, 2]
         runner.last_diagnostics.session_refresh = True
         with self.assertRaises(unified.SessionRefreshRequired):
             unified.prepare_prerequisites(runner, MagicMock())
-        self.assertEqual(runner.run.call_count, 2)
+        self.assertEqual(runner.run.call_count, 3)
+        self.assertEqual(runner.run.call_args_list[1].args[0], ["sudo", "-v"])
+        self.assertFalse(runner.run.call_args_list[2].kwargs["pause_for_auth"])
+
+    def test_local_prerequisite_guard_failure_does_not_authenticate(self):
+        runner = MagicMock()
+        runner.run.return_value = 3
+        with self.assertRaises(unified.UnifiedStartupError):
+            unified.prepare_prerequisites(runner, MagicMock())
+        runner.run.assert_called_once()
 
     def test_initialization_all_ready_without_tty_has_no_apply(self):
         with patch.object(unified.sys.stdin, "isatty", return_value=False), \

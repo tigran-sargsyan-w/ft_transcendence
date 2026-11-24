@@ -553,10 +553,21 @@ def prepare_prerequisites(runner, progress):
     installer = str(ROOT / "scripts/install-deps.sh")
     images = str(ROOT / "scripts/dev/bootstrap_images.py")
     progress.begin(0, Phase.CHECK)
-    cached = runner.run([installer, "--initialize-check"], cwd=ROOT, probe=True, operation="Check local prerequisites") == 0
+    check_code = runner.run([installer, "--initialize-check"], cwd=ROOT, probe=True,
+                            operation="Check local prerequisites")
+    cached = check_code == 0
+    if check_code not in (0, 1):
+        runner.report_failure()
+        raise UnifiedStartupError("Local prerequisite guard refused; inspect ./scripts/install-deps.sh --initialize-check")
     if not cached:
         progress.phase(Phase.PREPARE)
-        code = runner.run([installer, "--initialize-dev"], cwd=ROOT, foreground=True, operation="Install missing prerequisites")
+        # Authenticate on the real controlling TTY; the installer then uses
+        # sudo -n, so it can stream progress without touching password input.
+        if runner.run(["sudo", "-v"], cwd=ROOT, foreground=True,
+                      operation="Authenticate sudo"):
+            raise UnifiedStartupError("Sudo authentication failed; no dependency installation started")
+        code = runner.run([installer, "--initialize-dev"], cwd=ROOT, foreground=True,
+                          pause_for_auth=False, operation="Install missing prerequisites")
         if code == 2 and runner.last_diagnostics.session_refresh:
             raise SessionRefreshRequired()
         if code:

@@ -162,7 +162,42 @@ EVENTS = {
     "PASS: Grafana HTTPS WAF blocking.": ("Verify Grafana HTTPS WAF blocking", Status.DONE),
     "RETRY: Grafana HTTPS upstream readiness": ("Retry Grafana HTTPS upstream readiness", Status.RUNNING),
 }
+EVENTS.update({
+    "STEP: Install missing Ubuntu packages": ("Install missing Ubuntu packages", Status.RUNNING),
+    "PASS: Missing Ubuntu packages installed": ("Install missing Ubuntu packages", Status.DONE),
+    "PASS: Official Docker packages installed": ("Install Docker Engine, Compose and Buildx", Status.DONE),
+    "PASS: Docker daemon started": ("Start Docker daemon", Status.DONE),
+})
 EVENTS = {line.encode("ascii"): event for line, event in EVENTS.items()}
+for package in ("git", "make", "python3", "openssl", "curl", "ca-certificates",
+                "util-linux", "acl", "mkcert", "libnss3-tools", "Docker CLI",
+                "Docker Compose plugin", "Docker Buildx plugin"):
+    EVENTS[("OK: " + package).encode("ascii")] = ("Check " + package, Status.DONE)
+    EVENTS[("MISSING: " + package).encode("ascii")] = ("Check " + package, Status.PENDING)
+# Reviewed literal inventory. Never reflect arbitrary Docker resource names.
+for kind, names in (
+    ("network", ("transcendence-vault-dev_vault_private", "transcendence-app-dev_default",
+                 "transcendence-app-dev_collector_control")),
+    ("volume", ("transcendence-vault-dev_vault_data", "transcendence-vault-dev_backend_agent_auth",
+                "transcendence-vault-dev_backend_rendered", "transcendence-app-dev_postgres_data",
+                "transcendence-app-dev_prometheus_data", "transcendence-app-dev_grafana_data",
+                "transcendence-app-dev_grafana_vault_auth", "transcendence-app-dev_grafana_vault_rendered",
+                "transcendence-app-dev_migrator_vault_auth", "transcendence-app-dev_migrator_vault_rendered",
+                "transcendence-app-dev_postgres_provisioner_vault_auth",
+                "transcendence-app-dev_postgres_provisioner_rendered")),
+):
+    for name in names:
+        EVENTS[(f"CREATED: {kind} {name}").encode("ascii")] = (f"Create {kind} {name}", Status.DONE)
+for name in ("transcendence-vault-dev-vault-1", *(
+    "transcendence-app-dev-" + service + "-1"
+    for service in ("postgres", "vault-backend-agent", "backend", "docker-proxy",
+                    "collector", "graph-engine", "frontend", "nginx", "prometheus",
+                    "vault-grafana-agent", "grafana")
+)):
+    for prefix, label, status in (("CREATED", "Create", Status.DONE),
+                                  ("KEEP", "Reuse", Status.CACHED),
+                                  ("START", "Start", Status.DONE)):
+        EVENTS[(f"{prefix}: {name}").encode("ascii")] = (f"{label} {name}", status)
 for image in IMAGES:
     EVENTS[("PULL: " + image).encode("ascii")] = ("Pull " + image, Status.RUNNING)
     EVENTS[("PASS: " + image).encode("ascii")] = ("Pull " + image, Status.DONE)
@@ -329,7 +364,8 @@ class ChildRunner:
             self.progress.notice("Verification failed; use the indicated read-only check for details.")
 
     def run(self, argv, *, cwd, env=None, pass_fds=(), foreground=False,
-            critical=False, probe=False, operation="Execute reviewed operation"):
+            critical=False, probe=False, operation="Execute reviewed operation",
+            pause_for_auth=True):
         self.cancellation.check()
         diagnostics = Diagnostics()
         self.last_diagnostics = diagnostics
@@ -337,7 +373,8 @@ class ChildRunner:
         self.progress.substep(operation, Status.RUNNING)
         # Stream Python's reviewed messages promptly instead of at process exit.
         env = {**(os.environ if env is None else env), "PYTHONUNBUFFERED": "1"}
-        if foreground:
+        paused = foreground and pause_for_auth
+        if paused:
             self.progress.pause()
         try:
             with subprocess.Popen(argv, cwd=cwd, env=env, pass_fds=pass_fds,
@@ -355,7 +392,7 @@ class ChildRunner:
                             if interrupted is None:
                                 interrupted = now
                                 signum = self.cancellation.signum or signal.SIGINT
-                                if self.cancellation.signum is not None and not foreground:
+                                if self.cancellation.signum is not None and not paused:
                                     self.progress.notice('Cancellation requested; waiting for active operation.')
                                 try:
                                     if foreground:
@@ -383,7 +420,7 @@ class ChildRunner:
                         self.progress.refresh()
                     self.last_returncode = child.wait()
         finally:
-            if foreground:
+            if paused:
                 self.progress.resume()
         for notice in diagnostics.notices:
             if self.verbose or not probe or not notice.startswith('ERROR:'):

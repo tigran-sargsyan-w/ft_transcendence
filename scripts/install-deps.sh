@@ -8,7 +8,7 @@ usage() {
 Usage: ./scripts/install-deps.sh [--check|--initialize-check|--initialize-dev|--help]
 
   (default)   Install missing Ubuntu packages with confirmation.
-  --initialize-dev  Explicit development initialization (packages and local Docker access).
+  --initialize-dev  Development provisioning; requires prior sudo authentication if needed.
   --initialize-check  Read-only local development prerequisites and daemon guard.
   --check     Read-only prerequisites report; no sudo or mutations.
   --help      Print this help.
@@ -30,7 +30,20 @@ esac
 if (( $# > 1 )); then usage >&2; exit 2; fi
 
 say() { printf '%s\n' "$*"; }
-fail() { say "ERROR: $*" >&2; exit 1; }
+fail() {
+  say "ERROR: $*" >&2
+  [[ "$MODE" != initialize-check ]] || exit 3
+  exit 1
+}
+sudo_run() {
+  if [[ "$MODE" == initialize-dev ]]; then
+    # The orchestrator authenticates once on the controlling terminal.
+    # Never let an APT operation unexpectedly prompt while progress is live.
+    sudo -n "$@"
+  else
+    sudo "$@"
+  fi
+}
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 pkg_installed() { dpkg-query -W -f='${db:Status-Abbrev}' "$1" 2>/dev/null | grep -q '^ii'; }
 
@@ -163,18 +176,20 @@ if (( ${#missing_base[@]} || docker_packages_needed )); then
     exit 1
   fi
   command_exists sudo || fail "sudo is required for package installation"
-  sudo -v
+  sudo_run -v
 
   # Install common Ubuntu tools only if needed.
   if (( ${#missing_base[@]} )); then
-    sudo apt-get update
+    say "STEP: Install missing Ubuntu packages"
+    sudo_run apt-get update
     if ! pkg_installed mkcert && ! apt-cache show mkcert >/dev/null 2>&1; then
       say "INFO: Enabling Ubuntu universe repository for mkcert"
-      sudo apt-get install -y software-properties-common
-      sudo add-apt-repository -y universe
-      sudo apt-get update
+      sudo_run apt-get install -y software-properties-common
+      sudo_run add-apt-repository -y universe
+      sudo_run apt-get update
     fi
-    sudo apt-get install -y "${missing_base[@]}"
+    sudo_run apt-get install -y "${missing_base[@]}"
+    say "PASS: Missing Ubuntu packages installed"
   fi
 
   if (( docker_packages_needed )); then
@@ -187,12 +202,12 @@ if (( ${#missing_base[@]} || docker_packages_needed )); then
       if grep -Rqs 'download.docker.com/linux/ubuntu' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
         fail "An existing Docker APT source was detected; review it instead of adding another."
       fi
-      sudo install -m 0755 -d /etc/apt/keyrings
+      sudo_run install -m 0755 -d /etc/apt/keyrings
       if [[ ! -s /etc/apt/keyrings/docker.asc ]]; then
         tmpkey=$(mktemp)
         trap 'rm -f "${tmpkey:-}"' EXIT
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o "$tmpkey"
-        sudo install -m 0644 "$tmpkey" /etc/apt/keyrings/docker.asc
+        sudo_run install -m 0644 "$tmpkey" /etc/apt/keyrings/docker.asc
         rm -f "$tmpkey"
         trap - EXIT
       fi
@@ -209,13 +224,14 @@ Components: stable
 Architectures: $arch
 Signed-By: /etc/apt/keyrings/docker.asc
 EOF
-      sudo install -m 0644 "$tmp_source" /etc/apt/sources.list.d/docker.sources
+      sudo_run install -m 0644 "$tmp_source" /etc/apt/sources.list.d/docker.sources
       rm -f "$tmp_source"
       trap - EXIT
     fi
     say "INFO: Installing official Docker Engine / Compose / Buildx"
-    sudo apt-get update
-    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    sudo_run apt-get update
+    sudo_run apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    say "PASS: Official Docker packages installed"
   fi
 fi
 
@@ -236,7 +252,8 @@ fi
 if ! systemctl is-active --quiet docker; then
   say "INFO: Starting Docker service"
   command_exists sudo || fail "sudo is required to start Docker"
-  sudo systemctl enable --now docker
+  sudo_run systemctl enable --now docker
+  say "PASS: Docker daemon started"
 fi
 
 # Only the explicit development initialization mode may enroll the current
@@ -258,7 +275,7 @@ if ! docker info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
       || fail "Unexpected Docker group identity"
     [[ "$(stat -Lc '%u:%g' /var/run/docker.sock)" == "0:$group_gid" ]] \
       || fail "Unexpected Docker socket ownership"
-    if ! sudo docker --host unix:///var/run/docker.sock info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
+    if ! sudo_run docker --host unix:///var/run/docker.sock info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
       fail "Local Docker daemon is not responding via sudo"
     fi
   elif ! sudo docker info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
@@ -275,7 +292,7 @@ if ! docker info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
   if id -nG "$(id -un)" | tr ' ' '\n' | grep -qx docker; then
     say "ACTION REQUIRED: Docker group membership exists but is not active in this session."
   elif [[ "$MODE" == initialize-dev ]] || confirm "Add $(id -un) to the root-equivalent docker group?"; then
-    sudo usermod -aG docker "$(id -un)"
+    sudo_run usermod -aG docker "$(id -un)"
     id -nG "$(id -un)" | tr ' ' '\n' | grep -qx docker \
       || fail "Docker group enrollment could not be verified"
     say "ACTION REQUIRED: Sign out and back in (or reboot the VM), then rerun:"
