@@ -39,6 +39,10 @@ class MakefileStartupContractTests(unittest.TestCase):
         self.assertEqual(self.dry_run("check-all"), "./scripts/bootstrap.sh --check-all")
         self.assertEqual(self.dry_run("plan"), "./scripts/bootstrap.sh --plan")
 
+    def test_host_check_uses_shared_read_only_presentation(self):
+        self.assertEqual(self.dry_run("check"),
+                         "python3 -m scripts.dev.bootstrap_host_check")
+
     def test_acceptance_is_opt_in(self):
         self.assertEqual(
             self.dry_run("acceptance"),

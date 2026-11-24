@@ -66,6 +66,23 @@ class ProgressTests(unittest.TestCase):
         progress.summary()
         self.assertIn("Finished 2/2 stages", output.getvalue())
 
+    def test_nonfatal_not_ready_is_explicitly_opt_in(self):
+        ordinary = self.progress(io.StringIO())
+        ordinary.begin(0)
+        with self.assertRaises(ValueError):
+            ordinary.finish(Status.NOT_READY)
+        ordinary.finish(Status.FAILED)
+        output = io.StringIO()
+        progress = Progress(("Check stack", "Resume stack"), stream=output,
+                            allow_not_ready=True)
+        progress.begin(0)
+        progress.finish(Status.NOT_READY)
+        progress.begin(1)
+        progress.finish(Status.DONE)
+        progress.summary()
+        self.assertIn("Check stack NOT READY", output.getvalue())
+        self.assertIn("Finished 2/2 stages", output.getvalue())
+
     def test_profile_and_header_reject_unreviewed_controls(self):
         for kwargs in ({"profile": "compact"}, {"header": "Bad\x1b[2J"},
                        {"header": "Bad\nheader"}):
