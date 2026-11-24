@@ -6,7 +6,11 @@ export interface Credentials {
   password: string;
 }
 
-export const registerUser = (input: Credentials) =>
+export interface RegisterInput extends Credentials {
+  displayName: string;
+}
+
+export const registerUser = (input: RegisterInput) =>
   api<User>("/auth/register", { method: "POST", body: JSON.stringify(input) });
 
 export const loginUser = (input: Credentials) =>

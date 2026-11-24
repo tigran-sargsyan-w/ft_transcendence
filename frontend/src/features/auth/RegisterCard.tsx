@@ -31,6 +31,8 @@ export function RegisterCard({ onSwitch }: RegisterCardProps) {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [status, setStatus] = useState<FormStatus>("idle");
   const [error, setError] = useState<string | null>(null);
 
@@ -50,8 +52,23 @@ export function RegisterCard({ onSwitch }: RegisterCardProps) {
       return;
     }
 
-    if (password.length > 64) {
-      setError("Password must be at most 64 characters.");
+    if (password.length > 128) {
+      setError("Password must be at most 128 characters.");
+      return;
+    }
+
+    const displayName = [firstName, lastName]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(" ");
+
+    if (!firstName.trim() || !lastName.trim()) {
+      setError("Enter your first and last name.");
+      return;
+    }
+
+    if (displayName.length > 64) {
+      setError("Your name must be at most 64 characters.");
       return;
     }
 
@@ -61,6 +78,7 @@ export function RegisterCard({ onSwitch }: RegisterCardProps) {
       await registerUser({
         email: trimmedEmail,
         password,
+        displayName,
       });
 
       setStatus("success");
@@ -90,7 +108,7 @@ export function RegisterCard({ onSwitch }: RegisterCardProps) {
       <Card>
         <CardHeader>
           <CardTitle>Sign up</CardTitle>
-          <CardDescription>Register with email and password.</CardDescription>
+          <CardDescription>Create your account to get started.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col">
           <FieldGroup>
@@ -116,21 +134,47 @@ export function RegisterCard({ onSwitch }: RegisterCardProps) {
                 autoComplete="new-password"
                 required
                 minLength={8}
-                maxLength={64}
+                maxLength={128}
                 value={password}
                 disabled={isSubmitting}
                 onChange={(event) => setPassword(event.target.value)}
+              />
+            </Field>
+            <Field>
+              <FieldLabel>First Name</FieldLabel>
+              <Input
+                id="firstName"
+                name="firstName"
+                type="text"
+                autoComplete="given-name"
+                required
+                value={firstName}
+                disabled={isSubmitting}
+                onChange={(event) => setFirstName(event.target.value)}
+              />
+            </Field>
+            <Field>
+              <FieldLabel>Last Name</FieldLabel>
+              <Input
+                id="lastName"
+                name="lastName"
+                type="text"
+                autoComplete="family-name"
+                required
+                value={lastName}
+                disabled={isSubmitting}
+                onChange={(event) => setLastName(event.target.value)}
               />
             </Field>
           </FieldGroup>
         </CardContent>
         <CardFooter className="flex flex-col">
           <Button type="submit" disabled={isSubmitting} className="w-full">
-            {isSubmitting ? "Signing up…" : "Signup up"}
+            {isSubmitting ? "Signing up…" : "Sign up"}
           </Button>
           <CardAction>
             Already have an account?{" "}
-            <Button onClick={onSwitch} variant="link">
+            <Button type="button" onClick={onSwitch} variant="link">
               Sign in
             </Button>
           </CardAction>

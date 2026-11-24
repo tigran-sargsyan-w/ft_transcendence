@@ -37,7 +37,7 @@ export const IncidentBanner = ({ incident }: IncidentBannerProps) => {
             <span aria-hidden="true" className="hidden md:inline">
               ·
             </span>
-            <span>{formatElapsedSince(incident.startedAt)}</span>
+            <span>{formatElapsedSince(incident.startedAt, incident.resolvedAt)}</span>
           </div>
         </div>
         <Button className="cursor-pointer [grid-area:action]">

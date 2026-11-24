@@ -124,7 +124,7 @@ export function LoginCard({ onSwitch }: LoginCardProps) {
           </Button>
           <CardAction>
             Don't have an account?
-            <Button onClick={onSwitch} variant="link">
+            <Button type="button" onClick={onSwitch} variant="link">
               Sign up
             </Button>
           </CardAction>

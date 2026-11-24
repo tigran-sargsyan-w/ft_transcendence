@@ -51,7 +51,7 @@ export const ActiveIncidents = ({ incidents }: ActiveIncidentsProps) => {
                 </Badge>
               </TableCell>
               <TableCell className="hidden md:table-cell">
-                {formatElapsedSince(i.startedAt)}
+                {formatElapsedSince(i.startedAt, i.resolvedAt)}
               </TableCell>
               <TableCell className="hidden md:table-cell">
                 {i.commander?.displayName}
