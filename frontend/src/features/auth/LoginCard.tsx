@@ -51,8 +51,8 @@ export function LoginCard({ onSwitch }: LoginCardProps) {
       return;
     }
 
-    if (password.length > 64) {
-      setError("Password must be at most 64 characters.");
+    if (password.length > 128) {
+      setError("Password must be at most 128 characters.");
       return;
     }
 
