@@ -23,10 +23,10 @@ import sys
 import time
 
 if __package__:
-    from .bootstrap_progress import Phase, Progress, Status
+    from .bootstrap_progress import Phase, Progress, Status, emit_result
     from .bootstrap_process import Cancellation, ChildRunner, InitializationCancelled, UnexpectedApproval
 else:
-    from bootstrap_progress import Phase, Progress, Status
+    from bootstrap_progress import Phase, Progress, Status, emit_result
     from bootstrap_process import Cancellation, ChildRunner, InitializationCancelled, UnexpectedApproval
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -643,7 +643,7 @@ def initialize(lock_fd, *, cancellation=None):
             progress.summary()
         raise
     progress.summary()
-    print("RESULT: UNIFIED INITIALIZATION READY", flush=True)
+    emit_result("UNIFIED INITIALIZATION READY", Status.DONE)
 
 
 def start():
@@ -841,24 +841,26 @@ def main(argv=None):
                     start()
         return 0
     except SessionRefreshRequired:
-        print("RESULT: INITIALIZATION PAUSED (sign out and back in; rerun make initialize)",
-              file=sys.stderr, flush=True)
+        emit_result("INITIALIZATION PAUSED (sign out and back in; rerun make initialize)",
+                    Status.ACTION_REQUIRED, stream=sys.stderr)
         return 2
     except InitializationCancelled as exc:
-        print("RESULT: INITIALIZATION CANCELLED (no automatic rollback; inspect existing state)",
-              file=sys.stderr, flush=True)
+        emit_result("INITIALIZATION CANCELLED (no automatic rollback; inspect existing state)",
+                    Status.CANCELLED, stream=sys.stderr)
         return 128 + exc.signum
     except UnexpectedApproval:
-        print("RESULT: UNIFIED BOOTSTRAP STOPPED (unexpected approval; no automatic rollback)",
-              file=sys.stderr, flush=True)
+        emit_result("UNIFIED BOOTSTRAP STOPPED (unexpected approval; no automatic rollback)",
+                    Status.FAILED, stream=sys.stderr)
         return 1
     except OSError:
         print("ERROR: Local bootstrap operation failed; inspect the active stage", file=sys.stderr)
         return 1
     except UnifiedStartupError as exc:
         print(f"ERROR: {exc}", file=sys.stderr, flush=True)
-        print("RESULT: UNIFIED BOOTSTRAP STOPPED (no resources removed)",
-              file=sys.stderr, flush=True)
+        if args.mode == "initialize":
+            emit_result("UNIFIED BOOTSTRAP STOPPED (no resources removed)", Status.FAILED, stream=sys.stderr)
+        else:
+            print("RESULT: UNIFIED BOOTSTRAP STOPPED (no resources removed)", file=sys.stderr, flush=True)
         return 1
 
 

@@ -3,7 +3,7 @@ import io
 import unittest
 from unittest.mock import patch
 
-from bootstrap_progress import Phase, Progress, Status
+from bootstrap_progress import Phase, Progress, Status, emit_result
 
 
 class Terminal(io.StringIO):
@@ -56,7 +56,8 @@ class ProgressTests(unittest.TestCase):
         progress.finish(Status.SKIPPED)
         log = output.getvalue()
         self.assertIn("\r\x1b[2K", log)
-        self.assertIn("RUNNING 2.0s", log)
+        self.assertIn("\x1b[36mRUNNING\x1b[0m", log)
+        self.assertIn("2.0s | total 2.0s", log)
         self.assertIn("\x1b[32m", log)
         self.assertIn("PENDING", log)
         self.assertTrue(log.endswith("\n"))
@@ -115,7 +116,7 @@ class ProgressTests(unittest.TestCase):
         progress = self.progress(output, width=20)
         progress.begin(0)
         import re
-        for line in output.getvalue().split("\n"):
+        for line in progress._rows:
             clean = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line)
             self.assertLessEqual(len(clean), 19)
 
@@ -133,7 +134,8 @@ class ProgressTests(unittest.TestCase):
         progress.finish(Status.DONE)
         self.assertEqual(progress.drawn, 0)
         self.assertEqual(progress.steps, {})
-        self.assertIn("DONE 2.0s", output.getvalue())
+        self.assertIn("\x1b[32mDONE\x1b[0m", output.getvalue())
+        self.assertIn("2.0s | total 2.0s", output.getvalue())
 
     def test_terminal_screen_has_only_final_stage_rows(self):
         import re
@@ -154,8 +156,14 @@ class ProgressTests(unittest.TestCase):
         for token in re.findall(r"\x1b\[[0-9;]*[A-Za-z]|[\s\S]", output.getvalue()):
             if token == "\x1b[1A":
                 row = max(0, row - 1)
+            elif token == "\x1b[1B":
+                row += 1
+                if row == len(rows):
+                    rows.append("")
             elif token == "\x1b[2K":
                 rows[row] = ""
+            elif token == "\x1b[K":
+                rows[row] = rows[row][:col]
             elif token.startswith("\x1b"):
                 continue
             elif token == "\r":
@@ -175,6 +183,61 @@ class ProgressTests(unittest.TestCase):
         self.assertNotIn("Pulling image", screen)
         self.assertNotIn("PENDING", screen)
         self.assertNotIn("RUNNING", screen)
+
+    def test_timer_diff_does_not_rewrite_pending_or_unchanged_steps(self):
+        output = Terminal()
+        progress = self.progress(output, width=120)
+        progress.begin(0, Phase.CHECK)
+        progress.substep("Verify identity", Status.DONE)
+        self.now = 1
+        progress.refresh()
+        before = len(output.getvalue())
+        progress.refresh()
+        self.assertEqual(len(output.getvalue()), before)
+        self.now = 2
+        progress.refresh()
+        delta = output.getvalue()[before:]
+        self.assertNotIn("PostgreSQL", delta)
+        self.assertNotIn("Verify identity", delta)
+        self.assertNotIn("\x1b[2K", delta)
+        self.assertIn("2.0s", delta)
+
+    def test_width_and_status_only_color(self):
+        import re
+        width = 120
+        progress = Progress(("Vault", "PostgreSQL"), stream=Terminal(),
+                            clock=lambda: self.now, env={"TERM": "xterm"},
+                            terminal_width=lambda: width, terminal_height=lambda: 12)
+        progress.begin(0, Phase.CHECK)
+        active, pending = progress._rows[:2]
+        self.assertEqual(active.index("\x1b["), pending.index("\x1b["))
+        self.assertIn("\x1b[36mRUNNING\x1b[0m (check)", active)
+        strip = lambda value: re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", value)
+        self.assertEqual(len(strip(active)), 119)
+        self.assertEqual(len(strip(progress._rows[-1])), 119)
+        width = 65
+        self.now = 1
+        progress.refresh()
+        self.assertTrue(all(len(strip(row)) <= 64 for row in progress._rows))
+
+    def test_phase_replaces_previous_transient_substeps(self):
+        progress = self.progress(Terminal())
+        progress.begin(0, Phase.CHECK)
+        progress.substep("Check previous phase", Status.NOT_READY)
+        progress.phase(Phase.PREPARE)
+        self.assertEqual(progress.steps, {})
+        self.assertNotIn("Check previous phase", "\n".join(progress._rows))
+
+    def test_result_color_only_on_state_and_plain_contract(self):
+        output = Terminal()
+        with patch("bootstrap_progress.sys.stdout", output):
+            emit_result("INITIALIZATION CANCELLED (inspect state)", Status.CANCELLED,
+                        env={"TERM": "xterm"})
+            emit_result("UNIFIED INITIALIZATION READY", Status.DONE,
+                        env={"TERM": "xterm", "NO_COLOR": ""})
+        self.assertEqual(output.getvalue(),
+                         "RESULT: \x1b[33mINITIALIZATION CANCELLED\x1b[0m (inspect state)\n"
+                         "RESULT: UNIFIED INITIALIZATION READY\n")
 
     def test_plain_no_duplicate_start_and_verbose_keeps_substeps(self):
         output = io.StringIO()
