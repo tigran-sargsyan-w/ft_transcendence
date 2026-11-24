@@ -522,5 +522,131 @@ window dimensions; keep the terminal size stable during initialization for
 the best display. This is a known visual limitation, not a claim of resize
 safety. CI, NO_COLOR, verbose and redirected output keep the V3 plain-log
 contract. No fresh installation is required to recheck this restoration.
-The live reboot-recovery acceptance and controlled end-to-end benchmark
-remain pending. Live Vault critical-section cancellation remains deferred.
+The live reboot-recovery acceptance is recorded below. The controlled
+end-to-end benchmark and live Vault critical-section cancellation remain deferred.
+
+
+## Issue #160 final acceptance — 2026-11-24
+
+Tested implementation: `f8f26a678ad9ed14e7d14774f8d0f67149e92373`
+(V3 renderer restored, V4 targeted recovery improvement retained).
+Environment: disposable VirtualBox Ubuntu 26.04 LTS amd64 development VM,
+Docker 29.10.0. Results below distinguish final-commit checks from historical
+clean-VM and cancellation evidence. No fresh installation was repeated just
+to validate the renderer restoration.
+
+| Final implementation check | Result |
+| --- | --- |
+| `scripts/dev` offline tests | 692 passed |
+| `tests/dev` offline tests | 126 passed, 6 skipped |
+| `tests/benchmarks` offline tests | 47 passed |
+| Total offline suite | 871 tests: 865 passed, 6 skipped, 0 failures |
+| Renderer tests (included above) | 16/16 passed |
+| Repeated initialize on healthy VM | 21/21 stages; 20 CACHED, 1 SKIPPED; 59.4 s; zero approvals |
+| Initialize idempotency acceptance | 3/3 passed |
+| Routine startup idempotency acceptance | 3/3 passed |
+| Container, volume, network and migration inventory checks during idempotency | No reported drift or restart |
+| `make health` / `make check-all` | DEVELOPMENT HEALTHY / UNIFIED STACK READY |
+| Reboot recovery (see below) | Exit 0; REBOOT RECOVERY READY; full health passed |
+| Stable-size interactive renderer | Accepted by operator |
+| Terminal resize | Known, accepted visual limitation; no alternate screen or fallback |
+
+### Targeted reboot recovery
+
+Before reboot, all 12 long-running services were running and the one-shot
+Vault storage-permissions helper had exited successfully. Immediately after
+reboot, Vault was sealed, the existing backend-agent was running but
+unhealthy, and PostgreSQL and several application services had stopped.
+Grafana was restarting and its agent was starting. The operator invoked
+`make recover`, entered two distinct shares at the hidden Vault CLI prompts,
+and observed the following sequence:
+
+```text
+PASS: migrations
+WAIT: trusted backend-agent health after Vault unseal (up to 60s polling)
+PASS: backend-agent
+RESUME: backend (existing containers only)
+START: transcendence-app-dev-backend-1
+PASS: backend
+...
+RESULT: UNIFIED STARTUP READY
+RESULT: REBOOT RECOVERY READY
+```
+
+This exercised the previously failing running-but-unhealthy backend-agent
+path, rather than merely recovering an already healthy agent. The waiting
+branch was reached and the full readiness check passed before the backend
+was started. Actual waiting duration was not measured. The exact underlying
+cause of the earlier intermittent agent delay was not established.
+
+The before-reboot, after-reboot and after-recovery container inventories
+contained the same 13 container IDs. After recovery all 12 long-running
+services were running, the helper remained Exited (0), and `make health`
+passed. This confirms no observed container recreation in this run; it is
+not a claim that no containers restarted during reboot, nor an independent
+before/after credential or volume-content comparison. The recovery path
+did not invoke provisioning or migrations; manual Shamir unseal remained
+mandatory. Ordinary `make up` retains its previous policy.
+
+### Historical clean-VM and output evidence
+
+| Tested implementation | Post-enrollment initialization time | Outcome |
+| --- | ---: | --- |
+| V1 | 512.7 s | Failed at Grafana HTTPS |
+| V2 (`a2786a6`) | 569.0 s | 21/21 ready |
+| V3 (`28f5654`) | 563.1 s | 21/21 ready |
+| V4 (`9cee4d4`) | 518.3 s | 21/21 ready |
+| V5 (`67da387`) | 518.1 s | 21/21 ready |
+
+All successful runs above observed zero bootstrap approval prompts.
+A sudo authentication request and a one-time login-session refresh after
+Docker group enrollment are not approvals. The times exclude the initial
+package/enrollment invocation and any reboot or login time. They are
+individual observations at different revisions, not a controlled
+end-to-end comparison with main or a measured speedup attributable to #160.
+The final renderer is byte-identical to V3. Its synthetic benchmark against
+V2 (seven repetitions, 120 columns, 32 rows) measured 464 vs 1745 writes,
+240188 vs 849016 bytes and 336 vs 12432 full-row erases. These are renderer
+workload measurements, not total initialization wall time.
+
+V3 browser tests confirmed trusted application and Grafana HTTPS with no
+browser certificate warning. V3 redirected output contained 46 lines,
+zero ANSI escapes and zero carriage returns; CI, NO_COLOR and successful
+verbose runs also completed. V2 Docker pull cancellation and resume, and
+cancellation before Vault initialization followed by resume of the existing
+Vault container, passed. Read-only cancellation passed in V3 and V4 with
+exit 130 and a subsequent healthy stack. Earlier results are retained as
+evidence for unchanged paths, not represented as new final-commit runs.
+
+### Review and remaining acceptance boundaries
+
+- Review scope is development bootstrap, its tests, benchmark and
+  documentation. No application source, Compose runtime manifests or
+  production deployment files are changed by this issue.
+- Fixed stage dispatch retains the allowlist and held-lock check. Standalone
+  maintenance confirmations remain; no general-purpose yes flag is added.
+  The lock descriptor coordinates cooperative local callers, not a security
+  boundary against the account owner. Docker membership is root-equivalent.
+- The inherited image availability check treats a nonzero Docker image
+  inspect exit as absence; a successful daemon preflight and subsequent
+  image verification are still required. This is not a general guarantee
+  of discriminating every Docker inspection failure from a missing image.
+- Keep terminal dimensions stable for the best interactive display.
+  Reflow during resize can corrupt visible formatting; this was knowingly
+  accepted after comparing V3–V6.
+- The automated critical-section cancellation test exercises real private
+  recovery-file persistence and process signals with a simulated Vault
+  init response. Live cancellation inside the critical section and manual
+  recovery after that specific cancellation remain unverified. Do not
+  equate this with the successful ordinary reboot recovery above.
+- The schema-v2 first-run benchmark and its tests are updated for zero
+  confirmations. A controlled clean-VM benchmark on the final implementation
+  is deferred; no new speedup claim is made.
+- Full GitHub Actions CI remains required before merge. At final review,
+  no workflow/check run was recorded for the tested implementation.
+  The workflow triggers on PRs targeting main, main pushes, or manual
+  dispatch. Local regression results do not substitute for remote CI.
+
+The final documentation-only commit records these results without changing
+the tested implementation. Keep the issue open until the PR is reviewed
+and the required CI checks have passed.
