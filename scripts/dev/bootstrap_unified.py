@@ -554,7 +554,7 @@ def prepare_prerequisites(runner, progress):
     images = str(ROOT / "scripts/dev/bootstrap_images.py")
     progress.begin(0, Phase.CHECK)
     check_code = runner.run([installer, "--initialize-check"], cwd=ROOT, probe=True,
-                            operation="Check local prerequisites")
+                            probe_guard_codes=(3,), operation="Check local prerequisites")
     cached = check_code == 0
     if check_code not in (0, 1):
         runner.report_failure()

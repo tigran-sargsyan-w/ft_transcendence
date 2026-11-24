@@ -59,6 +59,10 @@ NOTICES = {
         'ACTION REQUIRED: Sign out and back in, then rerun make initialize.',
     b'NEVER paste or commit this file. It is NOT safe for a shared/production Vault.':
         'SECURITY: Protect the private Vault recovery file outside the VM and Git.',
+    b'SECURITY: Contains root token and all three shares; protect it outside the VM.':
+        'SECURITY: Protect the private Vault recovery file outside the VM and Git.',
+    b'WARNING: Recovery material exists but Vault container is missing':
+        'WARNING: Recovery material exists but Vault container is missing; inspect existing state.',
     b'ERROR: Unknown untrusted local CA; use explicit host preparation after review':
         'ERROR: Unknown untrusted local CA; review using --prepare-host.',
     b'ERROR: Local CA differs from its initialization record':
@@ -102,6 +106,7 @@ EVENTS = {
     "RESULT: DOCKER RESOURCES READY (read-only)": ("Verify Docker resources", Status.DONE),
     "RESULT: DOCKER RESOURCES READY": ("Verify Docker resources", Status.DONE),
     "STEP: Reserve private Vault recovery file": ("Reserve private Vault recovery file", Status.RUNNING),
+    "PASS: Private Vault recovery file reserved": ("Reserve private Vault recovery file", Status.DONE),
     "STEP: Initialize Vault and persist recovery material": ("Initialize Vault and persist recovery material", Status.RUNNING),
     "PASS: Vault recovery material persisted": ("Initialize Vault and persist recovery material", Status.DONE),
     "PASS: Vault initialized (Shamir 2-of-3)": ("Verify Vault Shamir initialization", Status.DONE),
@@ -139,7 +144,11 @@ EVENTS = {
     "PASS: Loopback HTTP 8080 redirects to HTTPS 8443": ("Verify HTTP to HTTPS redirect", Status.DONE),
     "RESULT: PROMETHEUS READY (read-only)": ("Verify Prometheus metrics readiness", Status.DONE),
     "RETRY: Prometheus HTTP readiness": ("Retry Prometheus metrics readiness", Status.RUNNING),
-    "MISSING: Initial Grafana Vault credentials": ("Initial Grafana credentials not yet created", Status.PENDING),
+    "PASS: Prometheus HTTP readiness retry": ("Retry Prometheus metrics readiness", Status.DONE),
+    "MISSING: Initial Grafana Vault credentials": ("Initial Grafana credentials not yet created", Status.MISSING),
+    "MISSING: Required Docker images": ("Verify required images", Status.MISSING),
+    "NOT READY: Docker daemon inaccessible (service or user permissions)": ("Verify local Docker access", Status.NOT_READY),
+    "RESULT: PREREQUISITES NOT READY (read-only)": ("Verify prerequisites", Status.NOT_READY),
     "CREATED: Grafana Vault credentials": ("Create Grafana credentials", Status.DONE),
     "PRESERVED: Grafana Vault credentials": ("Preserve Grafana credentials", Status.CACHED),
     "PASS: Grafana credential storage permissions": ("Verify Grafana credential storage", Status.DONE),
@@ -161,6 +170,7 @@ EVENTS = {
     "PASS: Grafana HTTPS anonymous access rejected.": ("Verify Grafana HTTPS anonymous access rejection", Status.DONE),
     "PASS: Grafana HTTPS WAF blocking.": ("Verify Grafana HTTPS WAF blocking", Status.DONE),
     "RETRY: Grafana HTTPS upstream readiness": ("Retry Grafana HTTPS upstream readiness", Status.RUNNING),
+    "PASS: Grafana HTTPS readiness retry": ("Retry Grafana HTTPS upstream readiness", Status.DONE),
 }
 EVENTS.update({
     "STEP: Install missing Ubuntu packages": ("Install missing Ubuntu packages", Status.RUNNING),
@@ -173,7 +183,7 @@ for package in ("git", "make", "python3", "openssl", "curl", "ca-certificates",
                 "util-linux", "acl", "mkcert", "libnss3-tools", "Docker CLI",
                 "Docker Compose plugin", "Docker Buildx plugin"):
     EVENTS[("OK: " + package).encode("ascii")] = ("Check " + package, Status.DONE)
-    EVENTS[("MISSING: " + package).encode("ascii")] = ("Check " + package, Status.PENDING)
+    EVENTS[("MISSING: " + package).encode("ascii")] = ("Check " + package, Status.MISSING)
 # Reviewed literal inventory. Never reflect arbitrary Docker resource names.
 for kind, names in (
     ("network", ("transcendence-vault-dev_vault_private", "transcendence-app-dev_default",
@@ -199,6 +209,7 @@ for name in ("transcendence-vault-dev-vault-1", *(
                                   ("START", "Start", Status.DONE)):
         EVENTS[(f"{prefix}: {name}").encode("ascii")] = (f"{label} {name}", status)
 for image in IMAGES:
+    EVENTS[("MISSING: " + image).encode("ascii")] = ("Pull " + image, Status.MISSING)
     EVENTS[("PULL: " + image).encode("ascii")] = ("Pull " + image, Status.RUNNING)
     EVENTS[("PASS: " + image).encode("ascii")] = ("Pull " + image, Status.DONE)
 
@@ -295,6 +306,7 @@ class Diagnostics:
         self.prompt_seen = False
         self.session_refresh = False
         self.events = []
+        self.missing_seen = False
 
     def line(self, stream, value):
         if not value:
@@ -305,14 +317,26 @@ class Diagnostics:
         if value in SESSION_REFRESH:
             self.session_refresh = True
         if value in EVENTS:
+            event = EVENTS[value]
+            if event[1] is Status.MISSING:
+                self.missing_seen = True
             if len(self.events) < 128:
-                self.events.append(EVENTS[value])
+                self.events.append(event)
         if value in NOTICES:
             notice = NOTICES[value]
             if notice.startswith("ERROR:"):
                 self.counts["error"] += 1
+                self.counts["reviewed_error"] += 1
+            elif notice.startswith(("SECURITY:", "WARNING:", "ACTION REQUIRED:")):
+                self.counts["warning"] += 1
+                self.counts["reviewed_warning"] += 1
             if notice not in self.notices:
                 self.notices.append(notice)
+        elif value == b"IMPORTANT: Recovery material stored privately at:" or value.startswith(b"IMPORTANT: Recovery material stored privately at: "):
+            # The path is sensitive and deliberately not reflected; the fixed
+            # security notice already covers the meaning of this message.
+            self.counts["warning"] += 1
+            self.counts["reviewed_warning"] += 1
         elif re.match(rb'^(WARN(?:ING)?[: ]|\[WARN(?:ING)?\]|SECURITY:|IMPORTANT:|ACTION REQUIRED:)', value):
             self.counts['warning'] += 1
         elif re.match(rb'^(ERROR:|\[ERROR\]|FAIL:|RESULT: .*STOPPED)', value):
@@ -352,6 +376,7 @@ class ChildRunner:
         self.verbose = os.environ.get('FT_DEV_BOOTSTRAP_VERBOSE') == '1'
         self.last_returncode = None
         self.last_diagnostics = None
+        self.last_operation = None
 
     def report_failure(self):
         """Expose reviewed reasons from the final failed probe only."""
@@ -360,16 +385,24 @@ class ChildRunner:
         for notice in self.last_diagnostics.notices:
             if notice.startswith("ERROR:") and not self.verbose:
                 self.progress.notice(notice)
+        if self.last_operation is not None:
+            self.progress.substep(self.last_operation, Status.FAILED)
         if not self.verbose:
+            counts = self.last_diagnostics.counts
+            if counts["error"] > counts["reviewed_error"]:
+                self.progress.notice("ERROR: Additional verification diagnostics withheld; use the indicated read-only check.")
             self.progress.notice("Verification failed; use the indicated read-only check for details.")
 
     def run(self, argv, *, cwd, env=None, pass_fds=(), foreground=False,
             critical=False, probe=False, operation="Execute reviewed operation",
-            pause_for_auth=True):
+            pause_for_auth=True, probe_guard_codes=()):
         self.cancellation.check()
         diagnostics = Diagnostics()
         self.last_diagnostics = diagnostics
+        self.last_operation = operation
+        self.last_returncode = None
         started = time.monotonic()
+        reported_steps = {}
         self.progress.substep(operation, Status.RUNNING)
         # Stream Python's reviewed messages promptly instead of at process exit.
         env = {**(os.environ if env is None else env), "PYTHONUNBUFFERED": "1"}
@@ -415,6 +448,7 @@ class ChildRunner:
                                 diagnostics.finish(key.data)
                                 sel.unregister(key.fileobj)
                         for label, status in diagnostics.events:
+                            reported_steps[label] = status
                             self.progress.substep(label, status)
                         diagnostics.events.clear()
                         self.progress.refresh()
@@ -429,16 +463,40 @@ class ChildRunner:
         cancelled = self.cancellation.signum is not None or self.last_returncode in (-2, -15, 130, 143)
         result = (Status.CANCELLED if cancelled else
                   Status.ACTION_REQUIRED if self.last_returncode == 2 and diagnostics.session_refresh else
-                  Status.DONE if self.last_returncode == 0 else Status.FAILED)
+                  Status.DONE if self.last_returncode == 0 else
+                  Status.FAILED if diagnostics.prompt_seen or self.last_returncode in probe_guard_codes else
+                  Status.MISSING if probe and diagnostics.missing_seen else
+                  Status.NOT_READY if probe else Status.FAILED)
+        if diagnostics.prompt_seen:
+            result = Status.FAILED
+        # A child exit alone does not prove every named operation completed.
+        # Close outstanding events without inventing success acknowledgements.
+        for label, status in reported_steps.items():
+            if status is Status.RUNNING and label != operation:
+                self.progress.substep(label, Status.CANCELLED if cancelled else Status.UNCONFIRMED)
         self.progress.substep(operation, result)
         elapsed = time.monotonic() - started
         if diagnostics.prompt_seen:
             self.progress.notice('ERROR: Unexpected initialization approval prompt; stopped safely.')
             raise UnexpectedApproval()
-        if self.verbose or (not probe and (self.last_returncode not in (0, 2) or counts['stderr'] or counts['error'])) or counts['warning']:
+        if self.verbose:
             self.progress.notice(f"{operation}: exit {self.last_returncode} in {elapsed:.1f}s; stdout {counts['stdout']} lines, "
                                  f"stderr {counts['stderr']} lines, warnings {counts['warning']}, "
                                  f"errors {counts['error']}, oversized {counts['oversized']} (raw output withheld)")
+        else:
+            # Do not treat stderr itself as a failure: successful tools such
+            # as mkcert and Docker write normal progress there. Preserve all
+            # reviewed notices and indicate unclassified warning/error lines.
+            warnings = counts["warning"] - counts["reviewed_warning"]
+            errors = counts["error"] - counts["reviewed_error"]
+            if warnings:
+                self.progress.notice(f"WARNING: {operation}: {warnings} additional warning lines withheld; use verbose mode.")
+            if not probe and errors and not cancelled:
+                self.progress.notice(f"ERROR: {operation}: {errors} additional error lines withheld; use verbose mode.")
+            if not probe and result is Status.FAILED:
+                self.progress.notice(f"ERROR: {operation} failed (exit {self.last_returncode}); use verbose mode and the indicated check.")
+            if counts["oversized"]:
+                self.progress.notice(f"WARNING: {operation}: {counts['oversized']} oversized output lines withheld.")
         self.cancellation.check()
         if self.last_returncode in (-signal.SIGINT, -signal.SIGTERM, 130, 143):
             raise InitializationCancelled(signal.SIGINT if self.last_returncode in (-2, 130) else signal.SIGTERM)

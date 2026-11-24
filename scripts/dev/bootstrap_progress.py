@@ -153,6 +153,9 @@ class Progress:
         use cursor movement. Unchanged rows are never erased or rewritten.
         """
         old = self._rows
+        height = max(1, self.height())
+        if len(old) > height:
+            old = old[-height:]
         if old == rows and not suffix:
             return
         cursor = max(0, len(old)-1)
@@ -282,7 +285,8 @@ class Progress:
             return
         if len(self.steps) >= 128 and label not in self.steps:
             self.steps.pop(next(iter(self.steps)))
-        self.steps.pop(label, None)
+        # Preserve row order for status-only updates; a changed status must
+        # not move otherwise unchanged operations around the screen.
         self.steps[label] = status
         if self.verbose:
             self._write(self._step_line(label, status) + "\n")

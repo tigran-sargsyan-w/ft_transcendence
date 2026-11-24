@@ -191,6 +191,7 @@ def persist_recovery_material():
         raise VaultBootstrapError("Cannot reserve private recovery file") from exc
     with fp:
         os.fchmod(fp.fileno(), 0o600)
+        print("PASS: Private Vault recovery file reserved", flush=True)
         try:
             print("STEP: Initialize Vault and persist recovery material", flush=True)
             raw = call([

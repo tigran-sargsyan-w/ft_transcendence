@@ -55,7 +55,7 @@ class ProgressTests(unittest.TestCase):
         progress.begin(1)
         progress.finish(Status.SKIPPED)
         log = output.getvalue()
-        self.assertIn("\r\x1b[2K", log)
+        self.assertIn("\x1b[2K", log)
         self.assertIn("\x1b[36mRUNNING\x1b[0m", log)
         self.assertIn("2.0s | total 2.0s", log)
         self.assertIn("\x1b[32m", log)

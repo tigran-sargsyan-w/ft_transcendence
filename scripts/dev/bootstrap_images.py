@@ -134,6 +134,9 @@ def main(argv=None):
             return 0
 
         if args.mode == "check" and missing:
+            print("MISSING: Required Docker images", flush=True)
+            for image in missing:
+                print("MISSING:", image)
             raise ImageError(
                 "Required images missing: " + ", ".join(missing)
             )

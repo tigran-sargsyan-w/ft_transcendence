@@ -311,6 +311,8 @@ def check_ready():
     for attempt in range(3):
         try:
             check()
+            if attempt:
+                print("PASS: Prometheus HTTP readiness retry", flush=True)
             return
         except PrometheusReadinessError:
             if attempt == 2:

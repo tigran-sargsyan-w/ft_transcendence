@@ -5,6 +5,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from bootstrap_process import Cancellation, ChildRunner, Diagnostics, InitializationCancelled, UnexpectedApproval
 from bootstrap_progress import Status
@@ -42,6 +43,61 @@ class ChildRunnerTests(unittest.TestCase):
         self.assertEqual(d.events, [("Verify Grafana HTTP health", Status.DONE)])
         self.assertEqual(d.notices, ["ERROR: Prometheus incomplete"])
         self.assertEqual(d.counts["error"], 2)
+
+    def test_expected_missing_and_guard_failure_are_distinct(self):
+        for code, message, guard_codes, expected in (
+            (1, "MISSING: mkcert", (3,), Status.MISSING),
+            (1, "NOT READY: Docker daemon inaccessible (service or user permissions)", (3,), Status.NOT_READY),
+            (3, "MISSING: mkcert", (3,), Status.FAILED),
+            (1, "ERROR: unexpected", (), Status.NOT_READY),
+        ):
+            with self.subTest(code=code, message=message):
+                display = Display()
+                runner = ChildRunner(display, Cancellation())
+                script = f"print({message!r}); raise SystemExit({code})"
+                self.assertEqual(runner.run([sys.executable, "-c", script], cwd=Path.cwd(),
+                                            probe=True, probe_guard_codes=guard_codes,
+                                            operation="Check prerequisites"), code)
+                self.assertEqual(display.steps[-1], ("Check prerequisites", expected))
+                runner.report_failure()
+                self.assertEqual(display.steps[-1], ("Check prerequisites", Status.FAILED))
+
+    def test_normal_diagnostics_omit_success_stats_but_keep_warnings(self):
+        display = Display()
+        with patch.dict(os.environ, {"FT_DEV_BOOTSTRAP_VERBOSE": "0"}):
+            runner = ChildRunner(display, Cancellation())
+            script = "import sys; print('ordinary progress', file=sys.stderr)"
+            self.assertEqual(runner.run([sys.executable, "-c", script], cwd=Path.cwd()), 0)
+            self.assertEqual(display.notices, [])
+            script = "print('WARNING: private-value'); print('ERROR: private-value')"
+            self.assertEqual(runner.run([sys.executable, "-c", script], cwd=Path.cwd()), 0)
+            self.assertTrue(any("additional warning" in notice for notice in display.notices))
+            self.assertTrue(any("additional error" in notice for notice in display.notices))
+            self.assertNotIn("private-value", str(display.notices))
+        with patch.dict(os.environ, {"FT_DEV_BOOTSTRAP_VERBOSE": "1"}):
+            runner = ChildRunner(display, Cancellation())
+            self.assertEqual(runner.run([sys.executable, "-c", "print('ordinary progress')"],
+                                        cwd=Path.cwd()), 0)
+            self.assertTrue(any("exit 0 in" in notice for notice in display.notices))
+
+    def test_unfinished_event_is_not_reported_as_done(self):
+        display = Display()
+        runner = ChildRunner(display, Cancellation())
+        script = "print('STEP: Verify Grafana container identity')"
+        self.assertEqual(runner.run([sys.executable, "-c", script], cwd=Path.cwd()), 0)
+        self.assertIn(("Verify Grafana container identity", Status.UNCONFIRMED), display.steps)
+        self.assertNotIn(("Verify Grafana container identity", Status.DONE), display.steps)
+
+    def test_vault_reservation_and_persistence_have_explicit_completion(self):
+        d = Diagnostics()
+        d.feed(0, b"STEP: Reserve private Vault recovery file\nPASS: Private Vault recovery file reserved\n"
+                  b"STEP: Initialize Vault and persist recovery material\nPASS: Vault recovery material persisted\n")
+        self.assertEqual(d.events, [
+            ("Reserve private Vault recovery file", Status.RUNNING),
+            ("Reserve private Vault recovery file", Status.DONE),
+            ("Initialize Vault and persist recovery material", Status.RUNNING),
+            ("Initialize Vault and persist recovery material", Status.DONE),
+        ])
 
     def test_session_refresh_requires_exact_marker(self):
         d = Diagnostics()

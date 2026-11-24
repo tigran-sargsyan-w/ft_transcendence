@@ -217,6 +217,8 @@ def check_ready():
     for attempt in range(3):
         try:
             check()
+            if attempt:
+                print("PASS: Grafana HTTPS readiness retry", flush=True)
             return
         except GrafanaHTTPSReadinessError:
             if attempt == 2:
