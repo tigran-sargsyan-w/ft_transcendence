@@ -52,9 +52,7 @@ setup:
 
 # Host-only checks. Use `make health` to validate the whole application.
 check:
-	$(PYTHON) -m scripts.dev.domains check
-	$(PYTHON) -m scripts.dev.certificates check
-	$(PYTHON) -m scripts.dev.ca_trust check
+	$(PYTHON) -m scripts.dev.bootstrap_host_check
 
 # Legacy raw-Compose maintenance operations: NOT part of trusted recovery.
 # These may leave an initialized runtime unable to resume via --start.

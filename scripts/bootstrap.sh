@@ -253,6 +253,24 @@ if [[ "$MODE" == --initialize ]]; then
   exec python3 scripts/dev/bootstrap_unified.py initialize
 fi
 
+# The existing read-only dependency check is presented by the routine CLI
+# together with its original second preflight. The shell guards above remain.
+case "$MODE" in
+  --start)         routine_mode=start ;;
+  --recover)       routine_mode=recover ;;
+  --check-all)     routine_mode=check ;;
+  --health-report) routine_mode=health-report ;;
+  *)               routine_mode="" ;;
+esac
+if [[ -n "$routine_mode" ]]; then
+  # Preserve the existing prerequisite failure on a host without Python.
+  if ! command -v python3 >/dev/null 2>&1; then
+    ./scripts/install-deps.sh --check || fail "Dependencies not ready; use make initialize on a fresh VM"
+    fail "Python 3 unavailable; inspect the prerequisite report"
+  fi
+  exec python3 scripts/dev/bootstrap_unified.py "$routine_mode" --shell-entry
+fi
+
 say "=== Fresh Ubuntu bootstrap: host + Docker resources ==="
 if [[ "$MODE" == --upgrade-waf ]]; then
   # Only explicitly approved initialization/maintenance installs packages.
@@ -279,18 +297,6 @@ case "$MODE" in
   --orchestrator-preflight)
     # Internal read-only entry: all standard shell guards above still run.
     say "RESULT: ORCHESTRATOR PREFLIGHT READY (read-only)"
-    ;;
-  --start)
-    python3 scripts/dev/bootstrap_unified.py start
-    ;;
-  --recover)
-    python3 scripts/dev/bootstrap_unified.py recover
-    ;;
-  --check-all)
-    python3 scripts/dev/bootstrap_unified.py check
-    ;;
-  --health-report)
-    python3 scripts/dev/bootstrap_unified.py health-report
     ;;
   --plan)
     if host_check; then

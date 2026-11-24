@@ -88,7 +88,92 @@ make health
 make check-all
 ```
 
-`make check` checks **only** the host domain, Nginx certificate and OS CA trust (legacy helper); use `make health` for the full runtime. `make acceptance` is an **opt-in** validation that repeatedly calls safe `--start` on an already healthy VM and compares container, persistent volume, network and Prisma migration-history metadata. It is not needed on every login.
+`make check` checks **only** the host domain, Nginx certificate and OS CA trust; use `make health` for the full runtime. `make acceptance` is an **opt-in** validation that repeatedly calls safe `--start` on an already healthy VM and compares container, persistent volume, network and Prisma migration-history metadata. It is not needed on every login.
+
+### Shared bootstrap progress (Issue #165)
+
+`make up` / `make start`, `make recover`, `make health`, `make check-all`
+and the host-only `make check` reuse the V3 inline progress renderer from
+#160. Their stages describe real operations and use actual elapsed time.
+The startup fast path still uses the existing transitive Nginx and
+monitoring checks; it does not run extra per-service probes just to
+populate the display. If necessary, the existing-container resume path
+appears as a separate stage with nested checks and operations.
+
+CACHED means an existing check established readiness without a change.
+DONE means the represented operation completed; SKIPPED is an unneeded
+operation, not a readiness assertion. NOT READY is a nonfatal intermediate
+stage result only in routine startup/recovery when the existing optional
+UI or fast-path policy permits continuing. The overall RESULT marker and
+exit code remain authoritative. Health/check commands still fail closed.
+The progress count measures completed stages, not the number of healthy
+services.
+
+Redirected output, CI, NO_COLOR, verbose and timing modes use plain logs.
+For example:
+
+```sh
+FT_DEV_BOOTSTRAP_VERBOSE=1 make health
+FT_DEV_STAGE_TIMING=1 make up
+NO_COLOR=1 make check-all
+```
+
+Verbose mode includes reviewed orchestration events, retry attempts and
+safe existing lifecycle messages. It does not forward raw subprocess
+output. If a host-only check fails, run the named `python3 -m
+scripts.dev.<module> check` helper locally for detailed diagnostics. For
+runtime failures use the indicated `./scripts/bootstrap.sh --check-*`
+entry point. Do not share unreviewed output or recovery material.
+
+The renderer pauses for manual Shamir unseal; Vault CLI retains the real
+controlling terminal and hidden prompts. The timer thread is presentation
+only and is joined at exit. The original V3 visual limitation during
+terminal resize remains; keep terminal dimensions stable. The separate
+plan/acceptance and Vault UI presentation follow-ups are #166 and #167;
+their behavior is not changed by #165.
+
+#### Issue #165 acceptance (2026-11-24)
+
+Tested implementation: `28a4342d3fffb368eb15fa6dc903aa7fe4de0e8e`,
+on an existing Ubuntu 26.04 LTS amd64 VirtualBox development VM.
+No clean installation was required for this presentation follow-up.
+
+| Check | Observed result |
+| --- | --- |
+| Offline regression | 897 tests: 891 passed, 6 skipped, 0 failures |
+| Renderer / CLI presentation / unified targeted suites | 21/21, 20/20, 90/90 passed (included above) |
+| Host-only check | 3/3 stages, 0.3 s |
+| Check-all | 8/8 stages, 26.1 s |
+| Health | 8/8 stages, 24.1 s |
+| Up / start on healthy stack | 8/8 stages, 24.6 s / 24.3 s |
+| Recover on unsealed healthy stack | 13/13 stages, 26.2 s |
+| Redirected health output | Exit 0, 20 lines, zero ANSI escapes or carriage returns, 23.0 s |
+| CI-mode up / NO_COLOR check-all / verbose health | Ready, 23.8 s / 23.0 s / 24.1 s |
+| Ctrl+C during health Application HTTPS | CANCELLED, 3/8 completed, exit 130, 2.3 s; subsequent health ready in 21.9 s |
+| Startup idempotency | 3/3 passed; no container recreation, restart or migration-history drift reported |
+| Interactive recovery after reboot | Renderer pause/resume and hidden Shamir prompts passed; first recovery stopped on known #155; second recovery succeeded |
+| Container identity after recovery | 14/14 IDs preserved; optional Vault UI remained disabled |
+| Post-recovery health | 8/8 stages, 21.0 s |
+
+The first post-reboot recovery completed 12/13 stages and stopped after
+167.2 s (including 49.1 s for the operator-assisted unseal), with
+`nginx is already running but unhealthy; manual review required`.
+A second recovery completed 13/13 stages in 27.6 s, without another
+unseal or manual resource repair. The final health check passed.
+This reproduces the pre-existing #155; it is **not** a first-attempt
+recovery pass. The underlying failing Nginx/transitive readiness
+condition has not been identified. The recovery guard remains unchanged
+and its failure is correctly displayed. See the [recovery guide](dev-reboot-recovery.md).
+
+Stable-size interactive output was visually inspected in the VM. The
+known V3 resize limitation was retained; no new resize test was required.
+The timing observations are individual runs, not a controlled performance
+comparison against main. Live initialization on this revision was not
+repeated; offline initialization regression coverage passed and the
+default renderer contract is retained. Live cancellation was exercised
+on the read-only health path; other cancellation and failure boundaries
+have offline coverage. Full remote GitHub Actions CI and team review
+remain required before merge.
 
 ## After a VM restart: operator-assisted recovery
 
