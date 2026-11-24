@@ -103,7 +103,7 @@ class Progress:
         self.live = live_enabled(self.stream, env) and interactive is not False
         if not isinstance(profile, ProgressProfile):
             raise ValueError("Expected a reviewed progress profile")
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 -]{0,119}", header):
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _-]{0,119}", header):
             raise ValueError("Expected a static command header")
         self.profile = profile
         # Only routine startup may record a nonfatal readiness result before

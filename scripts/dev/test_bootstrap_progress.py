@@ -83,6 +83,18 @@ class ProgressTests(unittest.TestCase):
         self.assertIn("Check stack NOT READY", output.getvalue())
         self.assertIn("Finished 2/2 stages", output.getvalue())
 
+    def test_project_name_is_valid_in_every_routine_header(self):
+        from bootstrap_unified import ROUTINE_PRESENTATION
+
+        output = io.StringIO()
+        Progress(("Vault",), stream=output)
+        self.assertEqual(output.getvalue(), "[+] Initializing ft_transcendence\n")
+        for header, labels in ROUTINE_PRESENTATION.values():
+            with self.subTest(header=header):
+                output = io.StringIO()
+                Progress(("System prerequisites",) + labels, stream=output, header=header)
+                self.assertEqual(output.getvalue(), "[+] " + header + "\n")
+
     def test_profile_and_header_reject_unreviewed_controls(self):
         for kwargs in ({"profile": "compact"}, {"header": "Bad\x1b[2J"},
                        {"header": "Bad\nheader"}):
