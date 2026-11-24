@@ -71,7 +71,7 @@ def emit_result(message, status, *, stream=None, env=None):
 
 
 class Progress:
-    """Inline progress with fail-safe append-only mode after a resize.
+    """Inline progress; rebuild the transient preview after terminal resize.
 
     All strings from callers must be reviewed static labels, never raw child
     output. Plain mode is append-only; verbose keeps reviewed substeps.
@@ -97,6 +97,7 @@ class Progress:
         self._report_width = None
         self._needs_report = False
         self._resized = False
+        self._settle_until = float("-inf")
         self._last_refresh = float("-inf")
         self.steps = {}
         self.width = terminal_width or (lambda: self._size().columns)
@@ -189,29 +190,32 @@ class Progress:
     def _size_key(self):
         return max(1, self.width()-1), max(1, self.height())
 
-    def _abandon_preview(self, reason="Terminal resized"):
-        """The old cursor anchor is no longer trustworthy; never seek it."""
+    def _detach_preview(self):
+        """Leave the invalidated preview behind, not the inline renderer.
+
+        Never seek backwards through reflowed rows. Start a fresh transient
+        region after the resize burst settles. A stale preview can remain in
+        scrollback, but stage transitions must not become a verbose log.
+        """
         if self._rows:
-            # Leave the last preview as historical output. A newline is safe
-            # even if the emulator reflowed its last row.
-            self._write("\n")
+            # Explicit CR+LF, not LF alone: some emulators retain a nonzero
+            # cursor column when the old progress bar reflows.
+            self._write("\r\n")
         self._rows = []
-        self._inline = False
         self._geometry = None
         self._needs_report = True
-        self._write(f"NOTICE: {reason}; continuing with append-only progress. "
-                    "Final stage report follows at exit.\n")
-        if self.active is not None and self.stages[self.active].status is Status.RUNNING:
-            self._plain_transition()
+        self._resized = False
+        self._settle_until = self.clock() + .3
 
     def _check_geometry(self, geometry):
         if not self._inline:
             return False
         if self._rows and (self._resized or geometry != self._geometry):
-            self._abandon_preview()
+            self._detach_preview()
             return False
-        if not self._rows:
+        if self._resized:
             self._resized = False
+            self._settle_until = self.clock() + .3
         return True
 
     @contextmanager
@@ -242,7 +246,7 @@ class Progress:
                 self._write(suffix)
             return
         if geometry != self._size_key() or self._resized:
-            self._abandon_preview()
+            self._detach_preview()
             if suffix:
                 self._write(suffix)
             return
@@ -286,9 +290,9 @@ class Progress:
         chunks.append(suffix)
         # Check again immediately before emitting relative movement. SIGWINCH
         # may still race a terminal write; there is no atomic resize-and-write
-        # primitive. Never reuse the anchor once a resize is observed.
+        # primitive. Never reuse the old anchor once a resize is observed.
         if self._resized or self._size_key() != geometry:
-            self._abandon_preview()
+            self._detach_preview()
             if suffix:
                 self._write(suffix)
             return
@@ -342,11 +346,15 @@ class Progress:
         geometry = self._size_key()
         if not self._check_geometry(geometry):
             return
-        if geometry[0] < 33 or geometry[1] < 4:
-            self._abandon_preview("Terminal too small")
-            return
         now = self.clock()
-        if not force and now-self._last_refresh < .2:
+        # At impractically small dimensions, omit only the transient preview.
+        # Durable stage results remain visible; expanding the window restores
+        # normal rendering. Do not switch to plain phase-transition logging.
+        if geometry[0] < 33 or geometry[1] < 4:
+            return
+        if now < self._settle_until:
+            return
+        if not force and self._rows and now-self._last_refresh < .2:
             return
         self._last_refresh = now
         width, height = geometry

@@ -149,9 +149,9 @@ class ProgressTests(unittest.TestCase):
         progress = self.progress(output, width=20)
         progress.begin(0)
         self.assertEqual(progress.drawn, 0)
-        self.assertFalse(progress._inline)
+        self.assertTrue(progress._inline)
         self.assertNotIn("\r", output.getvalue())
-        self.assertIn("Terminal too small", output.getvalue())
+        self.assertNotIn("append-only", output.getvalue())
 
     def test_pause_erases_active_region_and_substeps_are_transient(self):
         output = Terminal()
@@ -263,9 +263,13 @@ class ProgressTests(unittest.TestCase):
         self.now = 1
         progress.refresh()
         self.assertEqual(progress.drawn, 0)
-        self.assertFalse(progress._inline)
+        self.assertTrue(progress._inline)
+        self.now = 1.4
+        progress.refresh()
+        self.assertGreater(progress.drawn, 0)
+        self.assertTrue(all(len(strip(row)) < width for row in progress._rows))
 
-    def test_resize_abandons_cursor_anchor_and_appends_final_report(self):
+    def test_resize_reanchors_inline_preview_and_appends_final_report(self):
         import re
         output = Terminal()
         width, height = 120, 32
@@ -285,23 +289,34 @@ class ProgressTests(unittest.TestCase):
             width, height = 40, 7
             progress.refresh()
             self.assertEqual(progress.drawn, 0)
-            self.assertFalse(progress._inline)
+            self.assertTrue(progress._inline)
+            # Never seek the old frame. Repeated refresh requests during
+            # the resize burst must not produce a new snapshot per request.
+            self.assertEqual(output.getvalue()[before:], "\r\n")
             width, height = 150, 45
             progress.refresh()
+            self.assertEqual(output.getvalue()[before:], "\r\n")
+            self.now = 2.4
+            progress.refresh()
+            self.assertGreater(progress.drawn, 0)
+            live = "\n".join(progress._rows)
+            self.assertIn("    => => Verify identity", live)
+            self.assertIn("PENDING", live)
+            self.assertIn("elapsed", live)
+            progress.phase(Phase.VERIFY)
+            progress.substep("Verify credential access", Status.DONE)
+            self.now = 3
+            progress.refresh()
+            self.assertIn("    => => Verify credential access", "\n".join(progress._rows))
             progress.notice("SECURITY: Preserve recovery material.")
             progress.finish(Status.CANCELLED)
             progress.summary()
         tail = output.getvalue()[before:]
-        self.assertNotIn("\r", tail)
-        self.assertNotRegex(tail, r"\x1b\[[0-9;?]*[ABHJK]")
         self.assertNotIn("\x1b[?1049", output.getvalue())
-        self.assertIn("append-only progress", tail)
+        self.assertNotIn("append-only progress", tail)
         heading = "[+] Final stage report (actual results; previous progress above)\n"
         self.assertEqual(tail.count(heading), 1)
-        journal, report = tail.split(heading, 1)
-        self.assertIn("Final stage report follows at exit.", journal)
-        self.assertIn("[02/04]", journal)
-        report = re.sub(r"\x1b\[[0-9;]*m", "", report)
+        report = re.sub(r"\x1b\[[0-9;]*m", "", tail.split(heading, 1)[1])
         self.assertEqual(report.count("[01/04]"), 1)
         self.assertEqual(report.count("[02/04]"), 1)
         self.assertIn("total 1.0s", report)
@@ -310,6 +325,28 @@ class ProgressTests(unittest.TestCase):
         self.assertNotIn("Verify identity", report)
         rows = [line for line in report.splitlines() if line.startswith(" =>")]
         self.assertEqual(rows[0].index("CACHED"), rows[1].index("CANCELLED"))
+
+    def test_tiny_terminal_recovers_live_substeps_when_expanded(self):
+        output = Terminal()
+        width, height = 20, 3
+        progress = Progress(("Vault", "PostgreSQL"), stream=output,
+                            clock=lambda: self.now, env={"TERM": "xterm"},
+                            terminal_width=lambda: width, terminal_height=lambda: height)
+        progress.begin(0, Phase.CHECK)
+        progress.phase(Phase.PREPARE)
+        progress.substep("Verify identity", Status.RUNNING)
+        self.assertEqual(progress.drawn, 0)
+        self.assertTrue(progress._inline)
+        self.assertNotIn("RUNNING", output.getvalue())
+        width, height = 120, 32
+        self.now = 1
+        progress.refresh()
+        self.assertIn("    => => Verify identity", "\n".join(progress._rows))
+        progress.finish(Status.DONE)
+        progress.begin(1, Phase.CHECK)
+        progress.finish(Status.CACHED)
+        progress.summary()
+        self.assertNotIn("append-only", output.getvalue())
 
     def test_height_only_resize_before_notice_never_moves_cursor(self):
         output = Terminal()
@@ -324,7 +361,7 @@ class ProgressTests(unittest.TestCase):
         progress.finish(Status.FAILED)
         progress.summary()
         tail = output.getvalue()[before:]
-        self.assertNotIn("\r", tail)
+        self.assertTrue(tail.startswith("\r\n"))
         self.assertNotRegex(tail, r"\x1b\[[0-9;?]*[ABHJK]")
         self.assertIn("Preserve recovery material.", tail)
         self.assertIn("Final stage report", tail)
@@ -341,8 +378,8 @@ class ProgressTests(unittest.TestCase):
                 (119, 10), (119, 10), (119, 10), (79, 10)]):
             progress.refresh()
         tail = output.getvalue()[before:]
-        self.assertFalse(progress._inline)
-        self.assertNotIn("\r", tail)
+        self.assertTrue(progress._inline)
+        self.assertEqual(tail, "\r\n")
         self.assertNotRegex(tail, r"\x1b\[[0-9;?]*[ABHJK]")
 
     def test_resize_signal_invalidates_anchor_even_when_geometry_returns(self):
@@ -358,7 +395,7 @@ class ProgressTests(unittest.TestCase):
             progress.finish(Status.CACHED)
             progress.summary()
         tail = output.getvalue()[before:]
-        self.assertNotIn("\r", tail)
+        self.assertTrue(tail.startswith("\r\n"))
         self.assertNotRegex(tail, r"\x1b\[[0-9;?]*[ABHJK]")
         self.assertIn("Final stage report", tail)
 
