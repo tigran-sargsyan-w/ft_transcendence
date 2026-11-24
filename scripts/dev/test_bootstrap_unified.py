@@ -335,6 +335,82 @@ class UnifiedTests(unittest.TestCase):
             with self.assertRaisesRegex(unified.UnifiedStartupError, "already running but unhealthy"):
                 unified.guard_resume("postgres")
 
+    def test_recovery_wait_only_for_running_backend_agent(self):
+        targets = (("agent", "id", lambda _: None, "running"),)
+        error = unified.RunningNotReady("backend-agent", targets)
+        with patch.object(unified, "checked", return_value=False), \
+             patch.object(unified, "guard_resume", side_effect=error), \
+             patch.object(unified, "wait_recovery_backend_agent") as wait, \
+             patch.object(unified, "start_existing_only") as start:
+            with self.assertRaises(unified.RunningNotReady):
+                unified.resume("backend-agent")
+            with self.assertRaises(unified.RunningNotReady):
+                unified.resume("backend", recovery=True)
+            wait.assert_not_called()
+            unified.resume("backend-agent", recovery=True)
+            wait.assert_called_once_with(targets)
+            start.assert_not_called()
+
+    def test_recovery_wait_pins_identity_and_checks_full_readiness(self):
+        agent = types.ModuleType("bootstrap_backend_agent")
+        agent.NAME = "agent"
+        def item(health, identity="retained"):
+            return {"Id": identity, "State": {"Status": "running", "Running": True,
+                                               "Health": {"Status": health}}}
+        agent.inspect_agent = MagicMock(side_effect=[item("unhealthy"), item("starting"),
+                                                     item("healthy"), item("healthy")])
+        verify = MagicMock()
+        with patch.dict("sys.modules", {"bootstrap_backend_agent": agent}), \
+             patch.object(unified.time, "sleep") as sleep, \
+             patch.object(unified, "require") as require, \
+             patch.object(unified.subprocess, "run") as run, \
+             contextlib.redirect_stdout(io.StringIO()):
+            unified.wait_recovery_backend_agent((("agent", "retained", verify, "running"),))
+        self.assertEqual(verify.call_count, 4)
+        self.assertEqual(sleep.call_count, 2)
+        require.assert_called_once_with("backend-agent")
+        run.assert_not_called()
+
+    def test_recovery_wait_refuses_changed_identity_and_unexpected_state(self):
+        agent = types.ModuleType("bootstrap_backend_agent")
+        agent.NAME = "agent"
+        for item in (None, {"Id": "replacement"}, {"Id": "retained", "State": {
+                "Running": False, "Status": "exited"}}, {"Id": "retained", "State": {
+                "Running": True, "Status": "running", "Health": {"Status": "none"}}}):
+            with self.subTest(item=item):
+                agent.inspect_agent = MagicMock(return_value=item)
+                with patch.dict("sys.modules", {"bootstrap_backend_agent": agent}), \
+                     patch.object(unified, "require") as require, \
+                     patch.object(unified.time, "sleep") as sleep:
+                    with self.assertRaises(unified.UnifiedStartupError):
+                        unified.wait_recovery_backend_agent((("agent", "retained", lambda _: None, "running"),))
+                require.assert_not_called()
+                sleep.assert_not_called()
+
+    def test_recovery_wait_expires_and_does_not_retry_security_failure(self):
+        agent = types.ModuleType("bootstrap_backend_agent")
+        agent.NAME = "agent"
+        item = {"Id": "retained", "State": {"Running": True, "Status": "running",
+                                           "Health": {"Status": "unhealthy"}}}
+        agent.inspect_agent = MagicMock(return_value=item)
+        targets = (("agent", "retained", lambda _: None, "running"),)
+        with patch.dict("sys.modules", {"bootstrap_backend_agent": agent}), \
+             patch.object(unified.time, "monotonic", side_effect=[0, 61]), \
+             patch.object(unified.time, "sleep") as sleep, \
+             patch.object(unified, "require") as require:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "wait expired"):
+                unified.wait_recovery_backend_agent(targets)
+            sleep.assert_not_called()
+            require.assert_not_called()
+        item["State"]["Health"]["Status"] = "healthy"
+        with patch.dict("sys.modules", {"bootstrap_backend_agent": agent}), \
+             patch.object(unified, "require", side_effect=unified.UnifiedStartupError("security check failed")) as require, \
+             patch.object(unified.time, "sleep") as sleep:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "security check failed"):
+                unified.wait_recovery_backend_agent(targets)
+            require.assert_called_once_with("backend-agent")
+            sleep.assert_not_called()
+
     def test_resume_does_not_run_helper_if_guard_fails(self):
         with patch.object(unified, "checked", return_value=False), \
              patch.object(unified, "guard_resume", side_effect=unified.UnifiedStartupError("stop")), \
@@ -731,7 +807,7 @@ class UnifiedTests(unittest.TestCase):
         with patch.object(unified, "require", side_effect=lambda name: events.append("require:" + name)), \
              patch.object(unified, "recovery_vault", side_effect=lambda: ("vault", {"sealed": True})), \
              patch.object(unified, "interactive_unseal", side_effect=lambda *_: events.append("unseal")), \
-             patch.object(unified, "start", side_effect=lambda: events.append("start")), \
+             patch.object(unified, "start", side_effect=lambda *, recovery: events.append("start" if recovery else "wrong mode")), \
              contextlib.redirect_stdout(io.StringIO()):
             unified.recover()
         self.assertEqual(events, ["require:host", "require:resources", "unseal", "require:vault", "start"])

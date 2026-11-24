@@ -63,6 +63,8 @@ RESUMABLE = (
 )
 READ_ONLY_ATTEMPTS = 3
 READ_ONLY_RETRY_DELAY = 1
+RECOVERY_AGENT_WAIT = 60
+RECOVERY_AGENT_POLL = 2
 
 
 
@@ -116,6 +118,14 @@ class SessionRefreshRequired(Exception):
 
 class UnifiedStartupError(Exception):
     """Public diagnostic intentionally contains no subprocess output or secrets."""
+
+
+class RunningNotReady(UnifiedStartupError):
+    """Identity was verified, but the routine readiness probe failed."""
+
+    def __init__(self, name, targets):
+        super().__init__(f"{name} is already running but unhealthy; manual review required")
+        self.targets = targets
 
 
 def command(flag, *, quiet=False, runner=None, lock_fd=None):
@@ -341,7 +351,7 @@ def guard_resume(name):
             raise UnifiedStartupError(f"Missing trusted Docker ID: {container_name}")
         verified.append((container_name, item["Id"], verify, state))
     if all(state == "running" for _, _, _, state in verified):
-        raise UnifiedStartupError(f"{name} is already running but unhealthy; manual review required")
+        raise RunningNotReady(name, tuple(verified))
     return tuple(verified)
 
 
@@ -402,12 +412,69 @@ def start_existing_only(name, targets):
         raise UnifiedStartupError(f"Cannot acquire startup/migration lock for {name}") from None
 
 
-def resume(name):
+def wait_recovery_backend_agent(targets):
+    """Only explicit reboot recovery may wait for an already-running agent.
+
+    Do not restart, replace, provision, rotate or accept a failed security
+    check. Pin the verified container ID throughout the bounded read-only
+    wait, and require the full existing readiness check before continuing.
+    """
+    import bootstrap_backend_agent as agent
+
+    if len(targets) != 1:
+        raise UnifiedStartupError("Unexpected backend-agent recovery inventory")
+    name, expected_id, verify, state = targets[0]
+    if name != agent.NAME or state != "running":
+        raise UnifiedStartupError("Unexpected backend-agent recovery target")
+
+    def inspect_health():
+        try:
+            item = agent.inspect_agent()
+            if item is None or item.get("Id") != expected_id:
+                raise UnifiedStartupError("Backend-agent identity changed during recovery")
+            if verify_stopped_container(item, verify, name) != "running":
+                raise UnifiedStartupError("Backend-agent stopped during recovery")
+            health = ((item.get("State") or {}).get("Health") or {}).get("Status")
+            if health not in ("starting", "unhealthy", "healthy"):
+                raise UnifiedStartupError("Unexpected backend-agent health state")
+            return health
+        except UnifiedStartupError:
+            raise
+        except Exception:
+            raise UnifiedStartupError("Backend-agent recovery inspection failed; manual review required") from None
+
+    deadline = time.monotonic() + RECOVERY_AGENT_WAIT
+    # Bound polling even if a clock is mocked or a check returns immediately.
+    attempts = RECOVERY_AGENT_WAIT // RECOVERY_AGENT_POLL + 1
+    for attempt in range(attempts):
+        health = inspect_health()
+        if health == "healthy":
+            if time.monotonic() > deadline:
+                break
+            require("backend-agent")
+            if inspect_health() != "healthy":
+                raise UnifiedStartupError("Backend-agent readiness changed during recovery")
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or attempt + 1 == attempts:
+            break
+        if attempt == 0:
+            print("WAIT: trusted backend-agent health after Vault unseal (up to 60s polling)", flush=True)
+        time.sleep(min(RECOVERY_AGENT_POLL, remaining))
+    raise UnifiedStartupError("Backend-agent health wait expired; inspect --check-backend-agent; no restart attempted")
+
+
+def resume(name, *, recovery=False):
     if checked(name):
         print(f"KEEP: {name} ready", flush=True)
         return
     try:
         targets = guard_resume(name)
+    except RunningNotReady as exc:
+        if not recovery or name != "backend-agent":
+            raise
+        wait_recovery_backend_agent(exc.targets)
+        return
     except UnifiedStartupError:
         raise
     except Exception:
@@ -543,8 +610,8 @@ def recover():
     vault, seal = recovery_vault()
     interactive_unseal(vault, seal)
     require("vault")
-    # Reuse Phase 6A's guarded, non-provisioning application recovery path.
-    start()
+    # Reuse the guarded, non-provisioning application recovery path.
+    start(recovery=True)
     print("RESULT: REBOOT RECOVERY READY", flush=True)
 
 
@@ -647,7 +714,7 @@ def initialize(lock_fd, *, cancellation=None):
         emit_result("UNIFIED INITIALIZATION READY", Status.DONE)
 
 
-def start():
+def start(*, recovery=False):
     print("=== Vault-backed routine startup (no provisioning or migrations) ===", flush=True)
     require("host")
     require("resources")
@@ -680,7 +747,10 @@ def start():
         if name == "vault":
             require(name)
         elif name in RESUMABLE:
-            resume(name)
+            if recovery and name == "backend-agent":
+                resume(name, recovery=True)
+            else:
+                resume(name)
         else:
             require(name)
     print("RESULT: UNIFIED STARTUP READY", flush=True)
