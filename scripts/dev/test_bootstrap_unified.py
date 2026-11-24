@@ -117,6 +117,24 @@ class UnifiedTests(unittest.TestCase):
             progress.begin(index)
             progress.finish(unified.Status.DONE)
 
+    def test_ready_prerequisites_are_cached_without_privileged_install(self):
+        runner = MagicMock()
+        runner.run.return_value = 0
+        progress = MagicMock()
+        unified.prepare_prerequisites(runner, progress)
+        self.assertEqual([call.args[0][-1] for call in runner.run.call_args_list],
+                         ["--initialize-check", "--orchestrator-preflight", "preflight", "check"])
+        self.assertEqual(progress.finish.call_args_list,
+                         [call(unified.Status.CACHED), call(unified.Status.CACHED)])
+
+    def test_session_refresh_does_not_continue_to_images(self):
+        runner = MagicMock()
+        runner.run.side_effect = [1, 2]
+        runner.last_diagnostics.session_refresh = True
+        with self.assertRaises(unified.SessionRefreshRequired):
+            unified.prepare_prerequisites(runner, MagicMock())
+        self.assertEqual(runner.run.call_count, 2)
+
     def test_initialization_all_ready_without_tty_has_no_apply(self):
         with patch.object(unified.sys.stdin, "isatty", return_value=False), \
              patch.object(unified, "prepare_prerequisites", side_effect=self.fake_prerequisites), \

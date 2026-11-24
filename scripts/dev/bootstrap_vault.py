@@ -179,6 +179,7 @@ def ensure_private_dir():
 def persist_recovery_material():
     # Reserve the private destination *before* calling operator init, to avoid
     # initializing Vault when no safe output destination exists.
+    print("STEP: Reserve private Vault recovery file", flush=True)
     ensure_private_dir()
     if RECOVERY.exists():
         raise VaultBootstrapError(
@@ -191,6 +192,7 @@ def persist_recovery_material():
     with fp:
         os.fchmod(fp.fileno(), 0o600)
         try:
+            print("STEP: Initialize Vault and persist recovery material", flush=True)
             raw = call([
                 "docker", "exec", NAME,
                 "vault", "operator", "init", "-key-shares=3", "-key-threshold=2", "-format=json",
@@ -226,6 +228,7 @@ def persist_recovery_material():
     finally:
         os.close(dir_fd)
 
+    print("PASS: Vault recovery material persisted", flush=True)
     return shares
 
 
@@ -240,6 +243,7 @@ def initialize_vault():
     print("SECURITY: Contains root token and all three shares; protect it outside the VM.", flush=True)
     print("NEVER paste or commit this file. It is NOT safe for a shared/production Vault.", flush=True)
 
+    print("STEP: Initial Vault unseal", flush=True)
     for index, share in enumerate(shares[:2], 1):
         call([
             "docker", "exec", "-i", NAME, "vault", "write", "sys/unseal", "-",

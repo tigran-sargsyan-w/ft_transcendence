@@ -8,6 +8,13 @@ import signal
 import subprocess
 import time
 
+if __package__:
+    from .bootstrap_progress import Status
+    from .bootstrap_images import IMAGES
+else:
+    from bootstrap_progress import Status
+    from bootstrap_images import IMAGES
+
 
 class InitializationCancelled(Exception):
     def __init__(self, signum):
@@ -73,6 +80,173 @@ NOTICES = {
 }
 
 
+# Exact source messages only; no prefixes containing arbitrary child values.
+EVENTS = {
+    "PASS: All base packages installed": ("Verify base packages", Status.DONE),
+    "PASS: Docker Engine, Compose and Buildx available": ("Verify Docker tooling", Status.DONE),
+    "PASS: Docker daemon accessible without sudo": ("Verify local Docker access", Status.DONE),
+    "OK: Docker daemon accessible without sudo": ("Verify local Docker access", Status.DONE),
+    "RESULT: PREREQUISITES READY (read-only)": ("Verify prerequisites", Status.DONE),
+    "RESULT: DEPENDENCIES READY": ("Prepare system dependencies", Status.DONE),
+    "INFO: Installing official Docker Engine / Compose / Buildx": ("Install Docker Engine, Compose and Buildx", Status.RUNNING),
+    "INFO: Starting Docker service": ("Start Docker daemon", Status.RUNNING),
+    "RESULT: REQUIRED DOCKER IMAGES READY": ("Verify required images", Status.DONE),
+    "KEEP: All required Docker images already available.": ("Reuse existing Docker images", Status.CACHED),
+    "PASS: Local transcendence.test domain": ("Verify development hostname", Status.DONE),
+    "PASS: Browser-facing Nginx TLS certificate": ("Verify browser TLS certificate", Status.DONE),
+    "PASS: Local CA trust": ("Verify local CA trust", Status.DONE),
+    "PASS: Dedicated Nginx TLS group and ACL": ("Verify Nginx TLS permissions", Status.DONE),
+    "PASS: Existing Vault TLS chain, hostname and expiry": ("Verify Vault TLS", Status.DONE),
+    "RESULT: HOST PREPARATION READY": ("Verify host preparation", Status.DONE),
+    "PASS: Compose resource inventory and external network contract": ("Verify Compose resource inventory", Status.DONE),
+    "RESULT: DOCKER RESOURCES READY (read-only)": ("Verify Docker resources", Status.DONE),
+    "RESULT: DOCKER RESOURCES READY": ("Verify Docker resources", Status.DONE),
+    "STEP: Reserve private Vault recovery file": ("Reserve private Vault recovery file", Status.RUNNING),
+    "STEP: Initialize Vault and persist recovery material": ("Initialize Vault and persist recovery material", Status.RUNNING),
+    "PASS: Vault recovery material persisted": ("Initialize Vault and persist recovery material", Status.DONE),
+    "PASS: Vault initialized (Shamir 2-of-3)": ("Verify Vault Shamir initialization", Status.DONE),
+    "STEP: Initial Vault unseal": ("Initial Vault unseal", Status.RUNNING),
+    "PASS: Vault initialized, unsealed and using Raft": ("Initial Vault unseal", Status.DONE),
+    "KEEP: Vault is already initialized; never reinitializing": ("Reuse existing Vault", Status.CACHED),
+    "RESULT: VAULT READY (read-only)": ("Verify Vault identity and readiness", Status.DONE),
+    "PASS: Vault configuration check completed (KV v2, ACLs, four AppRoles)": ("Verify Vault KV, ACLs and AppRoles", Status.DONE),
+    "PASS: Vault configuration apply completed (KV v2, ACLs, four AppRoles)": ("Prepare Vault KV, ACLs and AppRoles", Status.DONE),
+    "PRESERVED: Vault backend database credential": ("Preserve backend database credential", Status.CACHED),
+    "PRESERVED: Vault migrator database credential": ("Preserve migrator database credential", Status.CACHED),
+    "CREATED: Vault backend database credential": ("Create backend database credential", Status.DONE),
+    "CREATED: Vault migrator database credential": ("Create migrator database credential", Status.DONE),
+    "PASS: Vault database credentials check verified": ("Verify Vault database credentials", Status.DONE),
+    "PASS: Vault database credentials apply verified": ("Prepare Vault database credentials", Status.DONE),
+    "PASS: Fresh PostgreSQL cluster initialized without persistent bootstrap password": ("Initialize PostgreSQL cluster", Status.DONE),
+    "KEEP: Existing PostgreSQL 18 cluster; no reinitialization": ("Reuse PostgreSQL cluster", Status.CACHED),
+    "PASS: PostgreSQL 18, database identity, SCRAM host auth and passwordless-disabled admin": ("Verify PostgreSQL identity and SCRAM", Status.DONE),
+    "PASS: PostgreSQL SCRAM roles and schema privileges": ("Verify PostgreSQL role permissions", Status.DONE),
+    "PASS: PostgreSQL SCRAM roles and schema privileges (metadata only)": ("Verify PostgreSQL role permissions", Status.DONE),
+    "PASS: Existing Vault-to-PostgreSQL SCRAM provisioning workflow": ("Prepare PostgreSQL SCRAM roles", Status.DONE),
+    "RUN: Existing Prisma migration and grants workflow": ("Run Prisma migration and grants workflow", Status.RUNNING),
+    "PASS: Existing Prisma migration and grants workflow": ("Run Prisma migration and grants workflow", Status.DONE),
+    "KEEP: Prisma migrations and PostgreSQL grants": ("Reuse existing Prisma migrations", Status.CACHED),
+    "RESULT: PRISMA MIGRATIONS READY (read-only)": ("Verify Prisma migration history and grants", Status.DONE),
+    "PASS: Backend UID/GID can read Vault-rendered DSN (content not displayed)": ("Verify backend credential access", Status.DONE),
+    "PASS: Backend Vault Agent healthy": ("Verify backend Vault Agent", Status.DONE),
+    "PASS: NestJS /api/v1/health confirms PostgreSQL and migrations": ("Verify NestJS health", Status.DONE),
+    "PASS: Vault-backed NestJS backend healthy": ("Verify NestJS health", Status.DONE),
+    "PASS: Collector health, snapshot and Docker Proxy GET access": ("Verify collector and Docker proxy", Status.DONE),
+    "PASS: Graph Engine HTTP health": ("Verify graph engine", Status.DONE),
+    "PASS: Backend can reach Collector and Graph Engine": ("Verify backend service connectivity", Status.DONE),
+    "PASS: React/Vite HTML, entry module and backend API proxy": ("Verify React frontend", Status.DONE),
+    "PASS: Nginx TLS verified, Vite HTML/module and NestJS API via HTTPS": ("Verify Nginx HTTPS application routing", Status.DONE),
+    "PASS: Loopback HTTP 8080 redirects to HTTPS 8443": ("Verify HTTP to HTTPS redirect", Status.DONE),
+    "RESULT: PROMETHEUS READY (read-only)": ("Verify Prometheus metrics readiness", Status.DONE),
+    "RETRY: Prometheus HTTP readiness": ("Retry Prometheus metrics readiness", Status.RUNNING),
+    "MISSING: Initial Grafana Vault credentials": ("Initial Grafana credentials not yet created", Status.PENDING),
+    "CREATED: Grafana Vault credentials": ("Create Grafana credentials", Status.DONE),
+    "PRESERVED: Grafana Vault credentials": ("Preserve Grafana credentials", Status.CACHED),
+    "PASS: Grafana credential storage permissions": ("Verify Grafana credential storage", Status.DONE),
+    "PASS: Grafana UID/GID can read rendered secrets": ("Verify Grafana rendered credential access", Status.DONE),
+    "PASS: Actual Grafana Vault secret delivery": ("Verify Grafana Vault secret delivery", Status.DONE),
+    "STEP: Verify Grafana container identity": ("Verify Grafana container identity", Status.RUNNING),
+    "PASS: Grafana container identity and privileges": ("Verify Grafana container identity", Status.DONE),
+    "STEP: Verify Grafana prerequisites": ("Verify Grafana prerequisites", Status.RUNNING),
+    "PASS: Grafana prerequisites verified": ("Verify Grafana prerequisites", Status.DONE),
+    "STEP: Verify Grafana HTTP health": ("Verify Grafana HTTP health", Status.RUNNING),
+    "PASS: Grafana HTTP health": ("Verify Grafana HTTP health", Status.DONE),
+    "STEP: Verify Grafana authentication and provisioning": ("Verify Grafana authentication and provisioning", Status.RUNNING),
+    "PASS: Grafana authentication and provisioning": ("Verify Grafana authentication and provisioning", Status.DONE),
+    "PASS: Grafana anonymous API access rejected": ("Verify Grafana anonymous access rejection", Status.DONE),
+    "PASS: Persistent Grafana PromQL CRS policy.": ("Verify Grafana PromQL CRS policy", Status.DONE),
+    "PASS: Grafana HTTPS gateway identity and policy.": ("Verify Grafana HTTPS gateway identity", Status.DONE),
+    "PASS: Grafana HTTPS login and canonical redirect.": ("Verify Grafana HTTPS login and redirect", Status.DONE),
+    "PASS: Grafana HTTPS health and database.": ("Verify Grafana HTTPS health and database", Status.DONE),
+    "PASS: Grafana HTTPS anonymous access rejected.": ("Verify Grafana HTTPS anonymous access rejection", Status.DONE),
+    "PASS: Grafana HTTPS WAF blocking.": ("Verify Grafana HTTPS WAF blocking", Status.DONE),
+    "RETRY: Grafana HTTPS upstream readiness": ("Retry Grafana HTTPS upstream readiness", Status.RUNNING),
+}
+EVENTS = {line.encode("ascii"): event for line, event in EVENTS.items()}
+for image in IMAGES:
+    EVENTS[("PULL: " + image).encode("ascii")] = ("Pull " + image, Status.RUNNING)
+    EVENTS[("PASS: " + image).encode("ascii")] = ("Pull " + image, Status.DONE)
+
+SAFE_ERRORS = {
+    "ERROR: Host preparation incomplete",
+    "ERROR: Docker resources incomplete",
+    "ERROR: Grafana Vault Agent incomplete",
+    "ERROR: Prometheus incomplete",
+    "ERROR: Grafana credential check failed; refusing provisioning",
+    "ERROR: Grafana Vault Agent is not ready",
+    "ERROR: Required Docker resources missing",
+    "ERROR: Required Docker resources missing; use explicit resource preparation",
+    "ERROR: Trusted support services are not ready",
+    "ERROR: Prometheus HTTP/metrics probe not ready or unavailable",
+    "ERROR: Prometheus HTTP/metrics readiness failed after bounded checks",
+    "ERROR: Prometheus container missing",
+    "ERROR: Prometheus is not running",
+    "ERROR: Unexpected Prometheus identity",
+    "ERROR: Unexpected Prometheus privileges or network",
+    "ERROR: Unexpected Prometheus mounts",
+    "ERROR: Unexpected Prometheus credentials",
+    "ERROR: Grafana container missing",
+    "ERROR: Unexpected Grafana identity",
+    "ERROR: Unexpected Grafana runtime privileges",
+    "ERROR: Unexpected Grafana mounts",
+    "ERROR: Unexpected Grafana environment override",
+    "ERROR: Unexpected application credentials",
+    "ERROR: Grafana database or version not ready",
+    "ERROR: Grafana authentication not verified",
+    "ERROR: Prometheus datasource mismatch",
+    "ERROR: Grafana readiness timeout",
+    "ERROR: Grafana stopped unexpectedly",
+    "ERROR: Grafana is not running",
+    "ERROR: Grafana Vault Agent not healthy",
+    "ERROR: Grafana AppRole credentials missing",
+    "ERROR: Grafana Vault secrets are not ready",
+    "ERROR: Unexpected Grafana Agent identity",
+    "ERROR: Unexpected Grafana Agent runtime privileges",
+    "ERROR: Required Grafana secrets are missing",
+    "ERROR: Trusted Vault configuration not ready",
+    "ERROR: Invalid Grafana helper result",
+    "ERROR: Grafana secret helper unavailable or timed out",
+    "ERROR: Grafana secrets check failed; raw output withheld",
+    "ERROR: Grafana secrets apply failed; raw output withheld",
+    "ERROR: Nginx gateway missing.",
+    "ERROR: Nginx gateway is not running.",
+    "ERROR: Nginx WAF blocking mode not enabled.",
+    "ERROR: Nginx runtime configuration differs from template.",
+    "ERROR: Required Grafana logging protection missing.",
+    "ERROR: Trusted PromQL CRS source unavailable.",
+    "ERROR: Trusted PromQL CRS source is empty.",
+    "ERROR: Runtime PromQL CRS rules differ from trusted source.",
+    "ERROR: Grafana HTTPS upstream temporarily unavailable.",
+    "ERROR: Grafana canonical redirect mismatch.",
+    "ERROR: Grafana login HTML unavailable or incomplete.",
+    "ERROR: Grafana HTTPS health unavailable.",
+    "ERROR: Invalid Grafana HTTPS health response.",
+    "ERROR: Grafana database or version verification failed.",
+    "ERROR: Grafana anonymous API access was not rejected.",
+    "ERROR: Grafana inbound WAF blocking not verified.",
+    "ERROR: Invalid Grafana HTTPS response.",
+    "ERROR: Invalid Grafana HTTPS status.",
+    "ERROR: Vault is not initialized",
+    "ERROR: Unexpected Vault container identity/Compose provenance",
+    "ERROR: Recovery file has unsafe ownership/permissions",
+    "ERROR: Protected Vault recovery file is missing",
+    "ERROR: Prisma migration history drift; manual review required",
+    "ERROR: Another provisioning workflow is running",
+    "ERROR: Unexpected Docker context; manual Docker access review required",
+    "ERROR: Unexpected DOCKER_HOST; manual Docker access review required",
+    "ERROR: Docker group is active but access is denied; review Docker socket permissions manually.",
+    "ERROR: Nginx command unavailable or timed out: curl",
+    "ERROR: Nginx command unavailable or timed out: docker",
+}
+for message in SAFE_ERRORS:
+    NOTICES.setdefault(message.encode("ascii"), message)
+# These exact shell notices accompany the dedicated installer exit code 2.
+SESSION_REFRESH = {
+    b"ACTION REQUIRED: Docker group membership exists but is not active in this session.",
+    b"ACTION REQUIRED: Sign out and back in (or reboot the VM), then rerun:",
+}
+
+
 class Diagnostics:
     def __init__(self):
         self.counts = Counter()
@@ -80,6 +254,8 @@ class Diagnostics:
         self.buffers = {0: b'', 1: b''}
         self.truncated = {0: False, 1: False}
         self.prompt_seen = False
+        self.session_refresh = False
+        self.events = []
 
     def line(self, stream, value):
         if not value:
@@ -87,8 +263,15 @@ class Diagnostics:
         self.counts['stdout' if stream == 0 else 'stderr'] += 1
         if re.search(rb'\[[yYnN]/[yYnN]\]', value):
             self.prompt_seen = True
+        if value in SESSION_REFRESH:
+            self.session_refresh = True
+        if value in EVENTS:
+            if len(self.events) < 128:
+                self.events.append(EVENTS[value])
         if value in NOTICES:
             notice = NOTICES[value]
+            if notice.startswith("ERROR:"):
+                self.counts["error"] += 1
             if notice not in self.notices:
                 self.notices.append(notice)
         elif re.match(rb'^(WARN(?:ING)?[: ]|\[WARN(?:ING)?\]|SECURITY:|IMPORTANT:|ACTION REQUIRED:)', value):
@@ -131,11 +314,25 @@ class ChildRunner:
         self.last_returncode = None
         self.last_diagnostics = None
 
+    def report_failure(self):
+        """Expose reviewed reasons from the final failed probe only."""
+        if self.last_diagnostics is None:
+            return
+        for notice in self.last_diagnostics.notices:
+            if notice.startswith("ERROR:") and not self.verbose:
+                self.progress.notice(notice)
+        if not self.verbose:
+            self.progress.notice("Verification failed; use the indicated read-only check for details.")
+
     def run(self, argv, *, cwd, env=None, pass_fds=(), foreground=False,
-            critical=False, probe=False):
+            critical=False, probe=False, operation="Execute reviewed operation"):
         self.cancellation.check()
         diagnostics = Diagnostics()
         self.last_diagnostics = diagnostics
+        started = time.monotonic()
+        self.progress.substep(operation, Status.RUNNING)
+        # Stream Python's reviewed messages promptly instead of at process exit.
+        env = {**(os.environ if env is None else env), "PYTHONUNBUFFERED": "1"}
         if foreground:
             self.progress.pause()
         try:
@@ -154,7 +351,7 @@ class ChildRunner:
                             if interrupted is None:
                                 interrupted = now
                                 signum = self.cancellation.signum or signal.SIGINT
-                                if self.cancellation.signum is not None:
+                                if self.cancellation.signum is not None and not foreground:
                                     self.progress.notice('Cancellation requested; waiting for active operation.')
                                 try:
                                     if foreground:
@@ -176,20 +373,29 @@ class ChildRunner:
                             else:
                                 diagnostics.finish(key.data)
                                 sel.unregister(key.fileobj)
+                        for label, status in diagnostics.events:
+                            self.progress.substep(label, status)
+                        diagnostics.events.clear()
                         self.progress.refresh()
                     self.last_returncode = child.wait()
         finally:
             if foreground:
                 self.progress.resume()
         for notice in diagnostics.notices:
-            if not probe or not notice.startswith('ERROR:'):
+            if self.verbose or not probe or not notice.startswith('ERROR:'):
                 self.progress.notice(notice)
         counts = diagnostics.counts
+        cancelled = self.cancellation.signum is not None or self.last_returncode in (-2, -15, 130, 143)
+        result = (Status.CANCELLED if cancelled else
+                  Status.ACTION_REQUIRED if self.last_returncode == 2 and diagnostics.session_refresh else
+                  Status.DONE if self.last_returncode == 0 else Status.FAILED)
+        self.progress.substep(operation, result)
+        elapsed = time.monotonic() - started
         if diagnostics.prompt_seen:
             self.progress.notice('ERROR: Unexpected initialization approval prompt; stopped safely.')
             raise UnexpectedApproval()
-        if self.verbose or (not probe and (self.last_returncode != 0 or counts['stderr'])) or counts['warning']:
-            self.progress.notice(f"Child exit {self.last_returncode}; stdout {counts['stdout']} lines, "
+        if self.verbose or (not probe and (self.last_returncode not in (0, 2) or counts['stderr'] or counts['error'])) or counts['warning']:
+            self.progress.notice(f"{operation}: exit {self.last_returncode} in {elapsed:.1f}s; stdout {counts['stdout']} lines, "
                                  f"stderr {counts['stderr']} lines, warnings {counts['warning']}, "
                                  f"errors {counts['error']}, oversized {counts['oversized']} (raw output withheld)")
         self.cancellation.check()

@@ -154,7 +154,9 @@ def command(flag, *, quiet=False, runner=None, lock_fd=None):
                               pass_fds=(lock_fd,) if preparing else (),
                               foreground=flag == "--prepare-host",
                               critical=flag == "--prepare-vault",
-                              probe=not preparing) == 0
+                              probe=not preparing,
+                              operation=("Prepare " if preparing else "Check ") +
+                              flag.removeprefix("--prepare-" if preparing else "--check-")) == 0
         except OSError:
             raise UnifiedStartupError("Cannot execute trusted bootstrap operation") from None
     if lock_fd is not None:
@@ -551,26 +553,26 @@ def prepare_prerequisites(runner, progress):
     installer = str(ROOT / "scripts/install-deps.sh")
     images = str(ROOT / "scripts/dev/bootstrap_images.py")
     progress.begin(0, Phase.CHECK)
-    cached = runner.run([installer, "--initialize-check"], cwd=ROOT, probe=True) == 0
+    cached = runner.run([installer, "--initialize-check"], cwd=ROOT, probe=True, operation="Check local prerequisites") == 0
     if not cached:
         progress.phase(Phase.PREPARE)
-        code = runner.run([installer, "--initialize-dev"], cwd=ROOT, foreground=True)
+        code = runner.run([installer, "--initialize-dev"], cwd=ROOT, foreground=True, operation="Install missing prerequisites")
         if code == 2 and runner.last_diagnostics.session_refresh:
             raise SessionRefreshRequired()
         if code:
             raise UnifiedStartupError("System prerequisites failed; inspect ./scripts/install-deps.sh --check")
     progress.phase(Phase.VERIFY)
-    for argv in ([str(BOOTSTRAP), "--orchestrator-preflight"],
-                 [sys.executable, "-m", "scripts.dev.bootstrap_linux_ca", "preflight"]):
-        if runner.run(argv, cwd=ROOT):
+    for argv, label in (([str(BOOTSTRAP), "--orchestrator-preflight"], "Verify platform and prerequisites"),
+                        ([sys.executable, "-m", "scripts.dev.bootstrap_linux_ca", "preflight"], "Verify existing CA provenance")):
+        if runner.run(argv, cwd=ROOT, operation=label):
             raise UnifiedStartupError("System prerequisite verification failed; inspect local host state")
     progress.finish(Status.CACHED if cached else Status.DONE)
 
     progress.begin(1, Phase.CHECK)
-    cached = runner.run([sys.executable, images, "check"], cwd=ROOT, probe=True) == 0
+    cached = runner.run([sys.executable, images, "check"], cwd=ROOT, probe=True, operation="Check local image inventory") == 0
     if not cached:
         progress.phase(Phase.PREPARE)
-        if runner.run([sys.executable, images, "initialize"], cwd=ROOT):
+        if runner.run([sys.executable, images, "initialize"], cwd=ROOT, operation="Prepare missing images"):
             raise UnifiedStartupError("Docker image preparation failed; inspect bootstrap_images.py check")
     progress.finish(Status.CACHED if cached else Status.DONE)
 
@@ -593,7 +595,8 @@ def initialize(lock_fd, *, cancellation=None):
                 progress.finish(Status.CACHED)
                 continue
             if prepare is None:
-                raise UnifiedStartupError(f"{name} verification failed; inspect {check}")
+                runner.report_failure()
+                raise UnifiedStartupError(f"{name} verification failed; inspect ./scripts/bootstrap.sh {check}")
             if name == "vault":
                 vault_seal_guard()
             cancellation.check()
@@ -607,6 +610,7 @@ def initialize(lock_fd, *, cancellation=None):
                 )
             progress.phase(Phase.VERIFY)
             if not checked(name, runner=runner):
+                runner.report_failure()
                 raise UnifiedStartupError(
                     f"{name} verification failed (exit {runner.last_returncode}); "
                     f"inspect ./scripts/bootstrap.sh {check}"

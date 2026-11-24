@@ -76,7 +76,10 @@ class Progress:
         self.live = (tty and env.get("TERM", "") not in ("", "dumb")
                      and not env.get("CI") and "NO_COLOR" not in env
                      and not self.verbose and env.get("FT_DEV_STAGE_TIMING") != "1")
-        self._write(self._color("[+] Initializing ft_transcendence", Status.RUNNING) + "\n")
+        header = "[+] Initializing ft_transcendence"
+        if self.live:
+            header = header[:max(1, self.width()-1)]
+        self._write(self._color(header, Status.RUNNING) + "\n")
 
     def _write(self, value):
         self.stream.write(value)

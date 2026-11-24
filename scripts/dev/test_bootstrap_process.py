@@ -7,12 +7,16 @@ import unittest
 from pathlib import Path
 
 from bootstrap_process import Cancellation, ChildRunner, Diagnostics, InitializationCancelled, UnexpectedApproval
+from bootstrap_progress import Status
 
 
 class Display:
     def __init__(self):
         self.notices = []
         self.refreshes = 0
+        self.steps = []
+    def substep(self, label, status):
+        self.steps.append((label, status))
     def notice(self, value):
         self.notices.append(value)
     def pause(self): pass
@@ -30,6 +34,21 @@ class ChildRunnerTests(unittest.TestCase):
         self.assertEqual(d.counts['error'], 1)
         self.assertEqual(d.counts['oversized'], 1)
         self.assertEqual(d.notices, [])
+
+    def test_exact_safe_event_and_error_not_raw_child_output(self):
+        d = Diagnostics()
+        d.feed(0, b"PASS: Grafana HTTP health\nPASS: token=private-value\n")
+        d.feed(1, b"ERROR: Prometheus incomplete\nERROR: secret=private-value\n")
+        self.assertEqual(d.events, [("Verify Grafana HTTP health", Status.DONE)])
+        self.assertEqual(d.notices, ["ERROR: Prometheus incomplete"])
+        self.assertEqual(d.counts["error"], 2)
+
+    def test_session_refresh_requires_exact_marker(self):
+        d = Diagnostics()
+        d.feed(0, b"ACTION REQUIRED: unknown\n")
+        self.assertFalse(d.session_refresh)
+        d.feed(0, b"ACTION REQUIRED: Sign out and back in (or reboot the VM), then rerun:\n")
+        self.assertTrue(d.session_refresh)
 
     def test_pipes_drained_and_exit_preserved(self):
         display = Display()
