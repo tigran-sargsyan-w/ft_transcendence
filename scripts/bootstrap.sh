@@ -403,9 +403,10 @@ case "$MODE" in
     python3 scripts/dev/bootstrap_vault_config.py check || fail "Vault configuration incomplete"
     python3 scripts/dev/bootstrap_grafana_secrets.py plan
 
-    if python3 scripts/dev/bootstrap_grafana_secrets.py check; then
+    if python3 scripts/dev/bootstrap_grafana_secrets.py check-missing; then
       say "KEEP: Existing Grafana Vault credentials verified"
     else
+      [[ $? -eq 2 ]] || fail "Grafana credential check failed; refusing provisioning"
       say ""
       say "This stage creates only initial Grafana credentials in Vault."
       say "Existing Grafana credentials will never be rotated or replaced."
@@ -462,7 +463,7 @@ case "$MODE" in
     host_check || fail "Host preparation incomplete"
     python3 scripts/dev/bootstrap_resources.py check || fail "Docker resources incomplete"
     python3 scripts/dev/bootstrap_grafana_agent.py check || fail "Grafana Vault Agent incomplete"
-    python3 scripts/dev/bootstrap_prometheus.py check || fail "Prometheus incomplete"
+    python3 scripts/dev/bootstrap_prometheus.py check-ready || fail "Prometheus incomplete"
     python3 scripts/dev/bootstrap_grafana.py plan
     say ""
     say "This stage starts only the trusted Grafana Compose service."

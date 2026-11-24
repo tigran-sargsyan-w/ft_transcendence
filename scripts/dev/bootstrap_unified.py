@@ -128,7 +128,8 @@ def command(flag, *, quiet=False, runner=None, lock_fd=None):
         kwargs.update(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if flag in DIRECT_READ_ONLY_CHECKS:
         script = ROOT / "scripts/dev" / DIRECT_READ_ONLY_CHECKS[flag]
-        argv = [sys.executable, str(script), "check"]
+        argv = [sys.executable, str(script),
+                "check-ready" if runner is not None and flag == "--check-grafana-https" else "check"]
         tls = Path(os.environ.get(
             "XDG_STATE_HOME", str(Path.home() / ".local/state")
         )) / "transcendence/dev/tls"
@@ -237,6 +238,9 @@ def checked(name, *, first_run=False, runner=None):
                   f"result={outcome} elapsed={elapsed:.2f}s", flush=True)
         if result:
             return True
+        if runner is not None and name == "grafana-https":
+            # The typed check-ready entry point owns its bounded retry budget.
+            return False
         if first_run and attempt == 0 and definitely_missing_container(name):
             return False
         if attempt + 1 < READ_ONLY_ATTEMPTS:

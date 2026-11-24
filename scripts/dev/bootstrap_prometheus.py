@@ -306,9 +306,22 @@ def check():
         ) from None
 
 
+def check_ready():
+    """Bounded retries of the complete read-only check, only for HTTP readiness."""
+    for attempt in range(3):
+        try:
+            check()
+            return
+        except PrometheusReadinessError:
+            if attempt == 2:
+                raise
+            print("RETRY: Prometheus HTTP readiness", flush=True)
+            time.sleep(2)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("plan", "check", "apply"))
+    parser.add_argument("mode", choices=("plan", "check", "check-ready", "apply"))
     args = parser.parse_args(argv)
 
     try:
@@ -321,8 +334,8 @@ def main(argv=None):
                 print(f"EXISTS: Prometheus ({(item.get('State') or {}).get('Status')})")
             return 0
 
-        if args.mode == "check":
-            check()
+        if args.mode in ("check", "check-ready"):
+            (check_ready if args.mode == "check-ready" else check)()
             print("RESULT: PROMETHEUS READY (read-only)", flush=True)
             return 0
 
