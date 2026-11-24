@@ -335,7 +335,7 @@ Related guides:
 
 The fixed 21-stage display includes system dependencies and Docker images before the 19 existing service stages. CACHED means a fresh readiness check passed, not an on-disk cache. DONE means the guarded preparation and required verification succeeded. Optional Vault UI remains SKIPPED. FAILED, CANCELLED and ACTION REQUIRED stop the sequence; later stages are not executed. ACTION REQUIRED is used only for verified Docker group enrollment/session refresh and preserves a nonzero exit status.
 
-An interactive terminal colors only the status field, uses adaptive-width stage columns and a completed-stage progress bar, commits one final row per stage and previews transient reviewed substeps. The renderer limits timer updates to five frames per second (apart from phase transitions, notices and resize) and overwrites only changed rows. Supported xterm-compatible terminals use inline progress under the invoking command, without switching to an alternate screen. SIGWINCH or a changed terminal size invalidates the tracked cursor anchor. If a preview is active, the renderer detaches from that preview without seeking backwards and rebuilds inline progress after a 300 ms settling interval. Nested operations, status columns and the progress bar remain live after the resize. Old preview lines may remain in scrollback above an explicitly labeled final report; a resize does not enable verbose phase-transition output. At extremely small dimensions the transient preview is temporarily omitted until the window expands. If committed rows were formatted at different widths, the final report is also emitted. Durable rows retain full stage names and actual elapsed/cumulative times, even if a very narrow terminal wraps them. A terminal resize racing an individual cursor-control write cannot be made atomic; the renderer checks geometry again before writing and stops using the anchor once a resize is observed. Unsupported terminals fall back to plain text. Pending stages are previewed within the available terminal height. MISSING means a reviewed absence event; NOT READY means a probe did not establish readiness. Neither authorizes provisioning or changes an exit code. UNCONFIRMED means a named child event did not report completion; no success is inferred. A terminal-stage failure still stops the sequence. CI, NO_COLOR, redirected output, verbose mode and timing mode use plain append-only text. The installer authenticates using sudo -v on the controlling terminal, then uses sudo -n for actual package/service operations so their progress stays live. Host operations that may invoke sudo indirectly (mkcert) clear the transient region and pause repainting until the foreground command returns; elapsed time still includes authentication and execution. This avoids interfering with the controlling terminal or intercepting passwords. Noninteractive initialization requires any necessary sudo authorization to be available already; it never requests or stores a password itself.
+An interactive terminal colors only the status field, uses adaptive-width stage columns and a completed-stage progress bar, commits one final row per stage and previews transient reviewed substeps. The renderer limits updates to five frames per second (apart from phase transitions and notices) and overwrites only changed rows. Pending stages are previewed within the available terminal height. MISSING means a reviewed absence event; NOT READY means a probe did not establish readiness. Neither authorizes provisioning or changes an exit code. UNCONFIRMED means a named child event did not report completion; no success is inferred. A terminal-stage failure still stops the sequence. CI, NO_COLOR, redirected output, verbose mode and timing mode use plain append-only text. The installer authenticates using sudo -v on the controlling terminal, then uses sudo -n for actual package/service operations so their progress stays live. Host operations that may invoke sudo indirectly (mkcert) clear the transient region and pause repainting until the foreground command returns; elapsed time still includes authentication and execution. This avoids interfering with the controlling terminal or intercepting passwords. Noninteractive initialization requires any necessary sudo authorization to be available already; it never requests or stores a password itself.
 
 Each operation retains its existing security checks. The internal stage dispatch is allowlisted and receives the held orchestrator lock descriptor, not a global yes flag. The Linux CA workflow will trust only an already trusted CA or a newly generated, recorded and validated CA. Unexpected CA paths, files and untrusted existing CAs are refused. Windows trust is outside this automatic path. Docker enrollment is restricted to a checked local socket and still requires normal sudo; sign out/in when instructed.
 
@@ -501,3 +501,26 @@ report remains authoritative. CI, NO_COLOR, redirected and verbose output
 retain their previous contracts. No initialization or recovery decisions
 are changed. V6 acceptance is renderer-only on a healthy VM; do not repeat
 cold installation to test the display.
+
+
+## Issue #160 final renderer selection
+
+At b920120, all 25 targeted V6 renderer tests passed on the Ubuntu VM.
+However, live resize left a stale preview followed by a new preview; the
+operator rejected this output as well. The operator explicitly selected
+V3 (28f5654) as the preferred presentation and accepted its known resize
+limitations rather than introducing further display modes. Restore the V3
+renderer, its matching tests and the original initialize integration exactly.
+The V4 bounded backend-agent recovery wait and its tests, along with the
+signature-independent image boundary test, remain in place. The V4–V6
+sections above are historical experiments, not the current renderer contract.
+
+The selected renderer is inline, does not use an alternate screen, and does
+not switch modes or print a duplicate final report on resize. Terminal
+reflow can produce misaligned, overlapping or repeated rows when changing
+window dimensions; keep the terminal size stable during initialization for
+the best display. This is a known visual limitation, not a claim of resize
+safety. CI, NO_COLOR, verbose and redirected output keep the V3 plain-log
+contract. No fresh installation is required to recheck this restoration.
+The live reboot-recovery acceptance and controlled end-to-end benchmark
+remain pending. Live Vault critical-section cancellation remains deferred.
