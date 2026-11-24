@@ -3,7 +3,7 @@ import io
 import unittest
 from unittest.mock import patch
 
-from bootstrap_progress import Phase, Progress, Status, emit_result
+from bootstrap_progress import Phase, Progress, ProgressProfile, Status, emit_result
 
 
 class Terminal(io.StringIO):
@@ -22,6 +22,59 @@ class ProgressTests(unittest.TestCase):
         return Progress(("Vault", "PostgreSQL"), stream=stream,
                         clock=lambda: self.now, env={"TERM": "xterm"} if env is None else env,
                         terminal_width=lambda: width, terminal_height=lambda: 10)
+
+    def test_full_profile_preserves_default_rendering(self):
+        default, explicit = Terminal(), Terminal()
+        a = self.progress(default)
+        b = Progress(("Vault", "PostgreSQL"), stream=explicit,
+                     clock=lambda: self.now, env={"TERM": "xterm"},
+                     terminal_width=lambda: 80, terminal_height=lambda: 10,
+                     header="Initializing ft_transcendence", profile=ProgressProfile.FULL)
+        for progress in (a, b):
+            progress.begin(0, Phase.CHECK)
+            progress.substep("Verify identity", Status.DONE)
+            progress.refresh(force=True)
+            progress.pause()
+            progress.resume()
+            progress.finish(Status.CACHED)
+            progress.begin(1)
+            progress.finish(Status.SKIPPED)
+            progress.summary()
+        self.assertEqual(default.getvalue(), explicit.getvalue())
+
+    def test_compact_profile_keeps_nested_events_without_pending_or_bar(self):
+        output = Terminal()
+        progress = Progress(("Gateway", "HTTPS"), stream=output,
+                            clock=lambda: self.now, env={"TERM": "xterm"},
+                            terminal_width=lambda: 100, terminal_height=lambda: 10,
+                            header="Enabling Vault UI", profile=ProgressProfile.COMPACT)
+        progress.begin(0, Phase.CHECK)
+        progress.substep("Verify identity", Status.DONE)
+        self.now = 1.0
+        progress.refresh(force=True)
+        self.assertIn("Enabling Vault UI", output.getvalue())
+        self.assertIn("Verify identity", output.getvalue())
+        self.assertNotIn("PENDING", output.getvalue())
+        self.assertNotIn("| elapsed", output.getvalue())
+        progress.pause("Manual Shamir unseal")
+        self.assertIn("Manual Shamir unseal", output.getvalue())
+        self.assertEqual(progress.drawn, 0)
+        progress.resume()
+        progress.finish(Status.DONE)
+        progress.begin(1)
+        progress.finish(Status.DONE)
+        progress.summary()
+        self.assertIn("Finished 2/2 stages", output.getvalue())
+
+    def test_profile_and_header_reject_unreviewed_controls(self):
+        for kwargs in ({"profile": "compact"}, {"header": "Bad\x1b[2J"},
+                       {"header": "Bad\nheader"}):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    Progress(("Vault",), stream=io.StringIO(), **kwargs)
+        progress = self.progress(Terminal())
+        with self.assertRaises(ValueError):
+            progress.pause("Bad\nmessage")
 
     def test_plain_only_transitions_with_actual_times(self):
         output = io.StringIO()

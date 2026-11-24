@@ -1,4 +1,4 @@
-"""Presentation-only initialization renderer; no raw child output."""
+"""Shared bootstrap progress presentation; no raw child output."""
 from dataclasses import dataclass
 from enum import Enum
 import os
@@ -20,6 +20,11 @@ class Status(Enum):
     ACTION_REQUIRED = "ACTION REQUIRED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
+
+
+class ProgressProfile(Enum):
+    FULL = "full"
+    COMPACT = "compact"
 
 
 class Phase(Enum):
@@ -73,7 +78,8 @@ class Progress:
     """
 
     def __init__(self, labels, *, stream=None, clock=time.monotonic, env=None,
-                 terminal_width=None, terminal_height=None, interactive=None):
+                 terminal_width=None, terminal_height=None, interactive=None,
+                 header="Initializing ft_transcendence", profile=ProgressProfile.FULL):
         self.stream = sys.stdout if stream is None else stream
         self.clock = clock
         env = os.environ if env is None else env
@@ -94,7 +100,12 @@ class Progress:
         self.height = terminal_height or (lambda: self._size().lines)
         self.verbose = env.get("FT_DEV_BOOTSTRAP_VERBOSE") == "1"
         self.live = live_enabled(self.stream, env) and interactive is not False
-        header = "[+] Initializing ft_transcendence"
+        if not isinstance(profile, ProgressProfile):
+            raise ValueError("Expected a reviewed progress profile")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 -]{0,119}", header):
+            raise ValueError("Expected a static command header")
+        self.profile = profile
+        header = "[+] " + header
         if self.live:
             header = header[:max(1, self.width()-1)]
         self._write(header + "\n")
@@ -235,7 +246,11 @@ class Progress:
         height = max(1, self.height())
         budget = max(1, height-3)
         rows = [self._line(self.active, width, now)]
-        if budget > 1:
+        if budget > 1 and self.profile is ProgressProfile.COMPACT:
+            step_budget = min(6, budget-1)
+            recent = list(self.steps.items())[-step_budget:] if step_budget else []
+            rows.extend(self._step_line(label, status, width) for label, status in recent)
+        elif budget > 1:
             step_budget = min(6, max(0, budget-2))
             recent = list(self.steps.items())[-step_budget:] if step_budget else []
             rows.extend(self._step_line(label, status, width) for label, status in recent)
@@ -292,10 +307,12 @@ class Progress:
         if self.verbose:
             self._write(self._step_line(label, status) + "\n")
 
-    def pause(self):
+    def pause(self, message="Authentication may be required (sudo)"):
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 .:/(),_+-]{0,119}", message):
+            raise ValueError("Expected a static pause message")
         if self.live:
             self._erase()
-            line = "    Authentication may be required (sudo)"
+            line = "    " + message
             self._write(line[:max(1, self.width()-1)] + "\n")
         self.paused = True
 
