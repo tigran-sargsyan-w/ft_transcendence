@@ -154,11 +154,11 @@ class ProgressTests(unittest.TestCase):
         # Minimal terminal interpretation of the renderer's exact CSI set.
         rows, row, col = [""], 0, 0
         for token in re.findall(r"\x1b\[[0-9;]*[A-Za-z]|[\s\S]", output.getvalue()):
-            if token == "\x1b[1A":
-                row = max(0, row - 1)
-            elif token == "\x1b[1B":
-                row += 1
-                if row == len(rows):
+            if re.fullmatch(r"\x1b\[\d+A", token):
+                row = max(0, row - int(token[2:-1]))
+            elif re.fullmatch(r"\x1b\[\d+B", token):
+                row += int(token[2:-1])
+                while row >= len(rows):
                     rows.append("")
             elif token == "\x1b[2K":
                 rows[row] = ""
@@ -183,6 +183,68 @@ class ProgressTests(unittest.TestCase):
         self.assertNotIn("Pulling image", screen)
         self.assertNotIn("PENDING", screen)
         self.assertNotIn("RUNNING", screen)
+
+    def test_scrolling_terminal_preserves_committed_rows_and_clears_preview(self):
+        import re
+        output = Terminal()
+        height = 8
+        width = 100
+        progress = Progress(tuple(f"Stage {i+1}" for i in range(21)), stream=output,
+                            clock=lambda: self.now, env={"TERM": "xterm"},
+                            terminal_width=lambda: width, terminal_height=lambda: height)
+        for i in range(17):
+            progress.begin(i, Phase.CHECK)
+            for j in range(7):
+                progress.substep(f"Verify operation {j+1}", Status.RUNNING)
+                self.now += .3
+                progress.refresh()
+                progress.substep(f"Verify operation {j+1}", Status.DONE)
+            if i == 5:
+                progress.notice("SECURITY: Preserve recovery material.")
+            progress.phase(Phase.VERIFY)
+            self.now += .3
+            progress.refresh()
+            progress.finish(Status.CANCELLED if i == 16 else Status.DONE)
+        progress.summary()
+
+        # A bounded viewport with scrollback. Cursor-up must not edit rows
+        # that have scrolled off screen; newline may extend the scrollback.
+        rows = ["" for _ in range(height)]
+        row = col = top = 0
+        for token in re.findall(r"\x1b\[[0-9;]*[A-Za-z]|[\s\S]", output.getvalue()):
+            if re.fullmatch(r"\x1b\[\d+A", token):
+                row = max(top, row-int(token[2:-1]))
+            elif re.fullmatch(r"\x1b\[\d+B", token):
+                row = min(top+height-1, row+int(token[2:-1]))
+            elif token == "\x1b[2K":
+                rows[row] = ""
+            elif token == "\x1b[K":
+                rows[row] = rows[row][:col]
+            elif token.startswith("\x1b"):
+                continue
+            elif token == "\r":
+                col = 0
+            elif token == "\n":
+                row += 1
+                col = 0
+                if row >= top+height:
+                    top += 1
+                    rows.append("")
+            else:
+                self.assertLess(col, width-1, "unexpected wrap")
+                line = rows[row].ljust(col)
+                rows[row] = line[:col]+token+line[col+1:]
+                col += 1
+        screen = "\n".join(rows)
+        for i in range(1, 18):
+            self.assertEqual(screen.count(f"[{i:02d}/21]"), 1)
+        self.assertNotIn("[18/21]", screen)
+        self.assertNotIn("PENDING", screen)
+        self.assertNotIn("RUNNING", screen)
+        self.assertNotIn("Verify operation", screen)
+        self.assertEqual(screen.count("SECURITY: Preserve recovery material."), 1)
+        self.assertEqual(screen.count("CANCELLED"), 1)
+        self.assertIn("Finished 16/21", screen)
 
     def test_timer_diff_does_not_rewrite_pending_or_unchanged_steps(self):
         output = Terminal()

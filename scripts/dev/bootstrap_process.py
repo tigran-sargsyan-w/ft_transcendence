@@ -332,11 +332,14 @@ class Diagnostics:
                 self.counts["reviewed_warning"] += 1
             if notice not in self.notices:
                 self.notices.append(notice)
-        elif value == b"IMPORTANT: Recovery material stored privately at:" or value.startswith(b"IMPORTANT: Recovery material stored privately at: "):
+        elif value.startswith(b"IMPORTANT: Recovery material stored privately at: "):
             # The path is sensitive and deliberately not reflected; the fixed
             # security notice already covers the meaning of this message.
             self.counts["warning"] += 1
             self.counts["reviewed_warning"] += 1
+            notice = "SECURITY: Protect the private Vault recovery file outside the VM and Git."
+            if notice not in self.notices:
+                self.notices.append(notice)
         elif re.match(rb'^(WARN(?:ING)?[: ]|\[WARN(?:ING)?\]|SECURITY:|IMPORTANT:|ACTION REQUIRED:)', value):
             self.counts['warning'] += 1
         elif re.match(rb'^(ERROR:|\[ERROR\]|FAIL:|RESULT: .*STOPPED)', value):
@@ -491,7 +494,7 @@ class ChildRunner:
             errors = counts["error"] - counts["reviewed_error"]
             if warnings:
                 self.progress.notice(f"WARNING: {operation}: {warnings} additional warning lines withheld; use verbose mode.")
-            if not probe and errors and not cancelled:
+            if not probe and errors:
                 self.progress.notice(f"ERROR: {operation}: {errors} additional error lines withheld; use verbose mode.")
             if not probe and result is Status.FAILED:
                 self.progress.notice(f"ERROR: {operation} failed (exit {self.last_returncode}); use verbose mode and the indicated check.")

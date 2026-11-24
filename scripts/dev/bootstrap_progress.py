@@ -165,13 +165,18 @@ class Progress:
         def move(target):
             nonlocal cursor, extent
             chunks.append("\r")
-            while cursor > target:
-                chunks.append("\x1b[1A")
-                cursor -= 1
-            while cursor < target:
-                chunks.append("\x1b[1B" if cursor+1 < extent else "\n")
-                cursor += 1
-                extent = max(extent, cursor+1)
+            if cursor > target:
+                chunks.append(f"\x1b[{cursor-target}A")
+                cursor = target
+            elif cursor < target:
+                existing = min(target-cursor, max(0, extent-1-cursor))
+                if existing:
+                    chunks.append(f"\x1b[{existing}B")
+                    cursor += existing
+                if cursor < target:
+                    chunks.append("\n" * (target-cursor))
+                    cursor = target
+                    extent = max(extent, cursor+1)
 
         for i in range(max(len(old), len(rows))):
             before = old[i] if i < len(old) else None
@@ -203,8 +208,8 @@ class Progress:
             return prefix + label + "  " + status.value
         width = max(1, self.width()-1) if width is None else width
         column = width - 25 - 18 - 1
-        if column >= len(prefix)+8:
-            return prefix + label[:column-len(prefix)].ljust(column-len(prefix)) + self._color(status.value, status)
+        if column >= len(prefix)+8 and len(prefix)+len(label) <= column:
+            return prefix + label.ljust(column-len(prefix)) + self._color(status.value, status)
         available = width-len(prefix)-len(status.value)-1
         if available >= 1:
             return prefix + label[:available].ljust(available) + " " + self._color(status.value, status)
@@ -228,10 +233,6 @@ class Progress:
         self._last_refresh = now
         width = max(1, self.width()-1)
         height = max(1, self.height())
-        # When a height reduction clips the previous region, never move
-        # upward beyond its visible suffix. Width reflow is terminal-specific.
-        if len(self._rows) > height:
-            self._rows = self._rows[-height:]
         budget = max(1, height-3)
         rows = [self._line(self.active, width, now)]
         if budget > 1:

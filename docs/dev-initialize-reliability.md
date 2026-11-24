@@ -335,13 +335,13 @@ Related guides:
 
 The fixed 21-stage display includes system dependencies and Docker images before the 19 existing service stages. CACHED means a fresh readiness check passed, not an on-disk cache. DONE means the guarded preparation and required verification succeeded. Optional Vault UI remains SKIPPED. FAILED, CANCELLED and ACTION REQUIRED stop the sequence; later stages are not executed. ACTION REQUIRED is used only for verified Docker group enrollment/session refresh and preserves a nonzero exit status.
 
-An interactive terminal uses color, a completed-stage progress bar, one final row per stage and transient nested reviewed substeps. Pending stages are previewed within the available terminal height. CI, NO_COLOR, redirected output, verbose mode and timing mode use plain append-only text. The installer authenticates using sudo -v on the controlling terminal, then uses sudo -n for actual package/service operations so their progress stays live. Host operations that may invoke sudo indirectly (mkcert) clear the transient region and pause repainting until the foreground command returns; elapsed time still includes authentication and execution. This avoids interfering with the controlling terminal or intercepting passwords. Noninteractive initialization requires any necessary sudo authorization to be available already; it never requests or stores a password itself.
+An interactive terminal colors only the status field, uses adaptive-width stage columns and a completed-stage progress bar, commits one final row per stage and previews transient reviewed substeps. The renderer limits updates to five frames per second (apart from phase transitions and notices) and overwrites only changed rows. Pending stages are previewed within the available terminal height. MISSING means a reviewed absence event; NOT READY means a probe did not establish readiness. Neither authorizes provisioning or changes an exit code. UNCONFIRMED means a named child event did not report completion; no success is inferred. A terminal-stage failure still stops the sequence. CI, NO_COLOR, redirected output, verbose mode and timing mode use plain append-only text. The installer authenticates using sudo -v on the controlling terminal, then uses sudo -n for actual package/service operations so their progress stays live. Host operations that may invoke sudo indirectly (mkcert) clear the transient region and pause repainting until the foreground command returns; elapsed time still includes authentication and execution. This avoids interfering with the controlling terminal or intercepting passwords. Noninteractive initialization requires any necessary sudo authorization to be available already; it never requests or stores a password itself.
 
 Each operation retains its existing security checks. The internal stage dispatch is allowlisted and receives the held orchestrator lock descriptor, not a global yes flag. The Linux CA workflow will trust only an already trusted CA or a newly generated, recorded and validated CA. Unexpected CA paths, files and untrusted existing CAs are refused. Windows trust is outside this automatic path. Docker enrollment is restricted to a checked local socket and still requires normal sudo; sign out/in when instructed.
 
 Ctrl+C/SIGTERM stop further stages. Vault initialization defers cancellation while the initial recovery response is being saved durably; the parent waits and does not force-kill that critical section. An already initialized sealed Vault is not automatically unsealed. Cancellation is not a rollback: Docker/OS operations may have completed or be in flight. Review stage state with make plan and the reported check before rerunning initialize for a genuinely partial fresh install. Use make recover for an initialized sealed Vault. A power loss, SIGKILL or uncertain/partial recovery-file write requires manual recovery; never delete the recovery file or volume to retry.
 
-Raw child output is not forwarded or saved, including verbose mode. Reviewed fixed notices, warning/error counts, actual exit codes and a targeted check are provided instead. Run the reported maintenance check locally for detailed diagnosis; do not share unreviewed logs or secret material.
+Raw child output is not forwarded or saved, including verbose mode. Normal mode keeps reviewed safety notices, actionable failures and indications of unclassified warning/error output. Verbose mode adds child exit codes, line counts and reviewed operation transitions; routine successful stderr and expected cancellation do not produce process-statistics summaries in normal mode. Run the reported maintenance check locally for detailed diagnosis; do not share unreviewed logs or secret material.
 
 ## Issue #160 first-round VM findings
 
@@ -374,3 +374,41 @@ but exercises the real recovery-file writer, fsync, isolated child and signal
 handling. A real Vault server cancellation within the critical section and
 manual unseal/resume remain live acceptance checks. Cold-VM and full CI
 results for #160 must be recorded separately from the historical #157 benchmark.
+
+
+## Issue #160 second-round VM findings
+
+On Ubuntu 26.04 amd64, branch commit a2786a6 passed fresh initialization
+(569.0 s after Docker group session refresh), resume from partial Docker
+images (537.4 s), and resume with an existing uninitialized Vault (439.6 s).
+Each completed 21/21 stages without an approval prompt; the earlier Grafana
+failures were not observed in these three runs. The resumed Vault retained
+its container ID and had three shares, threshold two, and an unsealed state;
+its recovery file was owned by the operator with mode 0600 and nonzero size.
+Health checks passed. Healthy initialize and routine startup acceptance both
+passed 3/3 without resource identity, restart-count or migration-history drift.
+Read-only, image-pull and pre-initialization Vault cancellations returned 130.
+
+The cached initialize times were 59.0 s (TTY), 58.1 s (redirected), 53.2 s
+(CI), 54.5 s (NO_COLOR), and 54.6 s (verbose). The redirected log had 46
+lines, zero ANSI escape bytes and zero carriage returns. These are individual
+VM measurements, not a controlled estimate of renderer overhead. Visual
+issues included full-region flicker, misclassified missing prerequisites,
+no final result color, excessive normal-mode statistics and transient rows
+occasionally overlapping committed rows. V3 addresses these in presentation
+and reviewed event handling; real terminal resizing and the full VM test
+matrix must still be revalidated. No live cancellation inside the Vault
+persistence critical section or manual sealed-Vault recovery was exercised.
+
+For the final performance comparison, alternate repeated healthy TTY and
+redirected runs under the same VM configuration, terminal geometry and
+workload; record each run and compare medians, not individual timings. Then
+use the existing guarded clean-VM benchmark separately. Do not mix partial
+image resume timings into cold-install medians. The renderer-only synthetic
+workload below uses 21 stages, 40 refresh requests per stage at 150 ms clock
+increments and four reviewed events per stage. It requires no Docker or
+network access and measures writes and bytes, not end-to-end initialization.
+
+```sh
+python3 tests/benchmarks/benchmark_progress_renderer.py --baseline a2786a6
+```
