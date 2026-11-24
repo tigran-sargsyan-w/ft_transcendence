@@ -104,7 +104,7 @@ Do **not** reboot the VM just to test until the offline tests and code review
 have passed, recovery shares are available from an independent secure backup,
 and all important local work has been saved.
 
-## Known first-recovery readiness issue (#155)
+## First-recovery Nginx readiness investigation (#155)
 
 The existing running-but-not-ready Nginx guard can stop the first recovery
 following a VM reboot. Issue #155 tracks investigation independently of
@@ -118,3 +118,73 @@ as an overall success result. Inspect the failing read-only check locally
 and follow the existing recovery procedure only after trusted readiness
 has been established. Do not recreate resources or bypass identity checks.
 No new waiting, retry, restart or provisioning policy is introduced by #165.
+
+### Observed evidence and recovery policy
+
+The operator's filtered Nginx log analysis for the 2026-11-24 recovery
+window reported 116 log lines, 26 DNS resolution failures, three
+"no live upstreams" errors and three HTTP 502 responses on the frontend
+root route. No connection-refused, upstream timeout, WAF rejection or
+TLS-error patterns were matched by that filter. Subsequent root,
+Vite module and API health responses were HTTP 200. The Docker Nginx
+health status had been healthy before recovery, so that status alone
+cannot establish end-to-end readiness.
+
+The results support temporary upstream unavailability; they do not
+establish the exact DNS cache mechanism, upstream identity for every
+log line, or timestamp-by-timestamp causality. No resolver configuration
+change is made by this issue.
+
+During explicit `make recover` only, if the existing ordinary read-only
+Nginx checks fail and the guarded inspection identifies a trusted
+already-running gateway, the orchestrator allows an additional 60-second
+wall-clock probe budget with a two-second interval between retryable
+results. This is additional to the original check budget, not a bound on
+the entire recovery. Each recovery probe validates the pinned full Docker
+ID, existing container identity and running state before prerequisites,
+before routes and after a successful route check or retryable HTTP 502.
+The full existing dependency, TLS/CA, ACL, Nginx syntax, HTTPS route,
+response-content and redirect checks must pass before recovery continues.
+
+Only HTTP 502 from the fixed HTTPS routes `/`, `/src/main.tsx` and
+`/api/v1/health` is an eligible retry result. HTTP 403, 503, 504, transport
+or certificate failures, malformed successful responses, failed
+prerequisites and other nonretryable errors stop this additional wait.
+An HTTP 502 is not itself proof of a harmless race. The extra wait ends
+on deadline expiry, an unexpected result, cancellation or changed
+container identity/state. The original checks and their retry policy
+are unchanged. The ordinary healthy fast path, stopped-container
+resume, initialization, health and maintenance policies are unchanged.
+
+The recovery helper runs read-only probes in a separate local process
+group with the remaining deadline as the wait timeout. On timeout or
+Ctrl+C the local group is terminated and the child reaped. Process
+creation and termination cleanup may add small overhead; no later
+readiness attempt is scheduled after the deadline. The renderer receives
+only fixed result codes and reviewed route labels, not raw child
+output, HTTP bodies, Docker inspection output or credential values.
+The existing manual Shamir unseal remains mandatory for sealed Vault.
+
+A retry may display, for example:
+
+```text
+WAIT: Nginx HTTPS / returned HTTP 502 (bounded recovery readiness)
+```
+
+If the additional wait fails, inspect the existing read-only Nginx
+helper locally using `./scripts/bootstrap.sh --check-nginx`. Do not
+restart, recreate, reload or weaken the gateway automatically. Do not
+share raw logs containing credentials or request data.
+
+### Validation plan for #155
+
+Run the offline regression suites before any live recovery test.
+New tests cover retryable vs nonretryable outcomes, full target identity
+checks, changed/stopped/missing/untrusted targets, the wall-clock
+deadline, process-group cleanup on timeout/cancellation, ordinary
+startup refusal and the unchanged healthy fast path. Runtime acceptance
+is pending: one controlled reboot on the existing test VM, manual
+unseal, first-attempt recovery result, original container IDs and
+post-recovery health. Record whether the new waiting path was actually
+exercised; a successful recovery that never enters it is not a live
+validation of the retry branch.
