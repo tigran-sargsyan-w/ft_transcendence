@@ -35,7 +35,7 @@ export const mockIncidents: IncidentSummary[] = [
     id: "inc-0041",
     title: "High latency on api-gateway",
     severity: "sev2",
-    status: "mitigated",
+    status: "investigating",
     environmentId: "env-prod",
     startedAt: "2026-11-09T06:47:00Z",
     resolvedAt: null,
