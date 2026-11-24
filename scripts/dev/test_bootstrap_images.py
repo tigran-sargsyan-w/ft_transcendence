@@ -4,9 +4,10 @@ import re
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import bootstrap_images as images
+import bootstrap_unified as unified
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -43,13 +44,35 @@ class ImageTests(unittest.TestCase):
 
     def test_only_initialize_installs_images(self):
         shell = (ROOT / "scripts/bootstrap.sh").read_text()
-        unified = (ROOT / "scripts/dev/bootstrap_unified.py").read_text()
+        unified_source = (ROOT / "scripts/dev/bootstrap_unified.py").read_text()
         self.assertIn("exec python3 scripts/dev/bootstrap_unified.py initialize", shell)
         self.assertNotIn("bootstrap_images.py", shell)
-        self.assertIn('str(ROOT / "scripts/dev/bootstrap_images.py"), "initialize"', unified)
         for mode in ("start", "recover", "check"):
-            section = unified.split(f"def {mode}():", 1)[1].split("\ndef ", 1)[0]
+            section = unified_source.split(f"def {mode}():", 1)[1].split("\ndef ", 1)[0]
             self.assertNotIn("prepare_prerequisites", section)
+
+        image_script = str(ROOT / "scripts/dev/bootstrap_images.py")
+        for missing in (False, True):
+            with self.subTest(missing=missing):
+                runner = MagicMock()
+                # Prerequisite check, shell preflight, CA preflight, image check,
+                # and (only when missing) image preparation.
+                runner.run.side_effect = [0, 0, 0, 1, 0] if missing else [0, 0, 0, 0]
+                progress = MagicMock()
+                unified.prepare_prerequisites(runner, progress)
+                image_calls = [
+                    invocation.args[0] for invocation in runner.run.call_args_list
+                    if image_script in invocation.args[0]
+                ]
+                expected = [[unified.sys.executable, image_script, "check"]]
+                if missing:
+                    expected.append([unified.sys.executable, image_script, "initialize"])
+                self.assertEqual(image_calls, expected)
+                self.assertEqual(runner.run.call_count, 5 if missing else 4)
+                self.assertEqual(
+                    progress.finish.call_args_list[-1].args[0],
+                    unified.Status.DONE if missing else unified.Status.CACHED,
+                )
 
     def test_present_images_never_pulled(self):
         with patch.object(images, "run") as runner:

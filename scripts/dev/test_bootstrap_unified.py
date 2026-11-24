@@ -7,7 +7,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import bootstrap_unified as unified
 
