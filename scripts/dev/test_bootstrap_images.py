@@ -1,5 +1,6 @@
 """Offline regression tests for first-install image preparation."""
 
+import inspect
 import re
 import types
 import unittest
@@ -44,11 +45,10 @@ class ImageTests(unittest.TestCase):
 
     def test_only_initialize_installs_images(self):
         shell = (ROOT / "scripts/bootstrap.sh").read_text()
-        unified_source = (ROOT / "scripts/dev/bootstrap_unified.py").read_text()
         self.assertIn("exec python3 scripts/dev/bootstrap_unified.py initialize", shell)
         self.assertNotIn("bootstrap_images.py", shell)
         for mode in ("start", "recover", "check"):
-            section = unified_source.split(f"def {mode}():", 1)[1].split("\ndef ", 1)[0]
+            section = inspect.getsource(getattr(unified, mode))
             self.assertNotIn("prepare_prerequisites", section)
 
         image_script = str(ROOT / "scripts/dev/bootstrap_images.py")
