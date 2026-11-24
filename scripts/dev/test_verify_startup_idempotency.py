@@ -195,9 +195,12 @@ class IdempotencyAcceptanceTests(unittest.TestCase):
         networks = [{"Name": name} for name in acceptance.NETWORKS]
         with patch.object(acceptance, "docker_json", side_effect=lambda *args: {
             "container": containers, "volume": volumes, "network": networks
-        }[args[0]]), patch.object(acceptance, "names_for", return_value=()), \
-             patch.object(acceptance, "migration_fingerprint", return_value="a" * 32):
-            with self.assertRaisesRegex(acceptance.AcceptanceError, "not running"):
+        }[args[0]]), \
+             patch.object(acceptance, "names_for", side_effect=lambda kind: fixture()[kind + "_inventory"]), \
+             patch.object(acceptance, "migration_fingerprint", return_value="a" * 32), \
+             patch.object(acceptance, "vault_ui_inventory", return_value=(False, None, False)):
+            with self.assertRaisesRegex(acceptance.AcceptanceError,
+                                       "Container not running: " + acceptance.CONTAINERS[2]):
                 acceptance.snapshot()
 
     def test_names_for_rejects_unrelated_host_resources(self):

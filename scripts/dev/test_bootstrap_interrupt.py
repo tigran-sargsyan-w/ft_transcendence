@@ -4,6 +4,7 @@ import signal
 import subprocess
 import sys
 import unittest
+from pathlib import Path
 
 from bootstrap_interrupt import DeferredInterrupt, defer_termination
 
@@ -57,6 +58,7 @@ except DeferredInterrupt as exc:
 raise AssertionError('signal not delivered')
 '''
         result = subprocess.run([sys.executable, '-c', code],
+                                cwd=Path(__file__).resolve().parent,
                                 start_new_session=True, capture_output=True,
                                 timeout=5, check=False)
         self.assertEqual(result.returncode, 130, result.stderr.decode())

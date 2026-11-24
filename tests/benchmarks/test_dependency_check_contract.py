@@ -15,7 +15,8 @@ DEV = ROOT / "scripts" / "dev"
 # Exact imported-module aliases and their expected read-only dependencies.
 # A changed edge requires an explicit review of the dependency graph.
 DEPENDENCIES = {
-    "nginx": {"frontend": "frontend"},
+    "nginx": {"frontend": "frontend", "tls_access": "nginx-tls-access"},
+    "nginx-tls-access": {},
     "frontend": {"support": "support-services"},
     "support-services": {"backend": "backend"},
     "backend": {"agent": "backend-agent"},
@@ -30,6 +31,7 @@ DEPENDENCIES = {
 
 FILES = {
     "nginx": "bootstrap_nginx.py",
+    "nginx-tls-access": "nginx_tls_access.py",
     "frontend": "bootstrap_frontend.py",
     "support-services": "bootstrap_support_services.py",
     "backend": "bootstrap_backend.py",
@@ -70,7 +72,7 @@ def imported_modules(source):
         if not isinstance(node, ast.Import):
             continue
         for entry in node.names:
-            if entry.name.startswith("bootstrap_"):
+            if entry.name in {Path(filename).stem for filename in FILES.values()}:
                 aliases[entry.asname or entry.name] = entry.name
     return aliases
 
@@ -101,7 +103,8 @@ class DependencyCheckContract(unittest.TestCase):
     def test_nginx_includes_all_essential_independent_checks(self):
         actual = {node: set(mapping.values()) for node, mapping in DEPENDENCIES.items()}
         self.assertEqual(reachable("nginx", actual), set(DEPENDENCIES))
-        self.assertEqual(len(reachable("nginx", actual)), 11)
+        self.assertEqual(len(reachable("nginx", actual)), 12)
+        self.assertIn("nginx-tls-access", reachable("nginx", actual))
 
     def test_each_module_retains_expected_read_only_check_edges(self):
         for name, mapping in DEPENDENCIES.items():
@@ -112,8 +115,7 @@ class DependencyCheckContract(unittest.TestCase):
                                       f"Unexpected dependency changes in {FILES[name]}")
                 imports = imported_modules(source)
                 for alias, target in mapping.items():
-                    self.assertEqual(imports.get(alias), "bootstrap_" + target.replace("-", "_")
-                                     if target != "support-services" else "bootstrap_support_services")
+                    self.assertEqual(imports.get(alias), Path(FILES[target]).stem)
 
     def test_exact_call_extraction_rejects_other_modes(self):
         source = '''import bootstrap_a as dependency
