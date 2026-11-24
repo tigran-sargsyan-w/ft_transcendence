@@ -296,7 +296,12 @@ class ProgressTests(unittest.TestCase):
         self.assertNotRegex(tail, r"\x1b\[[0-9;?]*[ABHJK]")
         self.assertNotIn("\x1b[?1049", output.getvalue())
         self.assertIn("append-only progress", tail)
-        report = re.sub(r"\x1b\[[0-9;]*m", "", tail.split("Final stage report", 1)[1])
+        heading = "[+] Final stage report (actual results; previous progress above)\n"
+        self.assertEqual(tail.count(heading), 1)
+        journal, report = tail.split(heading, 1)
+        self.assertIn("Final stage report follows at exit.", journal)
+        self.assertIn("[02/04]", journal)
+        report = re.sub(r"\x1b\[[0-9;]*m", "", report)
         self.assertEqual(report.count("[01/04]"), 1)
         self.assertEqual(report.count("[02/04]"), 1)
         self.assertIn("total 1.0s", report)
