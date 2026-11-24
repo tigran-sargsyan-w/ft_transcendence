@@ -18,37 +18,26 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Reviewed against the Issue #157 baseline and optimized first-run flows.
-# The exact sequence is intentional; changes to installer prompts need review.
-APPROVAL_SEQUENCE = (
-    "Download these missing Docker images?",
-    "Prepare local domain and TLS on this VM?",
-    "Apply this change?",  # /etc/hosts mapping
-    "Trust this CA on Linux?",  # local mkcert CA trust
-    "Create missing Docker networks and volumes on this VM?",
-    "Initialize or resume local development Vault on this VM?",
-    "Configure Vault policies and AppRoles on this VM?",
-    "Create missing PostgreSQL secrets in Vault on this VM?",
-    "Initialize or resume PostgreSQL on this VM?",
-    "Provision PostgreSQL roles using Vault credentials on this VM?",
-    "Apply Prisma migrations and reconcile PostgreSQL grants?",
-    "Prepare backend Vault Agent on this VM?",
-    "Build/start Vault-backed NestJS backend on this VM?",
-    "Prepare Docker Proxy, Collector and Graph Engine on this VM?",
-    "Build/start React/Vite frontend on this VM?",
-    "Start local HTTPS Nginx gateway on this VM?",
-    "Create/start Prometheus on this VM?",
-    "Prepare initial Grafana credentials in Vault?",
-    "Prepare Grafana Vault Agent on this VM?",
-    "Create/start Grafana on this VM?",
+# Issue #160: initialization must never request or receive approval.
+STAGE_NAMES = (
+    "System dependencies", "Docker images", "host", "resources", "vault",
+    "vault-ui", "vault-config", "vault-secrets", "postgres", "postgres-roles",
+    "migrations", "backend-agent", "backend", "support-services", "frontend",
+    "nginx", "prometheus", "grafana-secrets", "grafana-agent", "grafana",
+    "grafana-https",
 )
 
 TIMING = re.compile(
     r"^TIMING: stage=([a-z0-9-]+) attempt=(\d+)/(\d+) "
     r"result=(PASS|FAIL) elapsed=(\d+(?:\.\d+)?)s$"
 )
-# Only matching the bracket syntax does NOT authorize a prompt.
-YES_NO_PROMPT = re.compile(r"^(.*\?)\s+\[[yYnN]/[yYnN]\](?::)?\s*$")
+# Any approval prompt is a regression, including formerly reviewed prompts.
+YES_NO_PROMPT = re.compile(r"\[[yYnN]/[yYnN]\]")
+STAGE_END = re.compile(
+    r"^=> \[(\d+)/(\d+)\] ([A-Za-z0-9 -]+) "
+    r"(DONE|CACHED|SKIPPED|FAILED|CANCELLED) (\d+(?:\.\d+)?)s \| total (\d+(?:\.\d+)?)s$"
+)
+PROMPT_REFUSED = "ERROR: Unexpected initialization approval prompt; stopped safely."
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 SHA = re.compile(r"[a-f0-9]{40}\Z")
 LABEL = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}\Z")
@@ -112,7 +101,8 @@ def preflight(root, expected_commit):
     if git_capture(root, "status", "--porcelain", "--untracked-files=all"):
         raise BenchmarkError("working tree is not clean")
 
-    private_vault = Path.home() / ".local/state/transcendence/dev/private/vault-init.json"
+    private_vault = (Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
+                     / "transcendence/dev/private/vault-init.json")
     if private_vault.exists() or private_vault.is_symlink():
         raise BenchmarkError("existing private Vault initialization material detected")
 
@@ -125,12 +115,14 @@ def preflight(root, expected_commit):
 
 
 class Recorder:
-    """Parse non-secret stage timings and authorize exact sequential prompts."""
+    """Parse reviewed stage metrics; never approve an installer prompt."""
 
     def __init__(self, started):
         self.started = started
         self.checks = []
-        self.approvals = []
+        self.approvals = []  # retained in reports for baseline comparison
+        self.unexpected_confirmations = 0
+        self.stages = []
         self.preparations = {}
         self.line_buffer = ""
         self.last_approved_line = False
@@ -141,6 +133,17 @@ class Recorder:
         clean = ANSI.sub("", line).strip()
         if clean == READY_MARKER:
             self.ready = True
+        if clean == PROMPT_REFUSED:
+            self.unexpected_confirmations += 1
+            self.rejection = "unexpected confirmation"
+        terminal = STAGE_END.fullmatch(clean)
+        if terminal:
+            number, count, name, status, seconds, total = terminal.groups()
+            index = int(number) - 1
+            if (int(count) == len(STAGE_NAMES) and index == len(self.stages)
+                    and 0 <= index < len(STAGE_NAMES) and name == STAGE_NAMES[index]):
+                self.stages.append({"stage": name, "status": status,
+                                    "seconds": float(seconds), "total_seconds": float(total)})
         match = TIMING.fullmatch(clean)
         if match:
             stage, attempt, _, outcome, duration = match.groups()
@@ -162,7 +165,7 @@ class Recorder:
                 self.preparations[stage] = {"started": now}
 
     def feed(self, data, reply, now=None):
-        """Consume PTY bytes. Reply with yes only in the exact reviewed order."""
+        """Consume PTY bytes, rejecting every approval prompt."""
         if now is None:
             now = time.monotonic() - self.started
         decoded = data.decode("utf-8", "replace")
@@ -176,36 +179,25 @@ class Recorder:
             if not fragment:
                 continue
             self.line_buffer = (self.line_buffer + fragment)[-4096:]
-            match = YES_NO_PROMPT.fullmatch(ANSI.sub("", self.line_buffer))
+            match = YES_NO_PROMPT.search(ANSI.sub("", self.line_buffer))
             if not match or self.last_approved_line:
                 continue
             self.last_approved_line = True
-            question = match.group(1)
-            next_index = len(self.approvals)
-            if (
-                self.rejection is None
-                and next_index < len(APPROVAL_SEQUENCE)
-                and question == APPROVAL_SEQUENCE[next_index]
-            ):
-                reply(b"y\n")
-                self.approvals.append({
-                    "prompt": question,
-                    "elapsed_seconds": round(now, 3),
-                })
-            else:
-                # Never print/store unknown prompt text: it might contain a secret.
-                self.rejection = "unexpected, repeated or out-of-order confirmation"
-                reply(b"n\n")
+            self.unexpected_confirmations += 1
+            self.rejection = "unexpected confirmation"
+            reply(b"n\n")
 
     def successful(self, exit_code):
         return (
             exit_code == 0 and self.ready and self.rejection is None
-            and len(self.approvals) == len(APPROVAL_SEQUENCE)
+            and self.unexpected_confirmations == 0
+            and len(self.stages) == len(STAGE_NAMES)
+            and all(s["status"] in ("DONE", "CACHED", "SKIPPED") for s in self.stages)
         )
 
     def report(self, commit, label, started_utc, elapsed, exit_code):
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "label": label,
             "commit": commit,
             "started_utc": started_utc,
@@ -215,6 +207,8 @@ class Recorder:
             "readiness_marker_seen": self.ready,
             "confirmation_refusal": self.rejection is not None,
             "auto_approvals": self.approvals,
+            "unexpected_confirmations": self.unexpected_confirmations,
+            "stages": self.stages,
             "checks": self.checks,
             "preparations": {
                 k: {key: val for key, val in v.items() if key != "started"}
@@ -241,7 +235,7 @@ def safe_output_directory(root, requested):
 def summarize(recorder, elapsed, exit_code, destination):
     print("\n=== SAFE FIRST-RUN BENCHMARK SUMMARY ===")
     print(f"Total: {elapsed:.2f}s | Exit: {exit_code} | "
-          f"Confirmations: {len(recorder.approvals)}/{len(APPROVAL_SEQUENCE)}")
+          f"Unexpected confirmations: {recorder.unexpected_confirmations} (expected 0)")
     print(f"Checks measured: {len(recorder.checks)}")
     for stage in dict.fromkeys(e["stage"] for e in recorder.checks):
         entries = [e for e in recorder.checks if e["stage"] == stage]
@@ -257,8 +251,8 @@ def summarize(recorder, elapsed, exit_code, destination):
         print("ERROR: unexpected confirmation was denied; stop and review")
     elif not recorder.ready:
         print("ERROR: unified initialization ready marker was not observed")
-    elif len(recorder.approvals) != len(APPROVAL_SEQUENCE):
-        print("ERROR: not all reviewed confirmations occurred")
+    elif len(recorder.stages) != len(STAGE_NAMES):
+        print("ERROR: not all initialization stages were observed")
     print(f"Safe metrics JSON: {destination}")
     print("NOTE: do not share full terminal output or Vault recovery material")
 
@@ -319,7 +313,7 @@ def main(argv=None):
     started = time.monotonic()
     started_utc = datetime.now(timezone.utc).isoformat()
     recorder = Recorder(started)
-    print("=== FIRST-RUN BENCHMARK (reviewed prompts only) ===", flush=True)
+    print("=== FIRST-RUN BENCHMARK (zero approval prompts expected) ===", flush=True)
     print(f"Commit: {commit[:12]} | Label: {args.label} | No raw output saved", flush=True)
     try:
         def master_read(fd):

@@ -16,8 +16,8 @@ make initialize
 
 Run as the regular developer user, without sudo.
 
-The initializer retains individual operator confirmations for
-provisioning steps. It must stop on invalid existing resources,
+The historical #157 initializer retained individual confirmations. Issue #160
+removes them from the fixed development initialization path. It must stop on invalid existing resources,
 container identities, TLS configuration, Vault state, database
 permissions, or failed service readiness.
 
@@ -78,15 +78,15 @@ To include stage check timings:
 FT_DEV_STAGE_TIMING=1 make initialize
 ```
 
-To request additional package-preflight and resource inventory details:
+To request additional safe child diagnostic summaries:
 
 ```sh
 FT_DEV_BOOTSTRAP_VERBOSE=1 make initialize
 ```
 
-These flags can be combined. The verbose flag does not expose all
-output from internal read-only probes, which remain quiet during
-normal orchestration.
+These flags can be combined. Neither exposes raw child output. Verbose mode
+reports child exit codes and diagnostic counts; targeted read-only checks can
+be run separately.
 
 For a focused failure investigation, run the reported read-only
 check explicitly, for example:
@@ -142,16 +142,17 @@ The benchmark runs the guarded `make initialize` workflow using
 an interactive PTY, measures wall-clock time and stage checks,
 and saves structured JSON metrics outside the repository.
 
-It supports an arbitrary expected Git commit SHA and a result
-label, allowing baseline and optimized runs to use the same tool.
+It requires an exact expected Git commit SHA and a result label.
+Use the historical #157 tool to reproduce historical approval-based baselines.
 
 The runner requires a clean Git working tree and refuses detected
 existing project containers, volumes, networks and local Vault
 initialization material. It also requires an explicit disposable-VM
 authorization before an installation benchmark.
 
-Only the reviewed sequence of 20 operator confirmations is
-automatically approved. Unexpected prompts are refused.
+The #160 runner expects zero installer approval prompts, refuses any that
+appear, and records completed stage durations in schema version 2. It never
+sends an affirmative response. Historical #157 results below remain unchanged.
 The operator must still independently verify the restored snapshot.
 
 Example on a deliberately restored disposable VM:
@@ -165,7 +166,7 @@ python3 scripts/dev/benchmark_initialize.py \
 
 python3 scripts/dev/benchmark_initialize.py \
   --expected-commit "$SHA" \
-  --label optimized \
+  --label confirmation-free \
   --run \
   --approve-disposable-vm
 ```
@@ -328,3 +329,17 @@ Related guides:
 - [Health reporting](dev-health-report.md)
 - [Startup idempotency](dev-startup-idempotency.md)
 - [Vault UI administration](dev-vault-ui-on-demand.md)
+
+## Issue #160 initialization progress and cancellation
+
+The fixed 21-stage display includes system dependencies and Docker images before the 19 existing service stages. CACHED means a fresh readiness check passed, not an on-disk cache. DONE means the guarded preparation and required verification succeeded. Optional Vault UI remains SKIPPED. FAILED and CANCELLED stop the sequence; later stages are not executed.
+
+An interactive terminal repaints the active row. CI, redirected output, verbose mode and timing mode use plain append-only text. Host operations may temporarily pause repainting to let normal sudo authentication use the controlling terminal. Noninteractive initialization requires any necessary sudo authorization to be available already; it never requests or stores a password itself.
+
+Each operation retains its existing security checks. The internal stage dispatch is allowlisted and receives the held orchestrator lock descriptor, not a global yes flag. The Linux CA workflow will trust only an already trusted CA or a newly generated, recorded and validated CA. Unexpected CA paths, files and untrusted existing CAs are refused. Windows trust is outside this automatic path. Docker enrollment is restricted to a checked local socket and still requires normal sudo; sign out/in when instructed.
+
+Ctrl+C/SIGTERM stop further stages. Vault initialization defers cancellation while the initial recovery response is being saved durably; the parent waits and does not force-kill that critical section. An already initialized sealed Vault is not automatically unsealed. Cancellation is not a rollback: Docker/OS operations may have completed or be in flight. Review stage state with make plan and the reported check before rerunning initialize for a genuinely partial fresh install. Use make recover for an initialized sealed Vault. A power loss, SIGKILL or uncertain/partial recovery-file write requires manual recovery; never delete the recovery file or volume to retry.
+
+Raw child output is not forwarded or saved, including verbose mode. Reviewed fixed notices, warning/error counts, actual exit codes and a targeted check are provided instead. Run the reported maintenance check locally for detailed diagnosis; do not share unreviewed logs or secret material.
+
+Issue #160 cold-VM and full CI results must be recorded separately from the historical #157 benchmark. No measurements for #160 are claimed here.

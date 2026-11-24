@@ -65,11 +65,14 @@ class Diagnostics:
         self.notices = []
         self.buffers = {0: b'', 1: b''}
         self.truncated = {0: False, 1: False}
+        self.prompt_seen = False
 
     def line(self, stream, value):
         if not value:
             return
         self.counts['stdout' if stream == 0 else 'stderr'] += 1
+        if re.search(rb'\[[yYnN]/[yYnN]\]', value):
+            self.prompt_seen = True
         if value in NOTICES:
             notice = NOTICES[value]
             if notice not in self.notices:
@@ -121,7 +124,7 @@ class ChildRunner:
             self.progress.pause()
         try:
             with subprocess.Popen(argv, cwd=cwd, env=env, pass_fds=pass_fds,
-                                  stdin=None if foreground else subprocess.DEVNULL,
+                                  stdin=subprocess.DEVNULL,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                   start_new_session=not foreground) as child:
                 interrupted = None
@@ -164,7 +167,10 @@ class ChildRunner:
             if not probe or not notice.startswith('ERROR:'):
                 self.progress.notice(notice)
         counts = diagnostics.counts
-        if self.verbose or (not probe and self.last_returncode != 0) or counts['warning']:
+        if diagnostics.prompt_seen:
+            self.progress.notice('ERROR: Unexpected initialization approval prompt; stopped safely.')
+            self.last_returncode = self.last_returncode or 1
+        if self.verbose or (not probe and (self.last_returncode != 0 or counts['stderr'])) or counts['warning']:
             self.progress.notice(f"Child exit {self.last_returncode}; stdout {counts['stdout']} lines, "
                                  f"stderr {counts['stderr']} lines, warnings {counts['warning']}, "
                                  f"errors {counts['error']}, oversized {counts['oversized']} (raw output withheld)")

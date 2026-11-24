@@ -17,22 +17,23 @@ The Vault Web UI is an [optional, on-demand administrative gateway](dev-vault-ui
 1. Check out the project on the dedicated Ubuntu VM, including the intended reviewed commit. Keep local work and sensitive materials outside Git.
 2. Ensure the repository has been cloned and Git and GNU Make are
    available. `make initialize` installs missing OS/Docker prerequisites
-   and downloads required container images with confirmation. There is
+   and downloads required container images without approval prompts. There is
    no mandatory separate `install-deps.sh`, `make setup` or manual
    `docker pull` step. Existing local image tags are preserved.
 
    If Docker group membership changes, log out and back in before
    rerunning initialization. This is an operator-approved, resumable
-   first-install flow, not a silent privilege escalation.
+   first-install flow. Docker group membership grants root-equivalent access;
+   initialization authorizes automatic enrollment only for the verified local daemon.
 
-3. Run the single first-time entry point **in an interactive terminal**:
+3. Run the single first-time entry point (a terminal is recommended for sudo authentication):
 
    ```sh
    make initialize
    # Equivalent: ./scripts/bootstrap.sh --initialize
    ```
 
-   The operator must review and individually approve the necessary preparation stages (host TLS/CA, Docker resources, Vault, KV/ACL/AppRoles, initial DB secrets, PostgreSQL, roles, Prisma migrations, runtime Agent, backend, support services, frontend, Nginx, Prometheus, Grafana credentials, Grafana Vault Agent and Grafana). The helper never silently replaces a detected existing initialized Vault or PostgreSQL cluster. **Do not use initialization to recover from a reboot or a failed check.**
+   Invoking the command authorizes the fixed development provisioning stages; no additional approval prompts are required. This automatic path supports native Ubuntu Linux only, not Windows/WSL trust installation or a remote Docker daemon. Existing valid resources are retained and conflicting state is refused. Unknown untrusted browser CAs require explicit review. A sudo password request, if needed, is ordinary OS authentication, not a bootstrap confirmation. See [initialization progress and cancellation](dev-initialize-reliability.md#issue-160-initialization-progress-and-cancellation). **Do not use initialization to recover from a reboot or as a blind repair for an unhealthy stack.**
 
 4. Secure the generated Vault recovery material according to the local procedure and retain **two distinct Shamir shares in approved secure storage outside the VM**. The protected local `vault-init.json` contains root-level recovery material: never print it, commit it or paste it into an issue. Maintain an independent backup of persistent application data.
 5. Validate readiness:

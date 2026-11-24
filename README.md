@@ -25,7 +25,7 @@ make up
 The guarded entry point verifies the existing Vault-backed stack and starts only known, trusted stopped containers. It does not initialize Vault, create database credentials, run Prisma migrations or recreate persistent volumes. Open `https://transcendence.test:8443` in the browser configured for that VM.
 
 For a new Ubuntu development VM, clone the repository, ensure Git and
-GNU Make are available, then run **one interactive first-install command**:
+GNU Make are available, then run **one guarded first-install command**:
 
 ```sh
 make initialize
@@ -33,8 +33,10 @@ make initialize
 
 It prepares missing system/Docker prerequisites and required images, then
 runs the guarded host, Vault, database, application and monitoring stages.
-Approval is requested before privileged setup operations. If Docker group
-membership changes, log out and back in, then rerun the command.
+No bootstrap approval prompts are required on supported native Ubuntu Linux;
+normal sudo authentication may still be necessary. Docker group membership
+may be configured automatically; log out and back in if instructed. Interactive
+terminals show live stage progress; CI and redirected logs are plain text.
 
 Do not use `sudo make initialize`. Existing installations and upgrades
 require separate review; initial setup is not a replacement for recovery.

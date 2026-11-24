@@ -121,6 +121,11 @@ def prepare():
     root = ca_root()
     previous = inspect_ca(root)
     linux_hosts.append_text(linux_hosts.read_hosts(), domains.DEFAULT_DOMAIN)
+    for path in (nginx_tls_access.PROJECT_ROOT / 'infra',
+                 nginx_tls_access.PROJECT_ROOT / 'infra/nginx',
+                 certificates.CERT_DIR, certificates.CERT_FILE, certificates.KEY_FILE):
+        if path.is_symlink():
+            raise LinuxCAError('Refusing symlink in browser TLS path')
     if certificates.setup() != 0:
         raise LinuxCAError("Browser TLS setup failed; existing files retained")
     nginx_tls_access.check_files()

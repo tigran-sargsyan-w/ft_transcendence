@@ -102,3 +102,7 @@ final `--health-report`, and whether the browser is accessible at
 `https://transcendence.test:8443`. Do not record secret values or full Docker
 inspect output. The already completed Phase 6B reboot test is separate
 supporting evidence; Phase 6D does not require another reboot.
+
+## Interrupted first initialization (Issue #160)
+
+This is distinct from the routine-start acceptance test above. An interrupted fresh setup may have created trusted resources already. Check the active stage using the reported read-only check and make plan. After reviewing partial state, rerun make initialize to continue missing guarded operations. Existing initialized sealed Vault requires manual unseal with make recover; if application provisioning is incomplete, recovery can stop at a missing service, after which reviewed initialization may resume. Never delete persistent volumes or rotate credentials just to resume. Cancellation during Vault recovery-material persistence waits for the critical write but cannot protect against SIGKILL or power loss.

@@ -21,7 +21,10 @@ import sys
 import time
 from pathlib import Path
 
-from bootstrap_interrupt import DeferredInterrupt, defer_termination
+if __package__:
+    from .bootstrap_interrupt import DeferredInterrupt, defer_termination
+else:
+    from bootstrap_interrupt import DeferredInterrupt, defer_termination
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT = "transcendence-vault-dev"
