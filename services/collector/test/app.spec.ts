@@ -215,6 +215,56 @@ describe('Collector HTTP API', () => {
     await app.close();
   });
 
+
+  it('exposes Prometheus metrics', async () => {
+    const deps = makeDependencies();
+
+    const app = createApp({
+      ...deps,
+      logger: false,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/metrics',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/plain');
+    expect(response.headers['content-type']).toContain('version=0.0.4');
+    expect(response.body).toContain('# TYPE ft_demo_lab_present gauge');
+    expect(response.body).toContain('ft_demo_lab_present 0');
+    expect(deps.snapshots.create).toHaveBeenCalledOnce();
+
+    await app.close();
+  });
+
+  it('returns 503 when metrics snapshot fails', async () => {
+    const deps = makeDependencies();
+
+    deps.snapshots.create.mockRejectedValue(
+      new Error('Docker Engine is unavailable'),
+    );
+
+    const app = createApp({
+      ...deps,
+      logger: false,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/metrics',
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json().error.code).toBe(
+      'COLLECTOR_DOCKER_UNAVAILABLE',
+    );
+    expect(response.body).not.toContain('ft_demo_service_healthy');
+
+    await app.close();
+  });
+
   it.each([
     '/api/v1/events',
     '/api/v1/events?after=abc',

@@ -1,0 +1,23 @@
+groups:
+  - name: ft_demo_lab
+    rules:
+      - alert: CollectorMetricsUnavailable
+        expr: up{job="collector"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Collector metrics endpoint is unavailable
+          description: Prometheus cannot scrape Collector metrics.
+
+      - alert: DemoLabServiceNotHealthy
+        expr: |
+          (ft_demo_service_healthy{job="collector",service=~"db|api|web"} == 0)
+          and on(job, instance)
+          (ft_demo_lab_present{job="collector"} == 1)
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Demo Lab service {{ $labels.service }} is not healthy'
+          description: 'Required Demo Lab service {{ $labels.service }} is missing, stopped, or unhealthy.'

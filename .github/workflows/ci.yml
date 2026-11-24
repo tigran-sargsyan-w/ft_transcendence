@@ -50,6 +50,8 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
       - name: Lint
         run: npm run lint
       - name: Unit tests (currently pass when no tests are found)
@@ -203,6 +205,9 @@ jobs:
       - name: Test unified Compose safety invariants
         run: python3 -m unittest discover -s infra/vault/scripts -p 'test_compose_unification.py' -v
 
+      - name: Test Clean-Room isolation safety offline
+        run: python3 -m unittest discover -s infra/vault/scripts -p 'test_cleanroom_preflight_safety.py' -v
+
       - name: Test development startup preflight offline
         run: python3 -m unittest discover -s infra/vault/scripts -p 'test_dev_preflight.py' -v
 
@@ -220,3 +225,63 @@ jobs:
 
       - name: Validate Vault server Compose
         run: docker compose --profile "*" -f infra/vault/server/compose.yml config --quiet
+
+  monitoring:
+    name: Monitoring / infrastructure validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate bootstrap shell syntax
+        run: bash -n scripts/bootstrap.sh
+
+      - name: Test development bootstrap and monitoring offline
+        run: python3 -m unittest discover -s scripts/dev -p 'test_*.py' -v
+
+      - name: Validate Grafana dashboard JSON
+        run: |
+          python3 -m json.tool infra/monitoring/grafana/dashboards/demo-lab.json > /dev/null
+          python3 -m json.tool infra/monitoring/grafana/dashboards/monitoring-pipeline.json > /dev/null
+
+      - name: Pull the pinned WAF image
+        run: docker pull owasp/modsecurity-crs:4.30.0-nginx-202611090911
+
+      - name: Test Grafana datasource requests through isolated WAF
+        run: python3 scripts/dev/verify_grafana_datasource.py --isolated
+
+      - name: Pull the pinned Prometheus image
+        run: docker pull prom/prometheus:v3.15.0
+
+      - name: Validate Prometheus configuration
+        run: |
+          docker run --rm --pull never \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m \
+            --tmpfs /prometheus:rw,nosuid,nodev,noexec,size=16m \
+            --mount "type=bind,src=$PWD/infra/monitoring/prometheus,dst=/etc/prometheus,readonly" \
+            --entrypoint /bin/promtool \
+            prom/prometheus:v3.15.0 \
+            check config /etc/prometheus/prometheus.yml
+
+      - name: Test Prometheus alerting rules
+        run: |
+          docker run --rm --pull never \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m \
+            --tmpfs /prometheus:rw,nosuid,nodev,noexec,size=16m \
+            --mount "type=bind,src=$PWD/infra/monitoring/prometheus,dst=/etc/prometheus,readonly" \
+            --entrypoint /bin/promtool \
+            prom/prometheus:v3.15.0 \
+            test rules /etc/prometheus/tests/demo-lab.test.yml

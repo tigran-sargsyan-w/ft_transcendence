@@ -1,0 +1,906 @@
+{
+  "info": {
+    "_postman_id": "58849d4c-2d5d-4142-877a-552d7dc441ec",
+    "name": "ft_transcendence | WAF Security Evaluation (Validated Demo v2)",
+    "description": "Local-only WAF evaluation collection, revised from observed Postman responses on 2026-11-17. The original 32 probes returned: 22 x HTTP 403, 5 x HTTP 200, 2 x HTTP 400, 1 x HTTP 404, 1 x HTTP 405, 1 x HTTP 308. A new real-SID Engine.IO POST is an additional exploratory request, not yet verified. Enable TLS certificate verification and trust the local mkcert CA. Run requests in order. HTTP 403 alone is not proof of a particular ModSecurity rule: corroborate with CRS audit/error logs. SQLi, XSS, path traversal, command injection and other probes test suspicious patterns on a health endpoint; they DO NOT prove that those vulnerabilities exist in the application. Do not run outside an authorized local development environment. Some requests were previously double-URL-encoded by Postman; this revision stores decoded query values for Postman to encode once where possible, and requires one new live runner validation. The new 08.1b request is the sole added test; original controls remain present.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": {
+      "major": 1,
+      "minor": 0,
+      "patch": 0
+    }
+  },
+  "item": [
+    {
+      "name": "00 — Baseline: allowed traffic",
+      "description": "Positive controls to show that the WAF lets ordinary application traffic through. These should pass before attack demos.",
+      "item": [
+        {
+          "name": "00.1 — WAF gateway health (expect 200)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/healthz",
+            "description": "Dedicated gateway /healthz endpoint. Confirms gateway response, not the full application."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 200 — allowed\", function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "00.2 — Homepage through HTTPS (expect 200)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/",
+            "description": "React/Vite homepage through TLS-terminating Nginx + WAF."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 200 — allowed\", function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "00.3 — NestJS + PostgreSQL health (expect 200)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health",
+            "description": "Checks public API health through WAF and validates database status."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 200 — allowed\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"NestJS health reports application and DB OK\", function () { const data = pm.response.json().data; pm.expect(data.status).to.eql(\"ok\"); pm.expect(data.database).to.eql(\"ok\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "00.4 — Benign query parameter (expect 200)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?q=hello-world_2026",
+            "description": "The same health API with harmless query text. Demonstrates a positive control."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 200 — allowed\", function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 — Previously observed WAF blocks",
+      "description": "Representative SQLi and XSS patterns from this project's earlier local WAF validation. Expected: 403; re-verify after image/rule updates.",
+      "item": [
+        {
+          "name": "01.1 — SQLi: boolean tautology (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?q=1' OR '1'='1",
+            "description": "Previously used in the WAF migration blocking probe. This does not execute SQL because health ignores q. Evidence: 403; correlate CRS audit log for attribution."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "01.2 — XSS: script element (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?q=<script>alert(1)</script>",
+            "description": "Representative XSS payload inside a health endpoint parameter. No page renders this input. Evidence: 403; correlate CRS rule ID."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 — SQL injection: additional candidates",
+      "description": "SQLi signatures in harmless health query parameters. Candidate 403 outcomes are predictions; run on real WAF and calibrate before evaluation.",
+      "item": [
+        {
+          "name": "02.1 — SQLi: UNION SELECT (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?q=1 UNION SELECT username,password FROM users--",
+            "description": "Exercises UNION-based SQLi signatures; no database query is executed by this endpoint."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02.2 — SQLi: comment delimiter (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?q=admin'--",
+            "description": "Exercises SQL comment tokens in URL parameter. May require more context; 403 is a candidate expectation."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02.3 — SQLi: stacked statement (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?q=1'; DROP TABLE demo_table;--",
+            "description": "Text in an ignored health query parameter; does not execute SQL or modify tables. Illustrates stacked query signatures."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02.4 — SQLi: SELECT with sleep token (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?q=1 OR SLEEP(5)=0",
+            "description": "Time-based SQLi signature only. The health endpoint does not run this query; it should not induce actual delay. This tests a signature pattern, not an actual 5-second server-side SQL sleep."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 — Cross-site scripting: additional candidates",
+      "description": "XSS variants are sent to an ignored query parameter; they are never rendered or executed by the frontend. Candidate 403 expectations.",
+      "item": [
+        {
+          "name": "03.1 — XSS: image onerror (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?q=<img src=x onerror=alert(1)>",
+            "description": "Event handler injection fingerprint in a harmless query."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03.2 — XSS: SVG onload (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?q=<svg/onload=alert(1)>",
+            "description": "SVG event-handler attack signature. No browser rendering occurs."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03.3 — XSS: javascript URI (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?redirect=javascript:alert(1)",
+            "description": "JavaScript URL injection signature. May or may not cross the CRS anomaly threshold."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 — Path traversal / local file inclusion candidates",
+      "description": "These are strings in query parameters on the health route. No file is read by the application. OWASP CRS 930 family may reject them.",
+      "item": [
+        {
+          "name": "04.1 — Traversal: Unix passwd (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?file=../../../../etc/passwd",
+            "description": "Looks for Unix directory traversal / sensitive file reference in an ignored parameter."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.2 — Traversal: Windows win.ini (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?file=..\\..\\..\\Windows\\win.ini",
+            "description": "Windows-style traversal string, not a file access attempt."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.3 — Traversal: encoded dot segments (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?file=..%2f..%2fetc%2fpasswd",
+            "description": "Encodes traversal delimiters inside a query parameter; some clients normalize/double-encode. Inspect the actual sent URL in Postman. Deliberate encoded-segment / double-encoding probe. Verify actual on-wire bytes in Postman Console."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 — Remote command injection candidates",
+      "description": "Potential shell-command expressions in the inert health query parameter. They are not executed on the backend. OWASP CRS 932 family may block.",
+      "item": [
+        {
+          "name": "05.1 — RCE: shell semicolon (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?cmd=;cat /etc/passwd",
+            "description": "Signature probe only; no command execution is part of this demo."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05.2 — RCE: shell substitution (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?cmd=$(id)",
+            "description": "Shell substitution marker in a query parameter."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05.3 — RCE: pipe operator (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?cmd=echo demo | whoami",
+            "description": "Shell pipeline signature in a query parameter."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 — HTTP protocol / policy enforcement",
+      "description": "Method restrictions and Content-Type enforcement are configured in compose.yml (allowed methods exclude TRACE; CRS rule 920420 is scoped-off only for Socket.IO polling POST).",
+      "item": [
+        {
+          "name": "06.1 — TRACE rejected by gateway (observed 405)",
+          "request": {
+            "method": "TRACE",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health",
+            "description": "Observed HTTP 405 from Nginx. Not a ModSecurity-specific blocking proof. TRACE is not in ALLOWED_METHODS."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"TRACE rejected: HTTP 405 (server/gateway policy)\", function () { pm.response.to.have.status(405); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06.2 — POST text/plain OUTSIDE Socket.IO (observed 403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/health",
+            "description": "Expected to hit CRS 920420 because the text/plain exception applies only under /socket.io/ and only for POST polling. Backend endpoint need not support POST.",
+            "body": {
+              "mode": "raw",
+              "raw": "40",
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06.3 — Benign JSON passes WAF; backend returns 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/health",
+            "description": "Negative control for 920420. Health controller may reject POST with 404/405; the assertion tests only that WAF does not return 403.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"demo\":\"benign\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"WAF accepted JSON; backend route is absent (404)\", function () { pm.response.to.have.status(404); });",
+                  "pm.test(\"Backend NOT_FOUND response\", function () { pm.expect(pm.response.json().error.code).to.eql(\"NOT_FOUND\"); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 — Additional exploratory CRS signatures",
+      "description": "Exploratory probes of different detection families. These are not validated against this local deployment; a failed 403 expectation requires investigation, not a false claim in evaluation.",
+      "item": [
+        {
+          "name": "07.1 — Scanner fingerprint: sqlmap User-Agent (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "sqlmap/1.7.2",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/health",
+            "description": "CRS scanner detection (913 family) may flag well-known tooling User-Agent. Only a header string; no scanner is run."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07.2 — HTTP response splitting: CRLF in parameter (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?next=hello%0D%0ASet-Cookie%3A%20demo%3D1",
+            "description": "CRLF-in-query pattern for HTTP injection/response splitting signatures. Encoded query; no real header injection performed. NOTE: The logged URL showed a double-encoded CRLF marker; exact unencoded CRLF behavior is not established by this one probe."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07.3 — Log4Shell-style marker (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?q=${jndi:ldap://127.0.0.1:1389/demo}",
+            "description": "Detection-only local-loopback signature. No remote listener or external callback. Use only against own development stack. Detection of a JNDI marker does not imply Log4Shell exists in the NestJS application."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07.4 — Server-side template expression (observed 403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/health?template=%7B%7B7%2A7%7D%7D",
+            "description": "SSTI probe, may not be blocked by default CRS depending on context. A non-403 does not imply exploitable template rendering. NOTE: Curly-brace expression was percent-encoded in the stored URL and double-encoded in the observed Postman console. This only proves signature screening for this encoding, not an SSTI vulnerability."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "08 — Engine.IO / Socket.IO scoped CRS exception",
+      "description": "Expected application outcomes may be 400/401 because intentionally invalid or missing auth/sid. For GET and POST with valid polling Content-Type, the narrow CRS 920420 exception must keep WAF from returning 403. Do not confuse this with a successful authenticated Socket.IO connection.",
+      "item": [
+        {
+          "name": "08.1 — Engine.IO polling handshake (observed 200; save live SID)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/socket.io/?EIO=4&transport=polling",
+            "description": "Engine.IO open packet (HTTP 200) is the transport handshake, not an authenticated Socket.IO namespace session. The Postman test stores its short-lived SID for the immediately following optional live POST. For true WebSocket/Socket.IO upgrade and message exchange, use a separate Postman Socket.IO request in the UI; plain HTTP requests in this collection are not WebSocket frames."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Engine.IO returns HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Engine.IO open packet contains a real SID\", function () { const raw = pm.response.text(); pm.expect(raw.charAt(0)).to.equal(\"0\"); const handshake = JSON.parse(raw.slice(1)); pm.expect(handshake.sid).to.be.a(\"string\").and.not.empty; pm.collectionVariables.set(\"engineio_sid\", handshake.sid); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "08.1b — Live Engine.IO polling POST with captured SID (EXPLORATORY)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain;charset=UTF-8",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/socket.io/?EIO=4&transport=polling&sid={{engineio_sid}}",
+            "body": {
+              "mode": "raw",
+              "raw": "40",
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              }
+            },
+            "description": "New positive-control transport test, NOT yet verified on the real WAF. Run 08.1 immediately before this request to capture a fresh SID. A successful Engine.IO HTTP POST typically returns HTTP 200 and body ok, even if subsequent Socket.IO authentication rejects the namespace connection. A 400 may mean the transient SID expired or the namespace/backend closed it. If this test fails, inspect the transport response and rerun 08.1 rather than broadening the CRS exclusion."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Live Engine.IO polling POST succeeds (exploratory)\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Engine.IO replied ok, not WAF 403\", function () { pm.expect(pm.response.text()).to.equal(\"ok\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "08.2 — Invalid SID reaches Engine.IO (observed 400, not WAF 403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/socket.io/?EIO=4&transport=polling&sid=intentionally-invalid-demo-sid",
+            "description": "Invalid sid is intentional. Backend may respond 400. Tests WAF 920420 exception with Content-Type text/plain.",
+            "body": {
+              "mode": "raw",
+              "raw": "40",
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Engine.IO rejected unknown SID with HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error originates from Engine.IO rather than WAF\", function () { const obj = pm.response.json(); pm.expect(obj.code).to.equal(1); pm.expect(obj.message).to.equal(\"Session ID unknown\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "08.3 — Charset variant reaches Engine.IO (observed 400, not WAF 403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain;charset=UTF-8",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/socket.io/?EIO=4&transport=polling&sid=intentionally-invalid-demo-sid",
+            "description": "Tests second accepted Content-Type shape: text/plain;charset=UTF-8. Backend may reject invalid sid.",
+            "body": {
+              "mode": "raw",
+              "raw": "40",
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Engine.IO rejected unknown SID with HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error originates from Engine.IO rather than WAF\", function () { const obj = pm.response.json(); pm.expect(obj.code).to.equal(1); pm.expect(obj.message).to.equal(\"Session ID unknown\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "08.4 — text/plain excluded for non-polling transport (observed 403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/socket.io/?EIO=4&transport=websocket&sid=intentionally-invalid-demo-sid",
+            "description": "Control: local 920420 exception is scoped to transport=polling; this POST text/plain is outside exception. Expect 403 from CRS, not 400 from backend.",
+            "body": {
+              "mode": "raw",
+              "raw": "40",
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "08.5 — Polling still blocks SQLi (observed 403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain;charset=UTF-8",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/socket.io/?EIO=4&transport=polling&sid=intentionally-invalid-demo-sid&q=1' OR '1'='1",
+            "description": "Even if 920420 is excluded for this polling POST, SQLi detection should remain enabled. Expected 403 is a candidate: verify WAF rule ID.",
+            "body": {
+              "mode": "raw",
+              "raw": "40",
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Expected HTTP 403 — WAF blocking candidate\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "09 — Optional: HTTP redirect (port 8080)",
+      "description": "Requires port 8080 to be accessible from the Postman machine; VS Code may forward only 8443. Skip this folder if 8080 is not forwarded. Postman redirect following is disabled on this request.",
+      "item": [
+        {
+          "name": "09.1 — HTTP 8080 redirects to HTTPS 8443 (expect 308)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{http_base_url}}/",
+            "description": "Expected 308 with Location https://transcendence.test:8443/. Follow redirects disabled on this request. If no connection, forward local 8080 via VS Code Ports."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 308 redirect to HTTPS\", function () { pm.response.to.have.status(308); });",
+                  "pm.test(\"Location points to local HTTPS\", function () { pm.expect(pm.response.headers.get(\"Location\") || \"\").to.include(\"https://transcendence.test:8443/\"); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "noauth"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://transcendence.test:8443",
+      "type": "string",
+      "description": "Only your own local development WAF HTTPS gateway. Do NOT use production."
+    },
+    {
+      "key": "http_base_url",
+      "value": "http://transcendence.test:8080",
+      "type": "string",
+      "description": "Optional HTTP redirect test; port 8080 must be forwarded."
+    }
+  ]
+}

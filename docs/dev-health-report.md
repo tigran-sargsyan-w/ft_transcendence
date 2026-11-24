@@ -25,8 +25,18 @@ The fast path executes the existing trusted host and resource checks, then
 - Nginx identity, trusted TLS/HTTPS application routes, API/DB health and
   the HTTP-to-HTTPS redirect.
 
-The fast path does not repeat the nested dependency probes 13 times: this
-previously caused Docker CLI timeouts on small VMs.
+The fast path additionally verifies:
+
+- Prometheus identity, readiness and real Collector scrape metrics;
+- Grafana Vault credentials, dedicated Agent and secret delivery;
+- Grafana authentication, provisioned datasource and custom dashboards;
+- Grafana HTTPS routing, anonymous API rejection and WAF blocking.
+
+Monitoring failures are localized to the relevant check where possible.
+See the [monitoring operator guide](dev-monitoring.md).
+
+Nested dependency probes are kept sequential to avoid unnecessary
+parallel Docker workloads on small VMs.
 
 ## Diagnostic path
 

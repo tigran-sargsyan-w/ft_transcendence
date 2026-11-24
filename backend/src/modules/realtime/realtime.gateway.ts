@@ -26,13 +26,19 @@ import { createValidationPipe, validationError } from '../../app.setup.js';
 import { toErrorResponse } from '../../shared/api-envelope.js';
 import { AuthService } from '../auth/auth.service.js';
 import { SESSION_COOKIE } from '../auth/session-cookie.js';
+import {
+  type IncidentChange,
+  IncidentsService,
+} from '../incidents/incidents.service.js';
 import type { TopologySnapshot } from '../topology/graph.types.js';
 import { knownSnapshot } from '../topology/known-snapshot.js';
 import {
   type TopologyChange,
   TopologyService,
 } from '../topology/topology.service.js';
+import { PresenceService, type PresenceChange } from '../presence/presence.service.js';
 import { CommandLimitGuard } from './command-limit.guard.js';
+import { IncidentRoomDto } from './dto/incident-room.dto.js';
 import { SubscribeDto } from './dto/subscribe.dto.js';
 import { disconnectAt } from './session-expiry.js';
 import { WsErrorFilter } from './ws-error.filter.js';
@@ -42,9 +48,16 @@ type AckFn = (response: { data: unknown } | { error: unknown }) => void;
 // One room per environment.
 const room = (environmentId: string) => `env:${environmentId}`;
 
+// One room per incident. The id is the one the database gives, in small
+// letters: the same name for a join, a leave and what the server sends.
+const incidentRoom = (incidentId: string) => `incident:${incidentId}`;
+
 // One room per session, to close its sockets when it ends. It is named after
 // the hash of the session token, which is never sent to a client.
 const sessionRoom = (tokenHash: string) => `session:${tokenHash}`;
+
+// Server-assigned; a client cannot subscribe to another user's room.
+const userRoom = (userId: string) => `user:${userId}`;
 
 // What the server sends: the envelope of docs/architecture/realtime-conventions.md.
 function send(
@@ -72,12 +85,16 @@ export class RealtimeGateway
 
   private readonly logger = new Logger(RealtimeGateway.name);
   private readonly relays: Subscription[] = [];
+  // Preserve event order even if a friendship database lookup is slow.
+  private presenceBroadcasts = Promise.resolve();
   // Known from the first snapshot: a delta does not name its environment.
   private environmentId: string | null = null;
 
   constructor(
     private readonly authService: AuthService,
     private readonly topology: TopologyService,
+    private readonly presence: PresenceService,
+    private readonly incidents: IncidentsService,
   ) {}
 
   afterInit(server: Server) {
@@ -109,6 +126,7 @@ export class RealtimeGateway
           expiresAt: session.expiresAt,
         };
         await socket.join(sessionRoom(session.tokenHash));
+        await socket.join(userRoom(session.user.id));
         next();
       } catch (error) {
         // `connect_error` on the client, with `error.data = { code, message }`.
@@ -126,10 +144,20 @@ export class RealtimeGateway
       this.topology.status$.subscribe((status) =>
         this.toRoom('topology:status', status),
       ),
+      // What the incidents service has committed goes to the room of the incident.
+      this.incidents.changes$.subscribe((change) => this.relayIncident(change)),
       // A logout closes the sockets of that session at once.
-      this.authService.sessionEnded$.subscribe((tokenHash) =>
-        this.server.in(sessionRoom(tokenHash)).disconnectSockets(true),
-      ),
+      this.authService.sessionEnded$.subscribe((tokenHash) => {
+        this.presence.endSession(tokenHash);
+        this.server.in(sessionRoom(tokenHash)).disconnectSockets(true);
+      }),
+      this.presence.changes$.subscribe((change) => {
+        this.presenceBroadcasts = this.presenceBroadcasts
+          .then(() => this.publishPresenceChange(change))
+          .catch((error: unknown) =>
+            this.logger.error('Presence broadcast failed', error),
+          );
+      }),
     );
   }
 
@@ -141,13 +169,27 @@ export class RealtimeGateway
   // unless a logout closes it before. The client then receives `disconnect`
   // with the reason `io server disconnect`.
   handleConnection(socket: Socket) {
-    socket.data.stopExpiry = disconnectAt(socket.data.session.expiresAt, () =>
-      socket.disconnect(true),
+    this.presence.connect(
+      socket.data.user.id,
+      socket.id,
+      socket.data.session.tokenHash,
     );
+    socket.data.stopExpiry = disconnectAt(socket.data.session.expiresAt, () => {
+      this.presence.disconnect(socket.id, true);
+      socket.disconnect(true);
+    });
   }
 
   handleDisconnect(socket: Socket) {
     socket.data.stopExpiry?.();
+    this.presence.disconnect(socket.id);
+  }
+
+  private async publishPresenceChange(change: PresenceChange) {
+    const friendIds = await this.presence.acceptedFriendIds(change.userId);
+    for (const friendId of friendIds) {
+      send(this.server.to(userRoom(friendId)), 'presence:changed', change);
+    }
   }
 
   @SubscribeMessage('topology:subscribe')
@@ -197,6 +239,30 @@ export class RealtimeGateway
     this.answer(socket, ack, snapshot);
   }
 
+  @SubscribeMessage('incident:join')
+  async joinIncident(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody(createValidationPipe()) body: IncidentRoomDto,
+    @Ack() ack?: AckFn,
+  ) {
+    // In v1 every signed-in user may join any incident.
+    const incidentId = await this.incidents.findId(body.incidentId);
+
+    await socket.join(incidentRoom(incidentId));
+    ack?.({ data: { incidentId } });
+  }
+
+  @SubscribeMessage('incident:leave')
+  async leaveIncident(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody(createValidationPipe()) body: IncidentRoomDto,
+    @Ack() ack?: AckFn,
+  ) {
+    // No lookup: leaving a room one is not in does nothing.
+    await socket.leave(incidentRoom(body.incidentId.toLowerCase()));
+    ack?.({ data: {} });
+  }
+
   // The acknowledgement, then the snapshot, then the status: Socket.IO keeps
   // the order of what it sends on one connection.
   private answer(
@@ -215,6 +281,19 @@ export class RealtimeGateway
       this.toRoom('topology:snapshot', change.snapshot);
     } else {
       this.toRoom('topology:delta', change.delta);
+    }
+  }
+
+  // The incident first, then its new entries in the order of the timeline.
+  private relayIncident({ incidentId, incident, entries }: IncidentChange) {
+    const target = this.server.to(incidentRoom(incidentId));
+
+    if (incident) {
+      send(target, 'incident:updated', { incidentId, incident });
+    }
+
+    for (const entry of entries) {
+      send(target, 'timeline:entry_added', { incidentId, entry });
     }
   }
 

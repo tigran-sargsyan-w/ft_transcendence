@@ -1,20 +1,21 @@
 # Incidents API
 
-How the browser opens, reads and updates incidents, and reads their timeline. This is the first version (v1) of the incident room: incidents are opened by hand, every action is written in a timeline that is only ever added to, and two people changing the same incident at the same time cannot overwrite each other. The data model and the reasons are in [ADR 0004](../adr/0004-incident-events-and-topology-history.md); the screens' draft is [pull request #121](https://github.com/tigran-sargsyan-w/ft_transcendence/pull/121). Where this page and the draft differ, this page is what the server answers.
+How the browser opens, reads and updates incidents, and reads their timeline. This is the first version (v1) of the incident room: incidents are opened by hand, every action is written in a timeline that is only ever added to, and two people changing the same incident at the same time cannot overwrite each other. The data model and design decisions are in [ADR 0004](../adr/0004-incident-events-and-topology-history.md). For frontend integration, see [Incident Room v1](./incident-room-contract.md). Future features are documented in the [v2+ proposal](./incident-room-future-proposal.md), and the [original frontend proposal](./incident-room-original-proposal.md) is preserved for reference. **This document remains the authoritative backend API contract.**
 
 ## Status
 
-Implemented in the `incidents` module. Live updates over Socket.IO are not there yet: a screen reloads over REST.
+Implemented in the `incidents` module (REST) and the `realtime` module (live updates over Socket.IO, see [Live updates](#live-updates)).
 
 **Every signed-in user sees and changes every incident.** v1 has no organization, participant or role. That is only acceptable for the demo data: the isolation by organization and the permissions will come separately, and then an incident of another organization will answer `404 INCIDENT_NOT_FOUND`.
 
-## Differences from the draft
+## Compatibility notes for the original draft
 
 The server answers differently from the screens' draft on these points:
 
 - Three statuses: there is no `mitigated`, and a request that sends it gets a `400`.
 - `seedNodeIds` cannot be changed with `PATCH` (a `400`).
 - `PATCH` needs `version`, and ids are UUIDs, not `inc_042`.
+- `incident:updated` carries the whole `Incident`, with its `version`, and not an `IncidentSummary` plus `statusHistory`: the `version` is what a client needs to put the messages in order.
 - No roles, so no `FORBIDDEN`: any signed-in user can change an incident, and any existing user can be made commander. `INCIDENT_INVALID_COMMANDER` does not exist; an unknown `commanderId` is a `VALIDATION_ERROR`.
 - The fields v1 does not fill, and the new `action` values, are listed below.
 
@@ -130,6 +131,26 @@ Every change is an event that is only ever added: opening the incident, then one
 
 `created` and `title_changed` are not in the draft's list of actions: a screen that does not know an `action` shows its `summary`. No entry is an `infra_event` or an `analysis` in v1, so filtering on them gives an empty list. No entry has nodes (`nodeIds` is empty), so `nodeId` is accepted and always gives an empty list.
 
+## Live updates
+
+A screen that shows an incident joins its room, on the same Socket.IO connection as the topology: same handshake, same envelope (`event`, `payload`, `timestamp`), same limit of ten commands in ten seconds ([Realtime topology protocol](./realtime-topology.md)). A client never names a room: it asks to join, and the server decides. Any signed-in user may join any incident in v1. A socket can be in several incident rooms.
+
+| Command | Argument | Acknowledgement |
+|---------|----------|-----------------|
+| `incident:join` | `{ incidentId }`, a UUID | `{ data: { incidentId } }`, or `{ error }`: `VALIDATION_ERROR` (not a UUID, or another property), `INCIDENT_NOT_FOUND` |
+| `incident:leave` | `{ incidentId }`, a UUID | `{ data: {} }`; nothing happens if the socket is not in the room |
+
+The room is `incident:<id>`, with the id in small letters; an id in capitals is accepted in a command and gives the same room. The server sends to the room once the transaction is committed, to every socket in it, the sender's own included:
+
+| Event | Payload | Sent when |
+|-------|---------|-----------|
+| `incident:updated` | `{ incidentId, incident }`, the `Incident` that `PATCH` answers | a `PATCH` changed something |
+| `timeline:entry_added` | `{ incidentId, entry }`, a `TimelineEntry` | each new entry, after `incident:updated` and in the order of `seq`; a note sends only this one |
+
+Nothing is sent for a `PATCH` that changes nothing, for a refused request (`400`, `404`, `409`), or when an incident is opened (nobody can be in its room yet): the list of incidents is loaded again over REST.
+
+**Order and reconnection** ([ADR 0004](../adr/0004-incident-events-and-topology-history.md), "Live order"). Two updates can reach a client in the other order, so a client ignores an `incident:updated` whose `version` is not newer than its own, and reloads the incident over REST when it is more than one ahead (a message was missed). It drops a timeline entry whose `id` it already has and sorts by `seq`. A socket that reconnects is in no room: on every `connect` the client sends `incident:join` first, then reads `GET /incidents/:id` and its timeline, and applies the same rules to what REST returns, so nothing sent in between is lost. A crash between a commit and the sending loses that message until the next update or reconnection.
+
 ## Errors
 
 Shape and codes: [API conventions](./api-conventions.md).
@@ -146,7 +167,7 @@ Shape and codes: [API conventions](./api-conventions.md).
 
 ## Limits of v1
 
-- No participants, runbook, saved analysis, "compromised" mark, invitations or chat; no live updates (Socket.IO comes next).
+- No participants, runbook, saved analysis, "compromised" mark, invitations or chat; no live list of incidents (a new incident shows up at the next load).
 - No pagination, no purge. Opening incidents, changing them and adding notes are limited (see the errors); reading is not.
 - No idempotency: a `POST` that is sent again after a lost answer opens a second incident.
 - An incident is opened against the topology the server knows at that moment (`epoch` and `revision` are stored for the replay); it cannot be opened while the topology is unknown.

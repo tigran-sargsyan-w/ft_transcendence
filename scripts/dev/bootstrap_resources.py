@@ -29,6 +29,10 @@ VOLUMES = {
     "transcendence-vault-dev_backend_agent_auth": (VAULT_PROJECT, "backend_agent_auth"),
     "transcendence-vault-dev_backend_rendered": (VAULT_PROJECT, "backend_rendered"),
     "transcendence-app-dev_postgres_data": (APP_PROJECT, "postgres_data"),
+    "transcendence-app-dev_prometheus_data": (APP_PROJECT, "prometheus_data"),
+    "transcendence-app-dev_grafana_data": (APP_PROJECT, "grafana_data"),
+    "transcendence-app-dev_grafana_vault_auth": (APP_PROJECT, "grafana_vault_auth"),
+    "transcendence-app-dev_grafana_vault_rendered": (APP_PROJECT, "grafana_vault_rendered"),
     "transcendence-app-dev_migrator_vault_auth": (APP_PROJECT, "migrator_vault_auth"),
     "transcendence-app-dev_migrator_vault_rendered": (APP_PROJECT, "migrator_vault_rendered"),
     "transcendence-app-dev_postgres_provisioner_vault_auth": (

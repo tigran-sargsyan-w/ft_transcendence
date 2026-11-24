@@ -77,7 +77,7 @@ def run_helper(mode, token):
         # Intentionally never print the helper's raw stdout/stderr, which may
         # include sensitive troubleshooting details from Docker/Vault.
         raise ConfigError(f"Vault config {mode} failed (exit {result.returncode}); inspect trusted operator logs locally")
-    print(f"PASS: Vault configuration {mode} completed (KV v2, ACLs, three AppRoles)", flush=True)
+    print(f"PASS: Vault configuration {mode} completed (KV v2, ACLs, four AppRoles)", flush=True)
 
 
 def main(argv=None):
