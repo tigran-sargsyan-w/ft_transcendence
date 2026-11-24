@@ -5,9 +5,11 @@ set -Eeuo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/install-deps.sh [--check|--help]
+Usage: ./scripts/install-deps.sh [--check|--initialize-check|--initialize-dev|--help]
 
   (default)   Install missing Ubuntu packages with confirmation.
+  --initialize-dev  Development provisioning; requires prior sudo authentication if needed.
+  --initialize-check  Read-only local development prerequisites and daemon guard.
   --check     Read-only prerequisites report; no sudo or mutations.
   --help      Print this help.
 
@@ -20,13 +22,28 @@ MODE=install
 case "${1:-}" in
   "") ;;
   --check) MODE=check ;;
+  --initialize-dev) MODE=initialize-dev ;;
+  --initialize-check) MODE=initialize-check ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
 if (( $# > 1 )); then usage >&2; exit 2; fi
 
 say() { printf '%s\n' "$*"; }
-fail() { say "ERROR: $*" >&2; exit 1; }
+fail() {
+  say "ERROR: $*" >&2
+  [[ "$MODE" != initialize-check ]] || exit 3
+  exit 1
+}
+sudo_run() {
+  if [[ "$MODE" == initialize-dev ]]; then
+    # The orchestrator authenticates once on the controlling terminal.
+    # Never let an APT operation unexpectedly prompt while progress is live.
+    sudo -n "$@"
+  else
+    sudo "$@"
+  fi
+}
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 pkg_installed() { dpkg-query -W -f='${db:Status-Abbrev}' "$1" 2>/dev/null | grep -q '^ii'; }
 
@@ -107,8 +124,19 @@ if (( docker_packages_needed )); then
   fi
 fi
 
-if [[ "$MODE" == check ]]; then
+if [[ "$MODE" == check || "$MODE" == initialize-check ]]; then
   issues=0
+  if [[ "$MODE" == initialize-check ]]; then
+    [[ -z ${DOCKER_HOST:-} || "$DOCKER_HOST" == unix:///var/run/docker.sock ]] \
+      || fail "Unexpected DOCKER_HOST; manual Docker access review required"
+    if (( docker_cli )); then
+      endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}')" \
+        || fail "Cannot inspect Docker context"
+      [[ "$endpoint" == unix:///var/run/docker.sock ]] \
+        || fail "Unexpected Docker context; manual Docker access review required"
+    fi
+    systemctl is-active --quiet docker || issues=1
+  fi
   (( ${#missing_base[@]} == 0 )) || issues=1
   (( !docker_packages_needed )) || issues=1
   if (( docker_cli )); then
@@ -127,27 +155,41 @@ if [[ "$MODE" == check ]]; then
   exit 0
 fi
 
+# Refuse remote contexts before any package changes when Docker already exists.
+if [[ "$MODE" == initialize-dev ]]; then
+  [[ -z ${DOCKER_HOST:-} || "$DOCKER_HOST" == unix:///var/run/docker.sock ]] \
+    || fail "Unexpected DOCKER_HOST; manual Docker access review required"
+  if (( docker_cli )); then
+    endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}')" \
+      || fail "Cannot inspect Docker context"
+    [[ "$endpoint" == unix:///var/run/docker.sock ]] \
+      || fail "Unexpected Docker context; manual Docker access review required"
+  fi
+fi
+
 if (( ${#missing_base[@]} || docker_packages_needed )); then
   say ""
   say "Missing packages will be installed through Ubuntu APT and (if needed) Docker's official APT repository."
   say "No existing Docker installation, containers, images or volumes will be removed."
-  if ! confirm "Proceed with OS package installation?"; then
+  if [[ "$MODE" != initialize-dev ]] && ! confirm "Proceed with OS package installation?"; then
     say "CANCELLED: No packages installed"
     exit 1
   fi
   command_exists sudo || fail "sudo is required for package installation"
-  sudo -v
+  sudo_run -v
 
   # Install common Ubuntu tools only if needed.
   if (( ${#missing_base[@]} )); then
-    sudo apt-get update
+    say "STEP: Install missing Ubuntu packages"
+    sudo_run apt-get update
     if ! pkg_installed mkcert && ! apt-cache show mkcert >/dev/null 2>&1; then
       say "INFO: Enabling Ubuntu universe repository for mkcert"
-      sudo apt-get install -y software-properties-common
-      sudo add-apt-repository -y universe
-      sudo apt-get update
+      sudo_run apt-get install -y software-properties-common
+      sudo_run add-apt-repository -y universe
+      sudo_run apt-get update
     fi
-    sudo apt-get install -y "${missing_base[@]}"
+    sudo_run apt-get install -y "${missing_base[@]}"
+    say "PASS: Missing Ubuntu packages installed"
   fi
 
   if (( docker_packages_needed )); then
@@ -160,12 +202,12 @@ if (( ${#missing_base[@]} || docker_packages_needed )); then
       if grep -Rqs 'download.docker.com/linux/ubuntu' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
         fail "An existing Docker APT source was detected; review it instead of adding another."
       fi
-      sudo install -m 0755 -d /etc/apt/keyrings
+      sudo_run install -m 0755 -d /etc/apt/keyrings
       if [[ ! -s /etc/apt/keyrings/docker.asc ]]; then
         tmpkey=$(mktemp)
         trap 'rm -f "${tmpkey:-}"' EXIT
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o "$tmpkey"
-        sudo install -m 0644 "$tmpkey" /etc/apt/keyrings/docker.asc
+        sudo_run install -m 0644 "$tmpkey" /etc/apt/keyrings/docker.asc
         rm -f "$tmpkey"
         trap - EXIT
       fi
@@ -182,14 +224,25 @@ Components: stable
 Architectures: $arch
 Signed-By: /etc/apt/keyrings/docker.asc
 EOF
-      sudo install -m 0644 "$tmp_source" /etc/apt/sources.list.d/docker.sources
+      sudo_run install -m 0644 "$tmp_source" /etc/apt/sources.list.d/docker.sources
       rm -f "$tmp_source"
       trap - EXIT
     fi
     say "INFO: Installing official Docker Engine / Compose / Buildx"
-    sudo apt-get update
-    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    sudo_run apt-get update
+    sudo_run apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    say "PASS: Official Docker packages installed"
   fi
+fi
+
+# Initialization may provision only the local development daemon.
+if [[ "$MODE" == initialize-dev ]]; then
+  [[ -z ${DOCKER_HOST:-} || "$DOCKER_HOST" == unix:///var/run/docker.sock ]] \
+    || fail "Unexpected DOCKER_HOST; manual Docker access review required"
+  endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}')" \
+    || fail "Cannot inspect Docker context"
+  [[ "$endpoint" == unix:///var/run/docker.sock ]] \
+    || fail "Unexpected Docker context; manual Docker access review required"
 fi
 
 # Service management is separate from modifying Docker configuration or storage.
@@ -199,13 +252,33 @@ fi
 if ! systemctl is-active --quiet docker; then
   say "INFO: Starting Docker service"
   command_exists sudo || fail "sudo is required to start Docker"
-  sudo systemctl enable --now docker
+  sudo_run systemctl enable --now docker
+  say "PASS: Docker daemon started"
 fi
 
-# No automatic root-equivalent group enrollment.
+# Only the explicit development initialization mode may enroll the current
+# user automatically. The default maintenance installer still asks.
 if ! docker info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
   if ! command_exists docker; then fail "Docker CLI still missing"; fi
-  if ! sudo docker info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
+  if [[ "$MODE" == initialize-dev ]]; then
+    # Do not enroll users based on a remote, rootless or unexpected socket.
+    [[ -z ${DOCKER_HOST:-} || "$DOCKER_HOST" == unix:///var/run/docker.sock ]] \
+      || fail "Unexpected DOCKER_HOST; manual Docker access review required"
+    endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}')" \
+      || fail "Cannot inspect Docker context"
+    [[ "$endpoint" == unix:///var/run/docker.sock ]] \
+      || fail "Unexpected Docker context; manual Docker access review required"
+    [[ -S /var/run/docker.sock ]] || fail "Expected local Docker socket missing"
+    docker_group="$(getent group docker)" || fail "Docker group missing"
+    IFS=: read -r group_name group_password group_gid group_members <<< "$docker_group"
+    [[ "$group_name" == docker && "$group_gid" =~ ^[0-9]+$ && "$group_gid" != 0 ]] \
+      || fail "Unexpected Docker group identity"
+    [[ "$(stat -Lc '%u:%g' /var/run/docker.sock)" == "0:$group_gid" ]] \
+      || fail "Unexpected Docker socket ownership"
+    if ! sudo_run docker --host unix:///var/run/docker.sock info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
+      fail "Local Docker daemon is not responding via sudo"
+    fi
+  elif ! sudo docker info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
     fail "Docker daemon is not responding even via sudo; inspect systemctl status docker"
   fi
   say ""
@@ -218,13 +291,19 @@ if ! docker info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
   getent group docker >/dev/null || fail "Docker group is absent; review Docker installation"
   if id -nG "$(id -un)" | tr ' ' '\n' | grep -qx docker; then
     say "ACTION REQUIRED: Docker group membership exists but is not active in this session."
-  elif confirm "Add $(id -un) to the root-equivalent docker group?"; then
-    sudo usermod -aG docker "$(id -un)"
+  elif [[ "$MODE" == initialize-dev ]] || confirm "Add $(id -un) to the root-equivalent docker group?"; then
+    sudo_run usermod -aG docker "$(id -un)"
+    id -nG "$(id -un)" | tr ' ' '\n' | grep -qx docker \
+      || fail "Docker group enrollment could not be verified"
     say "ACTION REQUIRED: Sign out and back in (or reboot the VM), then rerun:"
   else
     say "ACTION REQUIRED: You declined Docker group access. Configure rootless Docker or operator-approved access."
   fi
-  say "  ./scripts/install-deps.sh --check"
+  if [[ "$MODE" == initialize-dev ]]; then
+    say "  make initialize"
+  else
+    say "  ./scripts/install-deps.sh --check"
+  fi
   exit 2
 fi
 

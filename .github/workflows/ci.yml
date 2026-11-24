@@ -239,10 +239,15 @@ jobs:
           python-version: '3.12'
 
       - name: Validate bootstrap shell syntax
-        run: bash -n scripts/bootstrap.sh
+        run: |
+          bash -n scripts/bootstrap.sh
+          bash -n scripts/install-deps.sh
 
       - name: Test development bootstrap and monitoring offline
-        run: python3 -m unittest discover -s scripts/dev -p 'test_*.py' -v
+        run: |
+          python3 -m unittest discover -s scripts/dev -p 'test_*.py' -v
+          python3 -m unittest discover -s tests/benchmarks -p 'test_*.py' -v
+          python3 -m unittest discover -s tests/dev -p 'test_bootstrap*.py' -v
 
       - name: Validate Grafana dashboard JSON
         run: |

@@ -75,6 +75,18 @@ class GrafanaPrerequisiteTests(unittest.TestCase):
             self.assertEqual(check.call_count, 3)
             self.assertEqual(self.sleep.call_count, 2)
 
+    def test_shell_prerequisite_entry_point_retries_readiness_only(self):
+        with patch.object(grafana.prometheus, "check", side_effect=[
+            grafana.prometheus.PrometheusReadinessError("temporary"), None,
+        ]) as check:
+            self.assertEqual(grafana.prometheus.main(["check-ready"]), 0)
+        self.assertEqual(check.call_count, 2)
+
+        with patch.object(grafana.prometheus, "check", side_effect=
+                          grafana.prometheus.PrometheusBootstrapError("identity")) as check:
+            self.assertEqual(grafana.prometheus.main(["check-ready"]), 1)
+        check.assert_called_once_with()
+
     def test_resources_failure_blocks_prometheus(self):
         self.scan.return_value = {"resources": False}
 

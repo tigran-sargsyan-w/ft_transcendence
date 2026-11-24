@@ -234,6 +234,30 @@ class GrafanaHTTPSTests(unittest.TestCase):
         ):
             self.assertEqual(https.main(["check"]), 1)
 
+    def test_ready_retries_only_temporary_upstream_response(self):
+        with patch.object(https, "check", side_effect=[
+            https.GrafanaHTTPSReadinessError("temporary"), None,
+        ]) as check, patch.object(https.time, "sleep") as sleep:
+            https.check_ready()
+        self.assertEqual(check.call_count, 2)
+        sleep.assert_called_once_with(3)
+
+    def test_ready_does_not_retry_security_failure(self):
+        with patch.object(https, "check", side_effect=https.GrafanaHTTPSBootstrapError(
+            "policy mismatch")) as check, patch.object(https.time, "sleep") as sleep:
+            with self.assertRaises(https.GrafanaHTTPSBootstrapError):
+                https.check_ready()
+        check.assert_called_once_with()
+        sleep.assert_not_called()
+
+    def test_ready_persistent_upstream_failure_refused(self):
+        with patch.object(https, "check", side_effect=https.GrafanaHTTPSReadinessError(
+            "temporary")) as check, patch.object(https.time, "sleep") as sleep:
+            with self.assertRaises(https.GrafanaHTTPSReadinessError):
+                https.check_ready()
+        self.assertEqual(check.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
     def test_check_order(self):
         calls = []
 

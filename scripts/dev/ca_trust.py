@@ -235,6 +235,14 @@ def setup_linux() -> int:
         print("[CANCELLED] CA trust installation declined")
         return 1
 
+    return install_linux(ca_file)
+
+
+def install_linux(ca_file: Path) -> int:
+    """Install the already reviewed Linux CA; callers own authorization."""
+    if platform.system() != "Linux" or certificates.get_ca_root() != ca_file.parent:
+        print("[ERROR] Unexpected Linux CA location")
+        return 2
     try:
         result = subprocess.run(
             ["mkcert", "-install"],

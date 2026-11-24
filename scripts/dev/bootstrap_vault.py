@@ -21,6 +21,11 @@ import sys
 import time
 from pathlib import Path
 
+if __package__:
+    from .bootstrap_interrupt import DeferredInterrupt, defer_termination
+else:
+    from bootstrap_interrupt import DeferredInterrupt, defer_termination
+
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT = "transcendence-vault-dev"
 NAME = PROJECT + "-vault-1"
@@ -33,10 +38,12 @@ class VaultBootstrapError(Exception):
     """Error messages never include subprocess output or secret values."""
 
 
-def call(args, *, input_data=None, accepted=(0,), timeout=90, env=None):
+def call(args, *, input_data=None, accepted=(0,), timeout=90, env=None,
+         isolated=False):
     try:
         result = subprocess.run(
             args, input=input_data, capture_output=True, timeout=timeout, check=False, env=env,
+            **({"start_new_session": True} if isolated else {}),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise VaultBootstrapError(f"Command unavailable or timed out: {args[0]}") from exc
@@ -169,9 +176,10 @@ def ensure_private_dir():
     validate_secret_path()
 
 
-def initialize_vault():
+def persist_recovery_material():
     # Reserve the private destination *before* calling operator init, to avoid
     # initializing Vault when no safe output destination exists.
+    print("STEP: Reserve private Vault recovery file", flush=True)
     ensure_private_dir()
     if RECOVERY.exists():
         raise VaultBootstrapError(
@@ -183,11 +191,13 @@ def initialize_vault():
         raise VaultBootstrapError("Cannot reserve private recovery file") from exc
     with fp:
         os.fchmod(fp.fileno(), 0o600)
+        print("PASS: Private Vault recovery file reserved", flush=True)
         try:
+            print("STEP: Initialize Vault and persist recovery material", flush=True)
             raw = call([
                 "docker", "exec", NAME,
                 "vault", "operator", "init", "-key-shares=3", "-key-threshold=2", "-format=json",
-            ], timeout=45)
+            ], timeout=45, isolated=True)
             # Persist the exact raw recovery output BEFORE parsing it. If parsing
             # fails after a successful Vault init, the original secrets still
             # exist privately and can be recovered by the trusted operator.
@@ -219,11 +229,22 @@ def initialize_vault():
     finally:
         os.close(dir_fd)
 
+    print("PASS: Vault recovery material persisted", flush=True)
+    return shares
+
+
+def initialize_vault():
+    # Do not interrupt between the server-side init and durable local storage.
+    # The init CLI has its own session; the parent must wait through this region.
+    with defer_termination():
+        shares = persist_recovery_material()
+
     print("PASS: Vault initialized (Shamir 2-of-3)", flush=True)
     print(f"IMPORTANT: Recovery material stored privately at: {RECOVERY}", flush=True)
     print("SECURITY: Contains root token and all three shares; protect it outside the VM.", flush=True)
     print("NEVER paste or commit this file. It is NOT safe for a shared/production Vault.", flush=True)
 
+    print("STEP: Initial Vault unseal", flush=True)
     for index, share in enumerate(shares[:2], 1):
         call([
             "docker", "exec", "-i", NAME, "vault", "write", "sys/unseal", "-",
@@ -310,6 +331,14 @@ def main(argv=None):
         initialize_vault()
         print("RESULT: VAULT READY (new development state)")
         return 0
+    except DeferredInterrupt as exc:
+        print("CANCELLED: Vault recovery material persisted privately; "
+              "review Vault seal state before continuing", file=sys.stderr)
+        return 128 + exc.signum
+    except KeyboardInterrupt:
+        print("CANCELLED: Vault bootstrap interrupted; review state before continuing",
+              file=sys.stderr)
+        return 130
     except VaultBootstrapError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         print("RESULT: VAULT BOOTSTRAP STOPPED (no resources removed)", file=sys.stderr)
