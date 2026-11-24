@@ -79,7 +79,8 @@ class Progress:
 
     def __init__(self, labels, *, stream=None, clock=time.monotonic, env=None,
                  terminal_width=None, terminal_height=None, interactive=None,
-                 header="Initializing ft_transcendence", profile=ProgressProfile.FULL):
+                 header="Initializing ft_transcendence", profile=ProgressProfile.FULL,
+                 allow_not_ready=False):
         self.stream = sys.stdout if stream is None else stream
         self.clock = clock
         env = os.environ if env is None else env
@@ -105,6 +106,9 @@ class Progress:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 -]{0,119}", header):
             raise ValueError("Expected a static command header")
         self.profile = profile
+        # Only routine startup may record a nonfatal readiness result before
+        # entering its existing guarded resume path. Initialization stays strict.
+        self.completed_statuses = COMPLETE + ((Status.NOT_READY,) if allow_not_ready else ())
         header = "[+] " + header
         if self.live:
             header = header[:max(1, self.width()-1)]
@@ -227,7 +231,7 @@ class Progress:
         return self._color(status.value[:width], status)
 
     def _bar(self, width, now):
-        completed = sum(stage.status in COMPLETE for stage in self.stages)
+        completed = sum(stage.status in self.completed_statuses for stage in self.stages)
         tail = f" {completed}/{len(self.stages)} | elapsed {max(0.0, now-self.started):.1f}s"
         size = max(0, width-len(tail)-2)
         filled = size * completed // len(self.stages)
@@ -332,7 +336,7 @@ class Progress:
         self.refresh(force=True)
 
     def finish(self, status):
-        if self.active is None or status not in COMPLETE + STOP:
+        if self.active is None or status not in self.completed_statuses + STOP:
             raise ValueError("Expected active stage and terminal status")
         index = self.active
         stage = self.stages[index]
@@ -348,6 +352,6 @@ class Progress:
     def summary(self):
         if self.active is not None or (not self.stopped and self.next_index != len(self.stages)):
             raise ValueError("Initialization is still in progress")
-        completed = sum(stage.status in COMPLETE for stage in self.stages)
+        completed = sum(stage.status in self.completed_statuses for stage in self.stages)
         elapsed = max(0.0, self.clock() - self.started)
         self._write(f"[+] Finished {completed}/{len(self.stages)} stages in {elapsed:.1f}s\n")

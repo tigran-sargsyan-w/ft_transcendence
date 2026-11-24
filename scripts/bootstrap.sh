@@ -253,6 +253,15 @@ if [[ "$MODE" == --initialize ]]; then
   exec python3 scripts/dev/bootstrap_unified.py initialize
 fi
 
+# The existing read-only dependency check is presented by the routine CLI
+# together with its original second preflight. The shell guards above remain.
+case "$MODE" in
+  --start)         exec python3 scripts/dev/bootstrap_unified.py start --shell-entry ;;
+  --recover)       exec python3 scripts/dev/bootstrap_unified.py recover --shell-entry ;;
+  --check-all)     exec python3 scripts/dev/bootstrap_unified.py check --shell-entry ;;
+  --health-report) exec python3 scripts/dev/bootstrap_unified.py health-report --shell-entry ;;
+esac
+
 say "=== Fresh Ubuntu bootstrap: host + Docker resources ==="
 if [[ "$MODE" == --upgrade-waf ]]; then
   # Only explicitly approved initialization/maintenance installs packages.
@@ -279,18 +288,6 @@ case "$MODE" in
   --orchestrator-preflight)
     # Internal read-only entry: all standard shell guards above still run.
     say "RESULT: ORCHESTRATOR PREFLIGHT READY (read-only)"
-    ;;
-  --start)
-    python3 scripts/dev/bootstrap_unified.py start
-    ;;
-  --recover)
-    python3 scripts/dev/bootstrap_unified.py recover
-    ;;
-  --check-all)
-    python3 scripts/dev/bootstrap_unified.py check
-    ;;
-  --health-report)
-    python3 scripts/dev/bootstrap_unified.py health-report
     ;;
   --plan)
     if host_check; then
