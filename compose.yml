@@ -258,7 +258,7 @@ services:
     restart: unless-stopped
 
   vault-backend-agent:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     user: "100:20000"
 
     entrypoint: ["/bin/sh", "-ec"]
@@ -315,7 +315,7 @@ services:
     restart: unless-stopped
 
   vault-grafana-agent:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     profiles:
       - monitoring
 
@@ -365,7 +365,7 @@ services:
     restart: unless-stopped
 
   vault-grafana-storage-init:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     user: "0:0"
 
     profiles:
@@ -397,7 +397,7 @@ services:
     restart: "no"
 
   vault-grafana-provision:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     user: "100:1000"
 
     profiles:
@@ -432,7 +432,7 @@ services:
     restart: "no"
 
   vault-postgres-provisioner-storage-init:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     user: "0:0"
 
     profiles:
@@ -460,7 +460,7 @@ services:
     restart: "no"
 
   vault-postgres-provisioner-provision:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     user: "100:1000"
 
     profiles:
@@ -524,7 +524,7 @@ services:
     restart: "no"
 
   vault-postgres-provisioner-agent:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     user: "100:20020"
 
     profiles:
@@ -580,7 +580,7 @@ services:
     restart: "no"
 
   vault-postgres-provisioner-reader:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     user: "100:20020"
 
     profiles:
@@ -605,7 +605,7 @@ services:
     restart: "no"
 
   vault-postgres-provisioner-cleanup:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     user: "100:20020"
 
     profiles:
@@ -679,7 +679,7 @@ services:
     restart: "no"
 
   vault-migrator-storage-init:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     user: "0:0"
 
     profiles:
@@ -707,7 +707,7 @@ services:
     restart: "no"
 
   vault-migrator-provision:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     user: "100:1000"
 
     # Provisioning must only run explicitly.
@@ -775,7 +775,7 @@ services:
     restart: "no"
 
   vault-migrator-agent:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     profiles:
       - vault-migration
     user: "100:20010"
@@ -844,7 +844,7 @@ services:
     restart: "no"
 
   vault-migrator-cleanup:
-    image: hashicorp/vault:2.2.1
+    image: hashicorp/vault:2.1.2
     user: "100:20010"
 
     # Never run as part of the normal application startup.

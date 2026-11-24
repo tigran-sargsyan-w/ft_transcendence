@@ -162,6 +162,12 @@ class Preflight:
                         == str(working_dir),
                         "Unexpected Compose working directory: " + name)
                 self.containers[service if kind == "app" else "vault"] = container
+        vault_host = self.containers["vault"].get("HostConfig") or {}
+        require(
+            vault_host.get("Privileged") is False
+            and not vault_host.get("PortBindings"),
+            "Unexpected existing Vault published ports or privileges",
+        )
         self.ok("Existing container identities and Compose provenance")
 
     def volumes_and_network(self):
@@ -311,7 +317,9 @@ class Preflight:
                     and volumes[key].get("external") is True,
                     "Unexpected shared Vault volume: " + key)
         owned = (
-            "postgres_data", "migrator_vault_auth", "migrator_vault_rendered",
+            "postgres_data", "prometheus_data", "grafana_data",
+            "grafana_vault_auth", "grafana_vault_rendered",
+            "migrator_vault_auth", "migrator_vault_rendered",
             "postgres_provisioner_vault_auth", "postgres_provisioner_rendered",
         )
         require(set(volumes) == set(owned) | {
@@ -360,6 +368,10 @@ class Preflight:
         self.ok("Full application runtime model, isolation and file secrets")
 
         vault_services = vault.get("services", {})
+        require(
+            not vault_services.get("vault", {}).get("ports"),
+            "Vault must not publish host ports directly",
+        )
         vault_volumes = vault.get("volumes", {})
         require(set(vault_volumes) == {
             "vault_data", "backend_agent_auth", "backend_rendered",
@@ -404,6 +416,12 @@ class Preflight:
         self.volumes_and_network()
         self.tls_mounts()
         self.target_models()
+        execute([
+            sys.executable,
+            str(self.root / "scripts/dev/bootstrap_vault_ui.py"),
+            "status",
+        ])
+        self.ok("Vault UI intended lifecycle state and isolation")
         if self.legacy:
             print("INFO: Legacy Compose provenance detected")
             print("RESULT: PREFLIGHT PASSED (read-only; legacy startup blocked)")

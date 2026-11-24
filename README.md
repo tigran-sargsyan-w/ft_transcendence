@@ -41,6 +41,8 @@ require separate review; initial setup is not a replacement for recovery.
 
 After reboot, single-node Vault using Shamir 2-of-3 normally needs **manual unseal**; run `make recover` from a real terminal, and enter two distinct shares into the hidden Vault CLI prompts. Never provide shares in command arguments, Git, chat, screenshots or logs. This is development-only operator-assisted recovery, **not unattended Auto Unseal**.
 
+Vault Web UI is [optional and on-demand](docs/dev-vault-ui-on-demand.md): `make vault-ui-enable`, `make vault-ui-disable`, `make vault-ui-status`.
+
 Useful commands: `make health` (read-only health/diagnostics), `make check-all` (read-only readiness), `make plan` (resource inventory), `make acceptance` (three non-destructive repeated-start checks on an already healthy VM). Do not use raw `docker compose up`, `make down` or `make clean` to troubleshoot the trusted runtime.
 
 **New to the project?** [Team quick start — Vault](docs/dev-team-quickstart.md) (short version) · [Developer commands](COMMANDS.md) (command reference).

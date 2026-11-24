@@ -10,6 +10,8 @@ This guide documents the **development VM** startup. Run commands at the reposit
 - The **host-based** bootstrap orchestrator delegates to independently runnable stage helpers. There is no giant privileged orchestration container. New app containers, migrations and AppRole credentials are **not** created by routine startup.
 - This VM configuration requires a trusted operator for initial setup and for Shamir unseal after a restart. It is not production-grade Auto Unseal or HA; credential rotation and a new unseal provider are separate tasks.
 
+The Vault Web UI is an [optional, on-demand administrative gateway](dev-vault-ui-on-demand.md). Use `make vault-ui-enable` only when needed; `make vault-ui-disable` closes its host-facing access.
+
 ## First-time trusted setup: new VM only
 
 1. Check out the project on the dedicated Ubuntu VM, including the intended reviewed commit. Keep local work and sensitive materials outside Git.
@@ -125,6 +127,7 @@ See [development monitoring](dev-monitoring.md).
 - [Read-only end-to-end health and diagnostics](dev-health-report.md)
 - [Reboot recovery with manual Shamir unseal](dev-reboot-recovery.md)
 - [Non-destructive startup idempotency checks](dev-startup-idempotency.md)
+- [First-run reliability and performance](dev-initialize-reliability.md)
 - [Phase 6E final acceptance checklist](dev-final-acceptance.md)
 
 This document describes the development environment only; it is not a production deployment, automated Auto Unseal, credential rotation plan, or full functional E2E test suite.

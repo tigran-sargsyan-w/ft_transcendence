@@ -91,6 +91,10 @@ class PrometheusBootstrapError(Exception):
     """Errors must not disclose Docker inspection details or secrets."""
 
 
+class PrometheusReadinessError(PrometheusBootstrapError):
+    """An HTTP/metrics probe failed after prerequisite validation."""
+
+
 def container():
     return pg.exact_container(NAME)
 
@@ -281,6 +285,27 @@ def apply():
     print("RESULT: PROMETHEUS READY (apply)", flush=True)
 
 
+def check():
+    """Raise typed errors while preserving every trust/readiness check."""
+    item = container()
+
+    if item is None:
+        raise PrometheusBootstrapError("Prometheus container missing")
+
+    verify_identity(item)
+    require_prerequisites()
+
+    if not running(item):
+        raise PrometheusBootstrapError("Prometheus is not running")
+
+    try:
+        probe_http()
+    except support.SupportServicesError:
+        raise PrometheusReadinessError(
+            "Prometheus HTTP/metrics probe not ready or unavailable"
+        ) from None
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("plan", "check", "apply"))
@@ -297,18 +322,7 @@ def main(argv=None):
             return 0
 
         if args.mode == "check":
-            require_prerequisites()
-            item = container()
-
-            if item is None:
-                raise PrometheusBootstrapError("Prometheus container missing")
-
-            verify_identity(item)
-
-            if not running(item):
-                raise PrometheusBootstrapError("Prometheus is not running")
-
-            probe_http()
+            check()
             print("RESULT: PROMETHEUS READY (read-only)", flush=True)
             return 0
 

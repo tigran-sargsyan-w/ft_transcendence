@@ -20,7 +20,7 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'HELP'
-Usage: ./scripts/bootstrap.sh [--initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--prepare-prometheus|--check-prometheus|--prepare-grafana-secrets|--check-grafana-secrets|--prepare-grafana-agent|--check-grafana-agent|--prepare-grafana|--check-grafana|--check-grafana-https|--plan-waf-upgrade|--upgrade-waf|--help]
+Usage: ./scripts/bootstrap.sh [--initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-ui|--check-vault-ui|--check-vault-ui-optional|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--prepare-prometheus|--check-prometheus|--prepare-grafana-secrets|--check-grafana-secrets|--prepare-grafana-agent|--check-grafana-agent|--prepare-grafana|--check-grafana|--check-grafana-https|--plan-waf-upgrade|--upgrade-waf|--help]
 
   --initialize    Install dependencies/images, then initialize guarded stages.
   --start         Resume only existing verified containers (Vault must be unsealed).
@@ -37,6 +37,9 @@ Usage: ./scripts/bootstrap.sh [--initialize|--start|--recover|--check-all|--heal
   --prepare-vault      Start/init a new Vault (DEV ONLY, protected recovery file).
                        Existing initialized Vault is NEVER reinitialized.
   --check-vault        Read-only check of Vault identity and readiness.
+  --prepare-vault-ui   Create/start only the localhost Vault Web UI gateway.
+  --check-vault-ui     Verify gateway is enabled, isolated and reachable.
+  --check-vault-ui-optional  Verify intended enabled/disabled gateway state.
   --prepare-vault-config  Configure Vault KV v2, ACL policies and AppRoles (no DB secrets).
   --check-vault-config    Authenticated read-only validation of Vault configuration.
   --prepare-vault-secrets  Create missing PostgreSQL DSNs in Vault KV v2 (no overwrite).
@@ -80,7 +83,7 @@ HELP
 
 MODE="${1:---plan}"
 case "$MODE" in
-  --initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--prepare-prometheus|--check-prometheus|--prepare-grafana-secrets|--check-grafana-secrets|--prepare-grafana-agent|--check-grafana-agent|--prepare-grafana|--check-grafana|--check-grafana-https|--plan-waf-upgrade|--upgrade-waf) ;;
+  --orchestrator-preflight|--initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-ui|--check-vault-ui|--check-vault-ui-optional|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--prepare-prometheus|--check-prometheus|--prepare-grafana-secrets|--check-grafana-secrets|--prepare-grafana-agent|--check-grafana-agent|--prepare-grafana|--check-grafana|--check-grafana-https|--plan-waf-upgrade|--upgrade-waf) ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -224,12 +227,28 @@ if [[ "$MODE" == --initialize || "$MODE" == --upgrade-waf ]]; then
   # Only explicitly approved initialization/maintenance installs packages.
   ./scripts/install-deps.sh || fail "Dependency installation stopped; inspect the installer and rerun"
   ./scripts/install-deps.sh --check || fail "Docker dependencies or access still unavailable"
+elif [[ "$MODE" == --prepare-* ]]; then
+  # Provisioning still verifies packages and Docker on every entry.
+  # Hide repeated success details, never hide a prerequisite failure.
+  if [[ "${FT_DEV_BOOTSTRAP_VERBOSE:-0}" == 1 ]]; then
+    ./scripts/install-deps.sh --check ||
+      fail "Dependencies not ready; inspect the prerequisite report"
+  else
+    deps_report="$(./scripts/install-deps.sh --check 2>&1)" || {
+      printf '%s\n' "$deps_report" >&2
+      fail "Dependencies not ready; inspect the prerequisite report"
+    }
+  fi
 else
   # Routine start, recovery and read-only commands never install packages.
   ./scripts/install-deps.sh --check || fail "Dependencies not ready; use make initialize on a fresh VM"
 fi
 
 case "$MODE" in
+  --orchestrator-preflight)
+    # Internal read-only entry: all standard shell guards above still run.
+    say "RESULT: ORCHESTRATOR PREFLIGHT READY (read-only)"
+    ;;
   --initialize)
     python3 scripts/dev/bootstrap_images.py apply || fail "Required images unavailable"
     python3 scripts/dev/bootstrap_unified.py initialize
@@ -255,6 +274,7 @@ case "$MODE" in
     inventory_docker
     python3 scripts/dev/bootstrap_resources.py plan
     python3 scripts/dev/bootstrap_vault.py plan
+    python3 scripts/dev/bootstrap_vault_ui.py plan
     say "INFO: Vault config read-only check is available via --check-vault-config"
     python3 scripts/dev/bootstrap_vault_secrets.py plan
     python3 scripts/dev/bootstrap_postgres.py plan
@@ -308,6 +328,23 @@ case "$MODE" in
     say "PostgreSQL and application containers will NOT be started."
     confirm "Initialize or resume local development Vault on this VM?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_vault.py apply
+    ;;
+  --check-vault-ui)
+    python3 scripts/dev/bootstrap_vault_ui.py check
+    ;;
+  --check-vault-ui-optional)
+    python3 scripts/dev/bootstrap_vault_ui.py status
+    ;;
+  --prepare-vault-ui)
+    host_check || fail "Host preparation incomplete"
+    python3 scripts/dev/bootstrap_vault.py check || fail "Vault is not ready"
+    python3 scripts/dev/bootstrap_vault_ui.py plan
+    say ""
+    say "This stage creates/starts only the trusted Vault UI gateway."
+    say "Only 127.0.0.1:8200 is published; TLS terminates in Vault."
+    say "Existing Vault, Raft and application containers are not modified."
+    confirm "Prepare local Vault UI gateway on this VM?" || fail "Cancelled"
+    python3 scripts/dev/bootstrap_vault_ui.py enable
     ;;
   --check-postgres)
     python3 scripts/dev/bootstrap_postgres.py check

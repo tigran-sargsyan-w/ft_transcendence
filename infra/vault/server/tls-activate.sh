@@ -51,12 +51,21 @@ done
 
 echo "Validating candidate certificate..."
 
+for hostname in vault localhost; do
+  openssl verify \
+    -purpose sslserver \
+    -verify_hostname "$hostname" \
+    -CAfile "$CA_CERT" \
+    "$CANDIDATE_DIR/vault.crt" >/dev/null ||
+    fail "Certificate hostname validation failed: $hostname"
+done
+
 openssl verify \
   -purpose sslserver \
-  -verify_hostname vault \
+  -verify_ip 127.0.0.1 \
   -CAfile "$CA_CERT" \
-  "$CANDIDATE_DIR/vault.crt" ||
-  fail "Certificate validation failed"
+  "$CANDIDATE_DIR/vault.crt" >/dev/null ||
+  fail "Certificate IP validation failed: 127.0.0.1"
 
 cert_public_hash="$(
   openssl x509 -in "$CANDIDATE_DIR/vault.crt" \

@@ -202,6 +202,11 @@ def running(item):
     )
 
 
+
+PROMETHEUS_CHECK_ATTEMPTS = 3
+PROMETHEUS_CHECK_DELAY = 2
+
+
 def require_prerequisites():
     resources.validate_compose_contract()
 
@@ -211,8 +216,19 @@ def require_prerequisites():
     if grafana_agent.main(["check"]) != 0:
         raise GrafanaBootstrapError("Grafana Vault Agent is not ready")
 
-    if prometheus.main(["check"]) != 0:
-        raise GrafanaBootstrapError("Prometheus pipeline is not ready")
+    # Retry only the complete read-only Prometheus verification.
+    # Never accept an unsuccessful probe or bypass trust checks.
+    for attempt in range(PROMETHEUS_CHECK_ATTEMPTS):
+        try:
+            prometheus.check()
+        except prometheus.PrometheusReadinessError:
+            if attempt + 1 == PROMETHEUS_CHECK_ATTEMPTS:
+                raise GrafanaBootstrapError(
+                    "Prometheus HTTP/metrics readiness failed after bounded checks"
+                ) from None
+            time.sleep(PROMETHEUS_CHECK_DELAY)
+        else:
+            break
 
 
 def request_json(command):
@@ -386,9 +402,8 @@ def wait_ready(attempts=60, delay=2):
 
 
 def check():
-    require_prerequisites()
-
     item = verify_identity(container())
+    require_prerequisites()
 
     if not running(item):
         raise GrafanaBootstrapError("Grafana is not running")
@@ -443,6 +458,7 @@ def main(argv=None):
 
     except (
         GrafanaBootstrapError,
+        prometheus.PrometheusBootstrapError,
         agent.BackendAgentError,
         resources.ResourceError,
         pg.PostgresBootstrapError,
