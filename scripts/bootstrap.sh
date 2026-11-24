@@ -256,11 +256,20 @@ fi
 # The existing read-only dependency check is presented by the routine CLI
 # together with its original second preflight. The shell guards above remain.
 case "$MODE" in
-  --start)         exec python3 scripts/dev/bootstrap_unified.py start --shell-entry ;;
-  --recover)       exec python3 scripts/dev/bootstrap_unified.py recover --shell-entry ;;
-  --check-all)     exec python3 scripts/dev/bootstrap_unified.py check --shell-entry ;;
-  --health-report) exec python3 scripts/dev/bootstrap_unified.py health-report --shell-entry ;;
+  --start)         routine_mode=start ;;
+  --recover)       routine_mode=recover ;;
+  --check-all)     routine_mode=check ;;
+  --health-report) routine_mode=health-report ;;
+  *)               routine_mode="" ;;
 esac
+if [[ -n "$routine_mode" ]]; then
+  # Preserve the existing prerequisite failure on a host without Python.
+  if ! command -v python3 >/dev/null 2>&1; then
+    ./scripts/install-deps.sh --check || fail "Dependencies not ready; use make initialize on a fresh VM"
+    fail "Python 3 unavailable; inspect the prerequisite report"
+  fi
+  exec python3 scripts/dev/bootstrap_unified.py "$routine_mode" --shell-entry
+fi
 
 say "=== Fresh Ubuntu bootstrap: host + Docker resources ==="
 if [[ "$MODE" == --upgrade-waf ]]; then

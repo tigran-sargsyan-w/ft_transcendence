@@ -246,7 +246,15 @@ def checked(name, *, first_run=False, runner=None):
     for attempt in range(READ_ONLY_ATTEMPTS):
         started = time.monotonic() if trace else None
         if runner is None:
-            result = command(STAGE_BY_NAME[name][0], quiet=True)
+            # Nested retry events are based on the actual existing attempt;
+            # this never changes the number of probes or their return values.
+            if attempt:
+                with cli.step(f"Retry {name} {attempt + 1}/{READ_ONLY_ATTEMPTS}") as outcome:
+                    result = command(STAGE_BY_NAME[name][0], quiet=True)
+                    if not result:
+                        outcome.status = Status.NOT_READY
+            else:
+                result = command(STAGE_BY_NAME[name][0], quiet=True)
         else:
             result = command(STAGE_BY_NAME[name][0], quiet=True, runner=runner)
         if trace:
@@ -489,15 +497,17 @@ def resume(name, *, recovery=False):
     try:
         targets = guard_resume(name)
     except RunningNotReady as exc:
+        cli.substep("Inspect trusted " + name + " containers", Status.DONE)
         if not recovery or name != "backend-agent":
             raise
-        cli.substep("Inspect trusted " + name + " containers", Status.DONE)
         with cli.step("Wait for trusted backend-agent health"):
             wait_recovery_backend_agent(exc.targets)
         return
     except UnifiedStartupError:
+        cli.substep("Inspect trusted " + name + " containers", Status.FAILED)
         raise
     except Exception:
+        cli.substep("Inspect trusted " + name + " containers", Status.FAILED)
         raise UnifiedStartupError(f"Cannot inspect trusted {name} containers") from None
     cli.substep("Inspect trusted " + name + " containers", Status.DONE)
     cli.legacy(f"RESUME: {name} (existing containers only)")
@@ -1003,7 +1013,7 @@ def main(argv=None, *, render=False):
         return 1
     except UnifiedStartupError as exc:
         print(f"ERROR: {exc}", file=sys.stderr, flush=True)
-        if args.mode == "initialize":
+        if args.mode == "initialize" or render:
             emit_result("UNIFIED BOOTSTRAP STOPPED (no resources removed)", Status.FAILED, stream=sys.stderr)
         else:
             print("RESULT: UNIFIED BOOTSTRAP STOPPED (no resources removed)", file=sys.stderr, flush=True)

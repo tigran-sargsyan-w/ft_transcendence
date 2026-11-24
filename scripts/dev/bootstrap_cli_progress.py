@@ -51,7 +51,7 @@ class Presentation:
 
     def close(self):
         self.done.set()
-        if self.ticker is not None:
+        if self.ticker is not None and self.ticker.ident is not None:
             self.ticker.join()
 
     @contextmanager
@@ -65,8 +65,11 @@ class Presentation:
             yield outcome
         except BaseException as exc:
             with self.lock:
-                self.progress.finish(Status.CANCELLED if isinstance(exc, KeyboardInterrupt)
-                                     else Status.FAILED)
+                cancelled = isinstance(exc, KeyboardInterrupt)
+                for label, status in tuple(self.progress.steps.items()):
+                    if status is Status.RUNNING:
+                        self.progress.substep(label, Status.CANCELLED if cancelled else Status.UNCONFIRMED)
+                self.progress.finish(Status.CANCELLED if cancelled else Status.FAILED)
             raise
         else:
             with self.lock:
@@ -151,8 +154,11 @@ def step(label, *, success=Status.DONE):
 
 def legacy(message):
     """Suppress redundant, reviewed legacy progress when a renderer owns it."""
-    if _current.get() is None:
+    current = _current.get()
+    if current is None:
         print(message, flush=True)
+    elif current.progress.verbose:
+        current.notice(message)
 
 
 def notice(message):

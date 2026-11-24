@@ -328,8 +328,8 @@ class Progress:
         # A persistent notice owns its own row; clear the preview and commit
         # the notice before drawing a new preview below it.
         prefix, sep, detail = message.partition(":")
-        status = (Status.FAILED if prefix == "ERROR" else
-                  Status.ACTION_REQUIRED if prefix in ("SECURITY", "WARNING", "ACTION REQUIRED") else
+        status = (Status.FAILED if prefix in ("ERROR", "FAIL") else
+                  Status.ACTION_REQUIRED if prefix in ("SECURITY", "WARNING", "WARN", "WAIT", "ACTION REQUIRED") else
                   Status.CANCELLED if prefix == "CANCELLED" else None)
         line = self._color(prefix, status) + sep + detail if status else message
         self._erase(line + "\n")
