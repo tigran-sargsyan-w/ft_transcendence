@@ -98,7 +98,7 @@ def apply_mapping(domain: str) -> int:
     return 0
 
 
-def setup(domain: str) -> int:
+def setup(domain: str, *, initializing=False) -> int:
     addition = append_text(read_hosts(), domain)
 
     if not addition:
@@ -108,11 +108,16 @@ def setup(domain: str) -> int:
     print("[DOMAIN] Proposed change to /etc/hosts:")
     print(addition, end="")
 
-    answer = input("Apply this change? [y/N]: ")
+    if initializing:
+        if domain != DEFAULT_DOMAIN:
+            print("[ERROR] Automatic initialization supports only the default domain")
+            return 2
+    else:
+        answer = input("Apply this change? [y/N]: ")
 
-    if answer.strip().lower() not in ("y", "yes"):
-        print("[SKIP] No changes made")
-        return 1
+        if answer.strip().lower() not in ("y", "yes"):
+            print("[SKIP] No changes made")
+            return 1
 
     if os.geteuid() == 0:
         return apply_mapping(domain)

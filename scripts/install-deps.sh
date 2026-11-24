@@ -194,6 +194,16 @@ EOF
   fi
 fi
 
+# Initialization may provision only the local development daemon.
+if [[ "$MODE" == initialize-dev ]]; then
+  [[ -z ${DOCKER_HOST:-} || "$DOCKER_HOST" == unix:///var/run/docker.sock ]] \
+    || fail "Unexpected DOCKER_HOST; manual Docker access review required"
+  endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}')" \
+    || fail "Cannot inspect Docker context"
+  [[ "$endpoint" == unix:///var/run/docker.sock ]] \
+    || fail "Unexpected Docker context; manual Docker access review required"
+fi
+
 # Service management is separate from modifying Docker configuration or storage.
 if ! command_exists systemctl; then
   fail "systemctl unavailable; Docker service must be started manually"
