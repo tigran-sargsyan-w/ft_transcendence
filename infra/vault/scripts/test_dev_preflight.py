@@ -74,6 +74,7 @@ class PreflightTests(unittest.TestCase):
                     }},
                 }
         vault = self.containers[preflight.VAULT_PROJECT + "-vault-1"]
+        vault["HostConfig"] = {"Privileged": False, "PortBindings": {}}
         agent = self.containers[preflight.APP_PROJECT + "-vault-backend-agent-1"]
         backend = self.containers[preflight.APP_PROJECT + "-backend-1"]
         postgres = self.containers[preflight.APP_PROJECT + "-postgres-1"]
@@ -144,6 +145,14 @@ class PreflightTests(unittest.TestCase):
                 "backend_vault_auth": {"external": True, "name": self.volume_names[1]},
                 "backend_vault_rendered": {"external": True, "name": self.volume_names[2]},
                 "postgres_data": {"name": self.volume_names[3]},
+                "prometheus_data": {
+                    "name": preflight.APP_PROJECT + "_prometheus_data"},
+                "grafana_data": {
+                    "name": preflight.APP_PROJECT + "_grafana_data"},
+                "grafana_vault_auth": {
+                    "name": preflight.APP_PROJECT + "_grafana_vault_auth"},
+                "grafana_vault_rendered": {
+                    "name": preflight.APP_PROJECT + "_grafana_vault_rendered"},
                 "migrator_vault_auth": {
                     "name": preflight.APP_PROJECT + "_migrator_vault_auth"},
                 "migrator_vault_rendered": {
@@ -254,6 +263,62 @@ class PreflightTests(unittest.TestCase):
         self.assertIn("migrator_vault_auth", app["volumes"])
         self.assertIn("postgres_provisioner_rendered", app["volumes"])
         self.assertIn("backend_agent_auth", vault["volumes"])
+
+    def test_gateway_security_check_is_invoked(self):
+        expected = [
+            preflight.sys.executable,
+            str(self.root / "scripts/dev/bootstrap_vault_ui.py"),
+            "status",
+        ]
+
+        with (
+            patch.object(
+                preflight, "json_command",
+                side_effect=self.fake_json,
+            ),
+            patch.object(
+                preflight, "execute",
+                return_value="",
+            ) as execute,
+        ):
+            self.pre.run()
+
+        commands = [
+            call.args[0]
+            for call in execute.call_args_list
+        ]
+
+        self.assertEqual(commands.count(expected), 1)
+
+    def test_gateway_failure_blocks_preflight(self):
+        expected = [
+            preflight.sys.executable,
+            str(self.root / "scripts/dev/bootstrap_vault_ui.py"),
+            "status",
+        ]
+
+        def fake_execute(command, env=None):
+            if command == expected:
+                raise preflight.PreflightError(
+                    "Gateway security check failed"
+                )
+            return ""
+
+        with (
+            patch.object(
+                preflight, "json_command",
+                side_effect=self.fake_json,
+            ),
+            patch.object(
+                preflight, "execute",
+                side_effect=fake_execute,
+            ),
+        ):
+            with self.assertRaisesRegex(
+                preflight.PreflightError,
+                "Gateway security check failed",
+            ):
+                self.pre.run()
 
     def test_existing_installation_passes(self):
         self.run_preflight()
@@ -427,6 +492,64 @@ class PreflightTests(unittest.TestCase):
             "Existing Collector network attachment"
         ):
             self.run_preflight()
+
+    def test_unsafe_target_vault_ports_rejected(self):
+        unsafe_ports = [
+            [{
+                "host_ip": "127.0.0.1",
+                "mode": "ingress",
+                "protocol": "tcp",
+                "published": "8200",
+                "target": 8200,
+            }],
+            [{
+                "host_ip": "0.0.0.0",
+                "mode": "ingress",
+                "protocol": "tcp",
+                "published": "8200",
+                "target": 8200,
+            }],
+            [{
+                "host_ip": "127.0.0.1",
+                "mode": "ingress",
+                "protocol": "tcp",
+                "published": "8201",
+                "target": 8200,
+            }],
+        ]
+        for ports in unsafe_ports:
+            with self.subTest(ports=ports):
+                self.vault_model["services"]["vault"]["ports"] = ports
+                with self.assertRaisesRegex(
+                    preflight.PreflightError, "Vault must not publish"
+                ):
+                    self.run_preflight()
+
+    def test_existing_vault_localhost_port_rejected(self):
+        vault = self.containers[preflight.VAULT_PROJECT + "-vault-1"]
+        vault["HostConfig"]["PortBindings"] = {
+            "8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}]
+        }
+        with self.assertRaisesRegex(
+            preflight.PreflightError,
+            "Unexpected existing Vault published ports",
+        ):
+            self.run_preflight()
+
+    def test_existing_vault_unsafe_ports_rejected(self):
+        vault = self.containers[preflight.VAULT_PROJECT + "-vault-1"]
+        cases = [
+            {"8200/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8200"}]},
+            {"8200/tcp": [{"HostIp": "::", "HostPort": "8200"}]},
+            {"8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8201"}]},
+        ]
+        for ports in cases:
+            with self.subTest(ports=ports):
+                vault["HostConfig"]["PortBindings"] = ports
+                with self.assertRaisesRegex(
+                    preflight.PreflightError, "Vault published ports"
+                ):
+                    self.run_preflight()
 
     def test_published_postgres_port_rejected(self):
         self.app_model["services"]["postgres"]["ports"] = [{

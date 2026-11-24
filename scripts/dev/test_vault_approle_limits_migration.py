@@ -18,6 +18,7 @@ ROLES = {
     "backend-reader": "backend-readonly",
     "migrator-reader": "migrator-readonly",
     "postgres-provisioner-reader": "postgres-provisioner-readonly",
+    "grafana-reader": "grafana-readonly",
 }
 
 FAKE_VAULT = r'''#!/bin/sh
@@ -158,7 +159,7 @@ class AppRoleLimitTests(unittest.TestCase):
         self.seed(original)
         result = self.run_script("apply")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(self.writes()), 7)
+        self.assertEqual(len(self.writes()), 9)
         for role, old in original.items():
             new = self.read()[role]
             self.assertEqual(new["secret_id_num_uses"], "0")
@@ -167,7 +168,7 @@ class AppRoleLimitTests(unittest.TestCase):
                         "token_ttl", "token_max_ttl"):
                 self.assertEqual(new[key], old[key])
         self.assertEqual(self.run_script("check").returncode, 0)
-        self.assertEqual(len(self.writes()), 7)
+        self.assertEqual(len(self.writes()), 9)
 
     def test_apply_is_idempotent(self):
         self.seed(initial_state("0", "2160h"), mount_ttl="2160h")
@@ -234,9 +235,79 @@ class AppRoleLimitTests(unittest.TestCase):
         self.seed({role: None for role in ROLES})
         result = self.run_script("apply")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(self.writes()), 4)
+        self.assertEqual(len(self.writes()), 5)
         self.assertTrue(all("secret-id" not in p for p in self.writes()))
         self.assertEqual(self.run_script("check").returncode, 0)
+
+
+
+    def test_existing_vault_adds_only_missing_grafana_role(self):
+        original = initial_state("0", "2160h")
+        original["grafana-reader"] = None
+
+        self.seed(original, mount_ttl="2160h")
+
+        result = self.run_script("apply")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        self.assertEqual(
+            self.writes(),
+            ["auth/approle/role/grafana-reader"],
+        )
+
+        expected = initial_state("0", "2160h")
+        self.assertEqual(self.read(), expected)
+
+        self.assertEqual(self.run_script("check").returncode, 0)
+        self.assertEqual(len(self.writes()), 1)
+
+    def test_missing_grafana_role_check_never_creates_it(self):
+        original = initial_state("0", "2160h")
+        original["grafana-reader"] = None
+
+        self.seed(original, mount_ttl="2160h")
+
+        result = self.run_script("check")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.read(), original)
+        self.assertEqual(self.writes(), [])
+
+    def test_existing_grafana_policy_drift_is_refused(self):
+        original = initial_state("0", "2160h")
+        original["grafana-reader"]["token_policies"] = "root"
+
+        self.seed(original, mount_ttl="2160h")
+
+        result = self.run_script("apply")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.read(), original)
+        self.assertEqual(self.writes(), [])
+
+    def test_grafana_policy_is_scoped_to_its_own_secret(self):
+        import re
+
+        policy = (
+            ROOT / "infra/vault/policies/grafana-readonly.hcl"
+        ).read_text()
+
+        actual = dict(re.findall(
+            r'path\s+"([^"]+)"\s*\{\s*'
+            r'capabilities\s*=\s*\["([^"]+)"\]\s*\}',
+            policy,
+        ))
+
+        self.assertEqual(actual, {
+            "kv/data/ft-transcendence/dev/grafana": "read",
+            "auth/token/renew-self": "update",
+            "auth/token/lookup-self": "read",
+        })
+
+        self.assertEqual(
+            len(re.findall(r'\bpath\s+"', policy)),
+            3,
+        )
 
 
 if __name__ == "__main__":

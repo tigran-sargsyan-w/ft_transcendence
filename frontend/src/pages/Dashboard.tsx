@@ -23,18 +23,18 @@ export default function Dashboard() {
     <div className="flex flex-col gap-4 w-full p-4">
       <WelcomeDashboardBanner displayName={displayName} />
       <DashboardIncidentsBanners incidents={mockIncidents} />
-      <div className="flex gap-4">
+      <div className="flex flex-col md:flex-row gap-4">
         <OpenIncidents incidents={mockIncidents} />{" "}
         <ServicesDown topology={mockTopology} />
         <ServicesImpacted topology={mockTopology} />
         <ResolvedIncidents />
       </div>
-      <div className="flex gap-4">
-        <div className="flex flex-col gap-4 w-3/5">
+      <div className="flex flex-col md:flex-row gap-4">
+        <div className="flex flex-col gap-4 md:w-3/5">
           <ActiveIncidents incidents={mockIncidents} />
           <ServicesHealth topology={mockTopology} />
         </div>
-        <div className="flex flex-col gap-4 w-2/5">
+        <div className="flex flex-col gap-4 md:w-2/5">
           <CriticalNodes criticalNodes={mockCriticalNodes} />
           <TeamOnlineCard team={mockTeam} />
         </div>

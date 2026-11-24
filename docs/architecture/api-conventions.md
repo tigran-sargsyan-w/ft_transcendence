@@ -61,9 +61,15 @@ The `code` is stable and machine-readable. An error that defines its own code us
 | `INTERNAL_ERROR` | 500 | Unexpected server error. The message is always `Internal server error`; the real error is only logged | none |
 | `BAD_REQUEST` | 400 | Malformed request, such as invalid JSON, or an id in the path that is not a UUID | none |
 | `NOT_FOUND` | 404 | Unknown route | none |
-| `USER_NOT_FOUND` | 404 | `GET /users/:id` with an id that no user has | none |
+| `USER_NOT_FOUND` | 404 | Unknown user in the profile read or friendship request | none |
+| `FRIENDSHIP_ALREADY_EXISTS` | 409 | A pair already has a pending request or accepted friendship | none |
+| `FRIEND_REQUEST_NOT_FOUND` | 404 | A pending request is missing or unavailable to the current user | none |
+| `FRIENDSHIP_NOT_FOUND` | 404 | No accepted friendship for the current user and target | none |
+| `AVATAR_NOT_FOUND` | 404 | No uploaded image for a user | none |
+| `AVATAR_TOO_LARGE` | 413 | Image or decoded/processed output exceeds size limit | none |
+| `INVALID_ORIGIN` | 403 | Multipart request comes from an untrusted browser origin | none |
 | `PAYLOAD_TOO_LARGE` | 413 | Request body over the size limit | none |
-| `INCIDENT_NOT_FOUND` | 404 | No incident has that id (routes of `/incidents`) | none |
+| `INCIDENT_NOT_FOUND` | 404 | No incident has that id (routes of `/incidents`, and `incident:join`) | none |
 | `INCIDENT_VERSION_CONFLICT` | 409 | `PATCH /incidents/:id` with a `version` that is not the current one | the current incident |
 | `TOPOLOGY_UNKNOWN_ENVIRONMENT` | 404 | An `environmentId` the server does not follow: `topology:subscribe` (in the acknowledgement), the analyses, `POST /incidents` | none |
 | `TOPOLOGY_UNAVAILABLE` | 503 | No topology yet: `topology:subscribe` (in the acknowledgement), the analyses, `POST /incidents` | none |

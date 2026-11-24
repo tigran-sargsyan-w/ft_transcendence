@@ -21,8 +21,8 @@ export const StatCard = ({
   tone = "default",
 }: StatCardProps) => {
   return (
-    <Card className="flex-1">
-      <CardHeader>
+    <Card className="flex flex-row md:flex-col items-center md:items-stretch justify-between flex-1">
+      <CardHeader className="flex-1 md:flex-none">
         <CardTitle>{title}</CardTitle>
       </CardHeader>
       <CardContent>

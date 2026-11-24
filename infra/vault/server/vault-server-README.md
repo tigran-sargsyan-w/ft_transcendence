@@ -75,7 +75,7 @@ The Vault Compose file deliberately retains the project name **`transcendence-va
 - Docker Engine, Docker Compose v2, Bash, OpenSSL, `flock` (util-linux), and permission to operate Docker.
 - An existing initialized PostgreSQL data volume for routine startup; bootstrap is an independently controlled operation.
 - A safe place **outside Git and Docker** for the Shamir shares and initial administrative token. Never paste these into chat, tickets, shell history, container logs, or CI.
-- Vault image version currently pinned to `hashicorp/vault:2.2.1`.
+- Vault image version currently pinned to `hashicorp/vault:2.1.2`.
 
 The Vault API is reachable over the private Docker network; its port is not published on the host. The current setup is **single node, manually unsealed, development only**, not a highly available or auto-unsealed deployment.
 
@@ -144,7 +144,7 @@ Supply the Vault administrative token at the hidden prompt. The bootstrap:
 - verifies existing role parameters instead of silently overwriting an existing role;
 - does **not** write database secrets or generate SecretIDs.
 
-All three AppRoles require a SecretID (`bind_secret_id=true`), use a 7-day SecretID lifetime, a maximum of 20 logins per SecretID, a 1-hour token TTL, a 4-hour token maximum TTL, and exclude the default token policy.
+All three AppRoles require a SecretID (`bind_secret_id=true`), use a 90-day SecretID lifetime (`2160h`), unlimited SecretID uses (`secret_id_num_uses=0`), a 1-hour token TTL, a 4-hour token maximum TTL, and exclude the default token policy.
 
 Running bootstrap again is supported; note that it **reapplies ACL policies** from the repository. Review policy changes before running it on a shared deployment.
 
@@ -332,7 +332,7 @@ Replace `backup-ACTUAL_NAME` with the actual backup directory name. Verify the l
 - Development-only single-node Raft; not production HA.
 - Manual Shamir initialization/unseal; no production-grade auto-unseal.
 - Administrative provisioning currently requires a root/admin token in an interactive session; a narrowly scoped provisioning identity is future work.
-- AppRole SecretID TTL is **168 hours**, with **20 uses**; credentials may need reprovisioning before expiry or on exhaustion. Automated rotation and revocation remain separate work.
+- AppRole SecretID TTL is **2160 hours (90 days)**, with **unlimited uses (0)**; expired or revoked credentials require operator-controlled recovery. Automatic SecretID rotation is not implemented.
 - Persistent Docker volumes contain authentication and rendered secret material; Docker host administrators can access them.
 - TLS rotation succeeded locally via `SIGHUP` without container restart, but interrupted-file replacement and rollback failure scenarios are not comprehensively tested.
 - PostgreSQL role creation, credential reconciliation, and grants are automated and were tested in an isolated Clean-Room. Initial Vault KV values and AppRole provisioning still require operator setup; a fresh-machine installation remains untested.

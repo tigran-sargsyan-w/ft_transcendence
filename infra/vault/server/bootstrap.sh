@@ -79,6 +79,7 @@ ensure_policy() {
 ensure_policy backend-readonly
 ensure_policy migrator-readonly
 ensure_policy postgres-provisioner-readonly
+ensure_policy grafana-readonly
 
 read_field() {
   printf '%s\n' "$role_state" |
@@ -205,6 +206,7 @@ ensure_approle_mount_limit() {
 ensure_role backend-reader backend-readonly
 ensure_role migrator-reader migrator-readonly
 ensure_role postgres-provisioner-reader postgres-provisioner-readonly
+ensure_role grafana-reader grafana-readonly
 
 ensure_approle_mount_limit
 

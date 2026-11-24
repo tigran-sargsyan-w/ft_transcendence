@@ -32,6 +32,25 @@ class HTTPReadinessTests(unittest.TestCase):
 
         self.assertEqual(execute.call_count, 2)
 
+    @patch.object(startup, "execute", return_value=b"200")
+    def test_https_readiness_enforces_tls_verification(self, execute):
+        startup.wait_https_route(
+            "/api/v1/health",
+            attempts=1,
+            delay=0,
+        )
+
+        command = execute.call_args.args[0]
+
+        self.assertEqual(command[:2], ["curl", "-q"])
+        self.assertNotIn("--insecure", command)
+        self.assertNotIn("-k", command)
+        self.assertIn("--noproxy", command)
+        self.assertIn(
+            "https://transcendence.test:8443/api/v1/health",
+            command,
+        )
+
     @patch.object(startup.time, "sleep")
     @patch.object(startup, "execute", return_value=b"502")
     def test_persistent_502_fails(self, execute, sleep):

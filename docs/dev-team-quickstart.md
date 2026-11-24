@@ -18,11 +18,15 @@ If Vault is **sealed** (typically after a reboot), use `make recover` in an inte
 ## 2. This is a completely new Ubuntu VM
 
 ```bash
-./scripts/install-deps.sh --check  # See which prerequisites are missing
-./scripts/install-deps.sh          # Interactive installation, if needed
-make initialize                    # FIRST SETUP ONLY; approve each stage
-make health
+make initialize  # First install: prerequisites, images and guarded stages
+make health      # Read-only verification
 ```
+
+Git and Make must be present to obtain the repository and invoke this
+command. Package installation, image downloads and initial Vault
+provisioning require explicit operator approval. If Docker group access
+changes, log out and back in before retrying. Do not run the initializer
+with sudo.
 
 `make initialize` sets up the local host, Vault, PostgreSQL, roles, migrations and application through an operator-approved flow. It is **not** routine startup, and its full first-install path has **not yet been independently accepted on another clean VM**. Ask the infrastructure owner if a step fails; do not retry by deleting Docker volumes.
 

@@ -1,0 +1,134 @@
+# WebSocket connection handling
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+# Docker embedded DNS
+
+upstream backend_upstream {
+    zone backend_upstream 64k;
+    server backend:3000 resolve;
+}
+
+upstream frontend_upstream {
+    zone frontend_upstream 64k;
+    server frontend:5173 resolve;
+}
+
+upstream grafana_upstream {
+    zone grafana_upstream 64k;
+    server grafana:3000 resolve;
+}
+
+# HTTP -> HTTPS
+server {
+    listen 8080;
+    server_name transcendence.test;
+
+    return 308 https://transcendence.test:8443$request_uri;
+}
+
+# HTTPS reverse proxy
+server {
+    listen 8443 ssl;
+    server_name transcendence.test;
+
+    ssl_certificate     /etc/nginx/certs/cert.pem;
+    ssl_certificate_key /etc/nginx/certs/key.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # NestJS REST API
+    location ^~ /api/ {
+        proxy_pass http://backend_upstream;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Socket.IO / WebSocket
+    location ^~ /socket.io/ {
+        # CRS 920420: allow Socket.IO Engine.IO polling POST
+        # with text/plain, without disabling other CRS protections.
+        modsecurity_rules '
+            SecRule REQUEST_METHOD "@streq POST" "id:1000043,phase:1,pass,nolog,t:none,chain"
+                SecRule ARGS_GET:transport "@streq polling" "t:none,chain"
+                    SecRule REQUEST_HEADERS:Content-Type "@rx (?i)^text/plain([[:space:]]*;[[:space:]]*charset[[:space:]]*=[[:space:]]*utf-8)?[[:space:]]*$" "t:none,ctl:ruleRemoveById=920420"
+        ';
+
+        proxy_pass http://backend_upstream;
+        proxy_http_version 1.1;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_read_timeout 75s;
+    }
+
+    # Canonical Grafana subpath.
+    location = /grafana {
+        return 308 https://transcendence.test:8443/grafana/$is_args$args;
+    }
+
+    # Grafana monitoring UI, API and Grafana Live WebSocket.
+    location ^~ /grafana/ {
+        # Keep critical gateway diagnostics without WAF matched data.
+        # Transaction metadata remains available in the audit log.
+        error_log /var/log/nginx/error.log crit;
+
+        # CRS 953100 falsely detects PHP leakage in Grafana UI HTML.
+        # Limit the exception to GET/HEAD requests for verified UI paths.
+        # Keep inbound inspection and outbound blocking rules enabled.
+        modsecurity_rules '
+            # Remove sensitive audit sections for this transaction.
+            SecAction "id:1000045,phase:1,pass,nolog,ctl:auditLogParts=-BCDEFGHIJK"
+
+            SecRule REQUEST_METHOD "@rx ^(?:GET|HEAD)$" "id:1000044,phase:1,pass,nolog,t:none,chain"
+                SecRule REQUEST_FILENAME "@rx ^(?:/grafana/login|/grafana/|/grafana/dashboards|/grafana/d/ft-demo-lab/demo-lab-service-availability|/grafana/dashboards/f/ft-monitoring/transcendence|/grafana/d/ft-monitoring-pipeline/monitoring-pipeline-operational-health)$" "t:none,ctl:ruleRemoveById=953100"
+        ';
+
+        proxy_pass http://grafana_upstream;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host transcendence.test:8443;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host transcendence.test:8443;
+        proxy_set_header X-Forwarded-Port 8443;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        proxy_read_timeout 75s;
+    }
+
+    # WAF container health endpoint
+    location = /healthz {
+        access_log off;
+        return 200 "OK";
+    }
+
+    # React + Vite development server
+    location / {
+        proxy_pass http://frontend_upstream;
+        proxy_http_version 1.1;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

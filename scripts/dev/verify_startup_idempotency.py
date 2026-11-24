@@ -16,6 +16,11 @@ import re
 import subprocess
 import sys
 
+if __package__:
+    from . import bootstrap_vault_ui as ui
+else:
+    import bootstrap_vault_ui as ui
+
 ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP = ROOT / "scripts/bootstrap.sh"
 APP = "transcendence-app-dev"
@@ -27,15 +32,22 @@ CONTAINERS = (
     f"{APP}-backend-1",
     f"{APP}-docker-proxy-1",
     f"{APP}-collector-1",
+    f"{APP}-prometheus-1",
     f"{APP}-graph-engine-1",
     f"{APP}-frontend-1",
     f"{APP}-nginx-1",
+    f"{APP}-vault-grafana-agent-1",
+    f"{APP}-grafana-1",
 )
 VOLUMES = (
     f"{VAULT}_vault_data",
     f"{VAULT}_backend_agent_auth",
     f"{VAULT}_backend_rendered",
     f"{APP}_postgres_data",
+    f"{APP}_prometheus_data",
+    f"{APP}_grafana_data",
+    f"{APP}_grafana_vault_auth",
+    f"{APP}_grafana_vault_rendered",
     f"{APP}_migrator_vault_auth",
     f"{APP}_migrator_vault_rendered",
     f"{APP}_postgres_provisioner_vault_auth",
@@ -93,7 +105,11 @@ def names_for(kind):
         names = output.decode("utf-8").splitlines()
     except UnicodeError:
         raise AcceptanceError(f"Invalid Docker {kind} inventory") from None
-    prefix = (f"{APP}-", f"{VAULT}-") if kind == "container" else (f"{APP}_", f"{VAULT}_")
+    prefix = (
+        (f"{APP}-", f"{VAULT}-", f"{ui.PROJECT}-")
+        if kind == "container"
+        else (f"{APP}_", f"{VAULT}_", f"{ui.PROJECT}_")
+    )
     return tuple(sorted(n for n in names if n.startswith(prefix)))
 
 
@@ -129,12 +145,67 @@ def migration_fingerprint():
     return value
 
 
+
+def vault_ui_inventory():
+    """Verify optional gateway intent, identity and edge network."""
+    try:
+        enabled = ui.desired_enabled()
+        gateway = ui.inspect()
+
+        if gateway is None and enabled:
+            raise AcceptanceError("Enabled Vault UI gateway missing")
+
+        if gateway is not None:
+            ui.verify_identity(gateway)
+
+        edge_present = ui.EDGE in names_for("network")
+
+        if gateway is not None and not edge_present:
+            raise AcceptanceError("Vault UI edge network missing")
+
+        if edge_present:
+            ui.verify_network(ui.EDGE, ui.PROJECT, False)
+
+        if gateway is not None:
+            state = gateway.get("State") or {}
+            running = (
+                state.get("Running") is True
+                and state.get("Status") == "running"
+            )
+            stopped = (
+                state.get("Running") is False
+                and state.get("Status") in ("created", "exited")
+            )
+
+            if enabled and not running:
+                raise AcceptanceError("Enabled Vault UI not running")
+            if not enabled and not stopped:
+                raise AcceptanceError("Disabled Vault UI not stopped")
+            if not isinstance(gateway.get("Id"), str) or not gateway["Id"]:
+                raise AcceptanceError("Missing Vault UI Docker identity")
+
+        return enabled, gateway, edge_present
+
+    except (ui.GatewayError, OSError):
+        raise AcceptanceError(
+            "Vault UI gateway inventory not trusted"
+        ) from None
+
+
 def snapshot():
     """Select only non-secret immutable identities and lifecycle metadata."""
     containers = inspected("container", CONTAINERS)
     volumes = inspected("volume", VOLUMES)
-    networks = inspected("network", NETWORKS)
+
+    ui_enabled, gateway, edge_present = vault_ui_inventory()
+
+    expected_networks = NETWORKS + (
+        (ui.EDGE,) if edge_present else ()
+    )
+    networks = inspected("network", expected_networks)
+
     result = {
+        "vault_ui_enabled": ui_enabled,
         "container_inventory": names_for("container"),
         "volume_inventory": names_for("volume"),
         "network_inventory": names_for("network"),
@@ -151,6 +222,23 @@ def snapshot():
             item["Id"], item.get("Created"), item.get("RestartCount"),
             state.get("StartedAt"),
         )
+    if gateway is not None:
+        if ui.NAME not in result["container_inventory"]:
+            raise AcceptanceError("Vault UI inventory mismatch")
+
+        state = gateway.get("State") or {}
+        result["containers"][ui.NAME] = (
+            gateway["Id"],
+            gateway.get("Created"),
+            gateway.get("RestartCount"),
+            state.get("StartedAt"),
+            state.get("Status"),
+            state.get("Running"),
+        )
+
+    if edge_present and ui.EDGE not in result["network_inventory"]:
+        raise AcceptanceError("Vault UI network inventory mismatch")
+
     for name, item in volumes.items():
         result["volumes"][name] = (item.get("CreatedAt"), item.get("Driver"), item.get("Mountpoint"))
     for name, item in networks.items():
@@ -159,6 +247,9 @@ def snapshot():
 
 
 def compare(expected, current):
+    if current["vault_ui_enabled"] != expected["vault_ui_enabled"]:
+        raise AcceptanceError("Vault UI enabled state changed")
+
     # Prevent silent creation of additional project resources; no raw IDs printed.
     for group in ("container_inventory", "volume_inventory", "network_inventory", "migration_history"):
         if current[group] != expected[group]:

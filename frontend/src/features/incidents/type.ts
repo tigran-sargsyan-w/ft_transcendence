@@ -2,11 +2,7 @@ import type { UserRef } from "@/types/user";
 
 export type IncidentSeverity = "sev1" | "sev2" | "sev3" | "sev4";
 
-export type IncidentStatus =
-  | "open"
-  | "investigating"
-  | "mitigated"
-  | "resolved";
+export type IncidentStatus = "open" | "investigating" | "resolved";
 
 export interface IncidentSummary {
   id: string;

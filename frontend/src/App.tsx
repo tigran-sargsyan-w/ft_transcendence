@@ -8,6 +8,7 @@ import Profile from "./pages/Profile";
 import Organization from "./pages/Organization";
 import Topology from "./pages/Topology";
 import { RequireAuth } from "./features/auth/RequireAuth";
+import NotFound from "./pages/NotFound";
 
 function App() {
   return (
@@ -24,6 +25,7 @@ function App() {
             <Route path="/organization" element={<Organization />} />
           </Route>
         </Route>
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
   );

@@ -15,9 +15,11 @@ import bootstrap_unified as unified
 class UnifiedTests(unittest.TestCase):
     def test_fixed_stage_order(self):
         self.assertEqual([s[0] for s in unified.STAGES], [
-            "host", "resources", "vault", "vault-config", "vault-secrets",
+            "host", "resources", "vault", "vault-ui", "vault-config", "vault-secrets",
             "postgres", "postgres-roles", "migrations", "backend-agent",
             "backend", "support-services", "frontend", "nginx",
+            "prometheus", "grafana-secrets", "grafana-agent",
+            "grafana", "grafana-https",
         ])
 
     def test_unknown_command_denied(self):
@@ -27,7 +29,12 @@ class UnifiedTests(unittest.TestCase):
     def test_command_check_is_quiet(self):
         with patch.object(unified.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as run:
             self.assertTrue(unified.command("--check-nginx", quiet=True))
-        self.assertEqual(run.call_args.args[0], [str(unified.BOOTSTRAP), "--check-nginx"])
+        self.assertEqual(run.call_args.args[0], [
+            unified.sys.executable,
+            str(unified.ROOT / "scripts/dev/bootstrap_nginx.py"),
+            "check",
+        ])
+        self.assertIn("FT_DEV_TLS_DIR", run.call_args.kwargs["env"])
         self.assertEqual(run.call_args.kwargs["stdout"], unified.subprocess.DEVNULL)
         self.assertEqual(run.call_args.kwargs["stderr"], unified.subprocess.DEVNULL)
 
@@ -39,7 +46,7 @@ class UnifiedTests(unittest.TestCase):
         with patch.object(unified, "command", return_value=True) as cmd, contextlib.redirect_stdout(io.StringIO()):
             unified.check()
         self.assertEqual([call.args[0] for call in cmd.call_args_list],
-                         ["--check-host", "--check-resources", "--check-nginx"])
+                         ["--check-host", "--check-resources", "--check-vault-ui-optional", "--check-nginx", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
         self.assertTrue(all(call.kwargs["quiet"] for call in cmd.call_args_list))
 
     def test_check_stops_on_first_failure(self):
@@ -50,12 +57,12 @@ class UnifiedTests(unittest.TestCase):
         self.assertEqual(cmd.call_count, unified.READ_ONLY_ATTEMPTS)
         self.assertEqual(sleep.call_count, unified.READ_ONLY_ATTEMPTS - 1)
 
-    def test_health_report_fast_path_only_three_checks(self):
+    def test_health_report_fast_path_checks_prometheus(self):
         with patch.object(unified, "command", return_value=True) as command, \
              contextlib.redirect_stdout(io.StringIO()) as output:
             unified.health_report()
         self.assertEqual([call.args[0] for call in command.call_args_list],
-                         ["--check-host", "--check-resources", "--check-nginx"])
+                         ["--check-host", "--check-resources", "--check-nginx", "--check-vault-ui-optional", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
         self.assertTrue(all(call.kwargs["quiet"] for call in command.call_args_list))
         self.assertIn("RESULT: DEVELOPMENT HEALTHY", output.getvalue())
 
@@ -66,7 +73,7 @@ class UnifiedTests(unittest.TestCase):
             with self.assertRaisesRegex(unified.UnifiedStartupError, "postgres"):
                 unified.health_report()
         self.assertEqual([c.args[0] for c in ck.call_args_list],
-                         ["host", "resources", "nginx", "vault", "vault-config", "vault-secrets", "postgres"])
+                         ["host", "resources", "nginx", "vault", "vault-ui", "vault-config", "vault-secrets", "postgres"])
         self.assertIn("FAIL: postgres; inspect --check-postgres", output.getvalue())
         self.assertNotIn("RESULT: DEVELOPMENT HEALTHY", output.getvalue())
 
@@ -98,9 +105,11 @@ class UnifiedTests(unittest.TestCase):
     def test_health_report_main_read_only_no_lock_or_mutation(self):
         with patch.object(unified.os, "geteuid", return_value=1000), \
              patch.object(unified, "health_report") as report, \
+             patch.object(unified, "preflight_once") as preflight, \
              patch.object(unified, "exclusive_orchestrator_lock") as lock:
             self.assertEqual(unified.main(["health-report"]), 0)
         report.assert_called_once()
+        preflight.assert_called_once_with()
         lock.assert_not_called()
 
     def test_initialization_requires_tty(self):
@@ -114,7 +123,7 @@ class UnifiedTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             unified.initialize()
         self.assertEqual([call.args[0] for call in cmd.call_args_list],
-                         [stage[1] for stage in unified.STAGES])
+                         [stage[1] for stage in unified.STAGES if stage[0] != "vault-ui"])
 
     def test_initialization_prepares_only_missing_stage(self):
         responses = [False] * unified.READ_ONLY_ATTEMPTS + [True, True] + [True] * (len(unified.STAGES) - 1)
@@ -141,7 +150,7 @@ class UnifiedTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             unified.start()
         self.assertEqual([call.args[0] for call in ck.call_args_list],
-                         ["host", "resources", "nginx"])
+                         ["host", "resources", "vault-ui", "nginx", "prometheus", "grafana", "grafana-https"])
         vault.assert_called_once()
 
     def test_routine_fails_before_database_if_vault_sealed(self):
@@ -158,6 +167,84 @@ class UnifiedTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(unified.UnifiedStartupError, "migrations"):
                 unified.start()
+
+    def test_reboot_with_enabled_but_stopped_ui_does_not_block_core_start(self):
+        # Simulates a persisted enabled marker and restart:no HAProxy after VM reboot.
+        # The core stack must still reach READY without starting the gateway.
+        with (
+            patch.object(unified, "checked", side_effect=lambda name, **_: name != "vault-ui") as probe,
+            patch.object(unified, "vault_seal_guard"),
+            patch.object(unified, "resume") as resume,
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            unified.start()
+        resume.assert_not_called()
+        self.assertIn("WARN: optional Vault UI state unhealthy", output.getvalue())
+        self.assertIn("RESULT: UNIFIED STARTUP READY", output.getvalue())
+        self.assertEqual([call.args[0] for call in probe.call_args_list],
+                         ["host", "resources", "vault-ui", "nginx",
+                          "prometheus", "grafana", "grafana-https"])
+
+    def test_initialize_never_requires_optional_gateway(self):
+        with (
+            patch.object(unified.sys.stdin, "isatty", return_value=True),
+            patch.object(unified, "checked", side_effect=lambda name, **_: name != "vault-ui") as probe,
+            patch.object(unified, "command") as command,
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            unified.initialize()
+        command.assert_not_called()
+        self.assertNotIn("vault-ui", [call.args[0] for call in probe.call_args_list])
+        self.assertIn("SKIP: optional vault-ui", output.getvalue())
+
+    def test_health_report_rejects_missing_enabled_gateway(self):
+        with (
+            patch.object(unified, "checked", side_effect=lambda name: name != "vault-ui"),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "vault-ui"):
+                unified.health_report()
+        self.assertIn("FAIL: vault-ui", output.getvalue())
+        self.assertNotIn("RESULT: DEVELOPMENT HEALTHY", output.getvalue())
+
+    def test_guard_resume_vault_ui_verifies_identity(self):
+        ui = types.ModuleType("bootstrap_vault_ui")
+        ui.NAME = "trusted-vault-ui"
+
+        item = {
+            "Id": "original-gateway-id",
+            "State": {
+                "Running": False,
+                "Status": "exited",
+            },
+        }
+
+        ui.inspect = MagicMock(return_value=item)
+        ui.verify_identity = MagicMock()
+
+        with patch.dict("sys.modules", {"bootstrap_vault_ui": ui}):
+            targets = unified.guard_resume("vault-ui")
+
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(
+            targets[0][:2],
+            ("trusted-vault-ui", "original-gateway-id"),
+        )
+        ui.verify_identity.assert_called_once_with(item)
+
+    def test_missing_vault_ui_refuses_resume(self):
+        ui = types.ModuleType("bootstrap_vault_ui")
+        ui.NAME = "trusted-vault-ui"
+        ui.inspect = MagicMock(return_value=None)
+        ui.verify_identity = MagicMock()
+
+        with patch.dict("sys.modules", {"bootstrap_vault_ui": ui}):
+            with self.assertRaisesRegex(
+                unified.UnifiedStartupError, "Missing"
+            ):
+                unified.guard_resume("vault-ui")
+
+        ui.verify_identity.assert_not_called()
 
     def test_resume_ready_is_keep(self):
         with patch.object(unified, "checked", return_value=True), \
@@ -371,7 +458,7 @@ class UnifiedTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             unified.start()
         self.assertEqual([item.args[0] for item in command.call_args_list],
-                         ["--check-host", "--check-resources", "--check-nginx"])
+                         ["--check-host", "--check-resources", "--check-vault-ui-optional", "--check-nginx", "--check-prometheus", "--check-grafana", "--check-grafana-https"])
         guard.assert_called_once()
         resume.assert_not_called()
 
@@ -442,6 +529,39 @@ class UnifiedTests(unittest.TestCase):
                 unified.recovery_vault()
         self.assertNotIn("sensitive internal info", str(caught.exception))
         cmd.assert_not_called()
+
+    def test_recovery_accepts_vault_without_published_ports(self):
+        vault, item = self.recovery_fixture(sealed=False)
+        with patch.dict("sys.modules", {"bootstrap_vault": vault}), \
+             patch.object(unified.subprocess, "run") as cmd, \
+             contextlib.redirect_stdout(io.StringIO()):
+            found, state = unified.recovery_vault()
+        self.assertIs(found, vault)
+        self.assertFalse(state["sealed"])
+        cmd.assert_not_called()
+
+    def test_recovery_rejects_unexpected_vault_ui_ports(self):
+        unsafe = [
+            {"8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}]},
+            {"8200/tcp": [{"HostIp": "::", "HostPort": "8200"}]},
+            {"8200/tcp": [{"HostIp": "127.0.0.2", "HostPort": "8200"}]},
+            {"8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8201"}]},
+            {
+                "8200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8200"}],
+                "8201/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8201"}],
+            },
+        ]
+        for bindings in unsafe:
+            with self.subTest(bindings=bindings):
+                vault, item = self.recovery_fixture()
+                item["HostConfig"]["PortBindings"] = bindings
+                with patch.dict("sys.modules", {"bootstrap_vault": vault}), \
+                     patch.object(unified.subprocess, "run") as cmd:
+                    with self.assertRaisesRegex(
+                        unified.UnifiedStartupError, "privileges/ports"
+                    ):
+                        unified.recovery_vault()
+                cmd.assert_not_called()
 
     def test_recovery_rejects_public_vault_ports(self):
         vault, item = self.recovery_fixture()
@@ -578,15 +698,298 @@ class UnifiedTests(unittest.TestCase):
     def test_recover_main_uses_existing_lock(self):
         with patch.object(unified.os, "geteuid", return_value=1000), \
              patch.object(unified, "exclusive_orchestrator_lock") as lock, \
-             patch.object(unified, "recover") as recover:
+             patch.object(unified, "recover") as recover, \
+             patch.object(unified, "preflight_once") as preflight:
             self.assertEqual(unified.main(["recover"]), 0)
         lock.assert_called_once_with()
         recover.assert_called_once_with()
+        preflight.assert_called_once_with()
 
     def test_main_refuses_root(self):
         with patch.object(unified.os, "geteuid", return_value=0):
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(unified.main(["start"]), 1)
+
+
+
+    def test_health_report_rejects_unavailable_prometheus(self):
+        checks = lambda name: name != "prometheus"
+
+        with patch.object(unified, "checked", side_effect=checks), \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaisesRegex(
+                unified.UnifiedStartupError, "prometheus"
+            ):
+                unified.health_report()
+
+        self.assertIn("FAIL: prometheus", output.getvalue())
+        self.assertNotIn("RESULT: DEVELOPMENT HEALTHY", output.getvalue())
+
+    def test_start_never_creates_missing_prometheus(self):
+        def checked(name):
+            return name != "prometheus"
+
+        def resume(name):
+            if name == "prometheus":
+                raise unified.UnifiedStartupError(
+                    "Missing Prometheus container"
+                )
+
+        with patch.object(unified, "checked", side_effect=checked), \
+             patch.object(unified, "vault_seal_guard"), \
+             patch.object(unified, "resume", side_effect=resume) as mocked, \
+             contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(
+                unified.UnifiedStartupError, "Missing Prometheus"
+            ):
+                unified.start()
+
+        self.assertEqual(mocked.call_args.args[0], "prometheus")
+
+    def test_guard_resume_prometheus_keeps_container_identity(self):
+        prometheus = types.ModuleType("bootstrap_prometheus")
+        prometheus.NAME = "trusted-prometheus"
+        prometheus.container = MagicMock(return_value={
+            "Id": "retained-id",
+            "State": {"Running": False, "Status": "exited"},
+        })
+        prometheus.verify_identity = MagicMock()
+
+        with patch.dict(
+            "sys.modules", {"bootstrap_prometheus": prometheus}
+        ):
+            targets = unified.guard_resume("prometheus")
+
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(targets[0][:2], (
+            "trusted-prometheus", "retained-id"
+        ))
+        self.assertEqual(targets[0][3], "stopped")
+        prometheus.verify_identity.assert_called_once()
+
+
+    def test_grafana_https_has_no_prepare_operation(self):
+        self.assertEqual(
+            unified.STAGE_BY_NAME["grafana-https"],
+            ("--check-grafana-https", None),
+        )
+        self.assertNotIn("grafana-https", unified.RESUMABLE)
+        self.assertNotIn("grafana-secrets", unified.RESUMABLE)
+
+        with patch.object(unified.subprocess, "run") as run:
+            with self.assertRaises(unified.UnifiedStartupError):
+                unified.command(None)
+        run.assert_not_called()
+
+    def test_initialize_does_not_repair_failed_grafana_https(self):
+        with (
+            patch.object(unified.sys.stdin, "isatty", return_value=True),
+            patch.object(
+                unified, "checked",
+                side_effect=lambda name, **_: name != "grafana-https",
+            ),
+            patch.object(unified, "command") as command,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            with self.assertRaisesRegex(
+                unified.UnifiedStartupError, "grafana-https"
+            ):
+                unified.initialize()
+
+        command.assert_not_called()
+
+    def test_unified_check_rejects_failed_grafana(self):
+        with (
+            patch.object(
+                unified, "command",
+                side_effect=lambda flag, **_: flag != "--check-grafana",
+            ) as command,
+            patch.object(unified.time, "sleep"),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            with self.assertRaisesRegex(
+                unified.UnifiedStartupError, "grafana not ready"
+            ):
+                unified.check()
+
+        calls = [call.args[0] for call in command.call_args_list]
+        self.assertNotIn("--check-grafana-https", calls)
+        self.assertTrue(all(flag.startswith("--check-") for flag in calls))
+
+    def test_health_report_localizes_grafana_secrets(self):
+        unavailable = {"grafana", "grafana-secrets"}
+
+        with (
+            patch.object(
+                unified, "checked",
+                side_effect=lambda name: name not in unavailable,
+            ),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            with self.assertRaisesRegex(
+                unified.UnifiedStartupError, "grafana-secrets"
+            ):
+                unified.health_report()
+
+        self.assertIn("FAIL: grafana-secrets", output.getvalue())
+        self.assertNotIn("RESULT: DEVELOPMENT HEALTHY", output.getvalue())
+
+    def test_health_report_localizes_grafana_agent(self):
+        unavailable = {"grafana", "grafana-agent"}
+
+        with (
+            patch.object(
+                unified, "checked",
+                side_effect=lambda name: name not in unavailable,
+            ),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            with self.assertRaisesRegex(
+                unified.UnifiedStartupError, "grafana-agent"
+            ):
+                unified.health_report()
+
+        self.assertIn("FAIL: grafana-agent", output.getvalue())
+        self.assertNotIn("RESULT: DEVELOPMENT HEALTHY", output.getvalue())
+
+    def test_health_report_rejects_failed_grafana_https(self):
+        with (
+            patch.object(
+                unified, "checked",
+                side_effect=lambda name, **_: name != "grafana-https",
+            ),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            with self.assertRaisesRegex(
+                unified.UnifiedStartupError, "grafana-https"
+            ):
+                unified.health_report()
+
+        self.assertIn("FAIL: grafana-https", output.getvalue())
+        self.assertNotIn("RESULT: DEVELOPMENT HEALTHY", output.getvalue())
+
+    def test_guard_resume_grafana_keeps_container_identity(self):
+        grafana = types.ModuleType("bootstrap_grafana")
+        grafana.NAME = "trusted-grafana"
+        grafana.container = MagicMock(return_value={
+            "Id": "existing-grafana-id",
+            "State": {"Running": False, "Status": "exited"},
+        })
+        grafana.verify_identity = MagicMock()
+
+        with patch.dict("sys.modules", {"bootstrap_grafana": grafana}):
+            targets = unified.guard_resume("grafana")
+
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(
+            targets[0][:2],
+            ("trusted-grafana", "existing-grafana-id"),
+        )
+        self.assertEqual(targets[0][3], "stopped")
+        grafana.verify_identity.assert_called_once()
+
+    def test_guard_resume_grafana_refuses_missing_container(self):
+        grafana = types.ModuleType("bootstrap_grafana")
+        grafana.NAME = "trusted-grafana"
+        grafana.container = MagicMock(return_value=None)
+        grafana.verify_identity = MagicMock()
+
+        with patch.dict("sys.modules", {"bootstrap_grafana": grafana}):
+            with self.assertRaisesRegex(
+                unified.UnifiedStartupError, "Missing"
+            ):
+                unified.guard_resume("grafana")
+
+    def test_guard_resume_grafana_agent_preserves_identity(self):
+        agent = types.ModuleType("bootstrap_grafana_agent")
+        agent.NAME = "trusted-grafana-agent"
+        agent.credential_inventory = MagicMock(return_value="present")
+        agent.container = MagicMock(return_value={
+            "Id": "existing-agent-id",
+            "State": {"Running": False, "Status": "exited"},
+        })
+        agent.verify_identity = MagicMock()
+
+        with patch.dict(
+            "sys.modules", {"bootstrap_grafana_agent": agent}
+        ):
+            targets = unified.guard_resume("grafana-agent")
+
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(
+            targets[0][:2],
+            ("trusted-grafana-agent", "existing-agent-id"),
+        )
+        self.assertEqual(targets[0][3], "stopped")
+        agent.credential_inventory.assert_called_once()
+        agent.verify_identity.assert_called_once()
+
+    def test_guard_resume_grafana_agent_refuses_missing_credentials(self):
+        agent = types.ModuleType("bootstrap_grafana_agent")
+        agent.credential_inventory = MagicMock(return_value="missing")
+        agent.container = MagicMock()
+
+        with patch.dict(
+            "sys.modules", {"bootstrap_grafana_agent": agent}
+        ):
+            with self.assertRaisesRegex(
+                unified.UnifiedStartupError, "AppRole missing"
+            ):
+                unified.guard_resume("grafana-agent")
+
+        agent.container.assert_not_called()
+
+    def test_start_resumes_grafana_in_dependency_order(self):
+        events = []
+
+        def checked(name):
+            return name != "grafana"
+
+        def require(name):
+            events.append(("require", name))
+
+        def resume(name):
+            events.append(("resume", name))
+
+        with (
+            patch.object(unified, "checked", side_effect=checked),
+            patch.object(unified, "require", side_effect=require),
+            patch.object(unified, "resume", side_effect=resume),
+            patch.object(unified, "vault_seal_guard"),
+            patch.object(unified, "command") as command,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            unified.start()
+
+        self.assertEqual(events[-5:], [
+            ("resume", "prometheus"),
+            ("require", "grafana-secrets"),
+            ("resume", "grafana-agent"),
+            ("resume", "grafana"),
+            ("require", "grafana-https"),
+        ])
+        command.assert_not_called()
+
+    def test_start_never_provisions_missing_grafana_secrets(self):
+        def checked(name):
+            return name not in ("grafana", "grafana-secrets")
+
+        with (
+            patch.object(unified, "checked", side_effect=checked),
+            patch.object(unified, "resume") as resume,
+            patch.object(unified, "vault_seal_guard"),
+            patch.object(unified, "command") as command,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            with self.assertRaisesRegex(
+                unified.UnifiedStartupError, "grafana-secrets"
+            ):
+                unified.start()
+
+        resumed = [call.args[0] for call in resume.call_args_list]
+        self.assertNotIn("grafana-agent", resumed)
+        self.assertNotIn("grafana", resumed)
+        command.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -1,11 +1,12 @@
 export function formatElapsedSince(
   start: string | Date,
-  now: Date = new Date(),
+  end?: string | Date | null,
 ): string {
   const startMs = new Date(start).getTime();
-  if (Number.isNaN(startMs)) return "--:--";
+  const endMs = end ? new Date(end).getTime() : Date.now();
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) return "--:--";
 
-  const elapsedMin = Math.max(0, Math.floor((now.getTime() - startMs) / 60000));
+  const elapsedMin = Math.max(0, Math.floor((endMs - startMs) / 60000));
   const hh = Math.floor(elapsedMin / 60);
   const mm = elapsedMin % 60;
 

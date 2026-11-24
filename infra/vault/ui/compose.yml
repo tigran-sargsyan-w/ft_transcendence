@@ -1,0 +1,35 @@
+name: transcendence-vault-ui-dev
+
+services:
+  gateway:
+    image: haproxy:3.2.27-alpine
+    user: "99:99"
+
+    ports:
+      - "127.0.0.1:8200:8200"
+
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+
+    networks:
+      - gateway_edge
+      - vault_private
+
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    restart: "no"
+
+networks:
+  gateway_edge:
+    driver: bridge
+
+  vault_private:
+    external: true
+    name: transcendence-vault-dev_vault_private

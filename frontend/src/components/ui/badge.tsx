@@ -29,8 +29,6 @@ const badgeVariants = cva(
         open: "bg-status-open/15 text-status-open border-status-open/30",
         investigating:
           "bg-status-investigating/15 text-status-investigating border-status-investigating/30",
-        mitigated:
-          "bg-status-mitigated/15 text-status-mitigated border-status-mitigated/30",
         resolved:
           "bg-status-resolved/15 text-status-resolved border-status-resolved/30",
 

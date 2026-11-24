@@ -19,7 +19,7 @@ import bootstrap_vault_secrets as secret_bootstrap
 
 ROOT = Path(__file__).resolve().parents[2]
 ROLE_VOLUME = "transcendence-app-dev_postgres_provisioner_vault_auth"
-VAULT_IMAGE = "hashicorp/vault:2.2.1"
+VAULT_IMAGE = "hashicorp/vault:2.1.2"
 
 # Only boolean role metadata and grants. Never read pg_authid.rolpassword into
 # application memory: SQL returns only the string 'ready' or 'pending'.

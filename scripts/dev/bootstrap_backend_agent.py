@@ -22,7 +22,7 @@ NAME = "transcendence-app-dev-vault-backend-agent-1"
 AUTH_VOLUME = "transcendence-vault-dev_backend_agent_auth"
 RENDERED_VOLUME = "transcendence-vault-dev_backend_rendered"
 PRIVATE_NETWORK = "transcendence-vault-dev_vault_private"
-VAULT_IMAGE = "hashicorp/vault:2.2.1"
+VAULT_IMAGE = "hashicorp/vault:2.1.2"
 VAULT_COMPOSE = pg.ROOT / "infra/vault/server/compose.yml"
 
 

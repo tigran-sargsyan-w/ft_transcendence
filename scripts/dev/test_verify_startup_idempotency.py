@@ -12,6 +12,7 @@ import verify_startup_idempotency as acceptance
 
 def fixture():
     return {
+        "vault_ui_enabled": False,
         "container_inventory": tuple(sorted(acceptance.CONTAINERS)),
         "volume_inventory": tuple(sorted(acceptance.VOLUMES)),
         "network_inventory": tuple(sorted(acceptance.NETWORKS)),
@@ -24,8 +25,8 @@ def fixture():
 
 class IdempotencyAcceptanceTests(unittest.TestCase):
     def test_expected_resource_inventory(self):
-        self.assertEqual(len(acceptance.CONTAINERS), 9)
-        self.assertEqual(len(acceptance.VOLUMES), 8)
+        self.assertEqual(len(acceptance.CONTAINERS), 12)
+        self.assertEqual(len(acceptance.VOLUMES), 12)
         self.assertEqual(len(acceptance.NETWORKS), 3)
 
     def test_healthy_repeated_runs_no_mutation(self):
@@ -179,7 +180,8 @@ class IdempotencyAcceptanceTests(unittest.TestCase):
             return {"container": containers, "volume": volumes, "network": networks}[args[0]]
         with patch.object(acceptance, "docker_json", side_effect=fake_json), \
              patch.object(acceptance, "names_for", side_effect=lambda kind: fixture()[kind + "_inventory"]), \
-             patch.object(acceptance, "migration_fingerprint", return_value="a" * 32):
+             patch.object(acceptance, "migration_fingerprint", return_value="a" * 32), \
+             patch.object(acceptance, "vault_ui_inventory", return_value=(False, None, False)):
             state = acceptance.snapshot()
         self.assertEqual(state, fixture())
         self.assertNotIn("should-not-be-persisted", repr(state))
@@ -218,6 +220,105 @@ class IdempotencyAcceptanceTests(unittest.TestCase):
         with patch.object(acceptance, "docker_json", return_value=[]):
             with self.assertRaisesRegex(acceptance.AcceptanceError, "Missing container"):
                 acceptance.inspected("container", acceptance.CONTAINERS)
+
+
+
+    def test_monitoring_container_inventory(self):
+        for service in (
+            "prometheus",
+            "vault-grafana-agent",
+            "grafana",
+        ):
+            self.assertIn(
+                f"{acceptance.APP}-{service}-1",
+                acceptance.CONTAINERS,
+            )
+
+    def test_monitoring_volume_inventory(self):
+        for volume in (
+            "prometheus_data",
+            "grafana_data",
+            "grafana_vault_auth",
+            "grafana_vault_rendered",
+        ):
+            self.assertIn(
+                f"{acceptance.APP}_{volume}",
+                acceptance.VOLUMES,
+            )
+
+    def test_monitoring_container_restart_is_rejected(self):
+        for service in ("vault-grafana-agent", "grafana"):
+            with self.subTest(service=service):
+                baseline = fixture()
+                changed = copy.deepcopy(baseline)
+
+                name = f"{acceptance.APP}-{service}-1"
+
+                container_id, created, restarts, started = (
+                    changed["containers"][name]
+                )
+
+                changed["containers"][name] = (
+                    container_id,
+                    created,
+                    restarts + 1,
+                    "different-start-time",
+                )
+
+                with self.assertRaisesRegex(
+                    acceptance.AcceptanceError, name,
+                ):
+                    acceptance.compare(baseline, changed)
+
+    def test_monitoring_container_recreation_is_rejected(self):
+        for service in ("vault-grafana-agent", "grafana"):
+            with self.subTest(service=service):
+                baseline = fixture()
+                changed = copy.deepcopy(baseline)
+
+                name = f"{acceptance.APP}-{service}-1"
+
+                container_id, created, restarts, started = (
+                    changed["containers"][name]
+                )
+
+                changed["containers"][name] = (
+                    "replacement-id",
+                    created,
+                    restarts,
+                    started,
+                )
+
+                with self.assertRaisesRegex(
+                    acceptance.AcceptanceError, name,
+                ):
+                    acceptance.compare(baseline, changed)
+
+    def test_monitoring_volume_recreation_is_rejected(self):
+        for volume in (
+            "prometheus_data",
+            "grafana_data",
+            "grafana_vault_auth",
+            "grafana_vault_rendered",
+        ):
+            with self.subTest(volume=volume):
+                baseline = fixture()
+                changed = copy.deepcopy(baseline)
+
+                name = f"{acceptance.APP}_{volume}"
+
+                created, driver, mountpoint = changed["volumes"][name]
+
+                changed["volumes"][name] = (
+                    "different-creation-time",
+                    driver,
+                    mountpoint,
+                )
+
+                with self.assertRaisesRegex(
+                    acceptance.AcceptanceError, name,
+                ):
+                    acceptance.compare(baseline, changed)
 
 
 if __name__ == "__main__":

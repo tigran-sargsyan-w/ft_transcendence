@@ -32,6 +32,7 @@ STAGES = (
     ("host", "--check-host", "--prepare-host"),
     ("resources", "--check-resources", "--prepare-resources"),
     ("vault", "--check-vault", "--prepare-vault"),
+    ("vault-ui", "--check-vault-ui-optional", None),
     ("vault-config", "--check-vault-config", "--prepare-vault-config"),
     ("vault-secrets", "--check-vault-secrets", "--prepare-vault-secrets"),
     ("postgres", "--check-postgres", "--prepare-postgres"),
@@ -42,11 +43,64 @@ STAGES = (
     ("support-services", "--check-support-services", "--prepare-support-services"),
     ("frontend", "--check-frontend", "--prepare-frontend"),
     ("nginx", "--check-nginx", "--prepare-nginx"),
+    ("prometheus", "--check-prometheus", "--prepare-prometheus"),
+    ("grafana-secrets", "--check-grafana-secrets", "--prepare-grafana-secrets"),
+    ("grafana-agent", "--check-grafana-agent", "--prepare-grafana-agent"),
+    ("grafana", "--check-grafana", "--prepare-grafana"),
+    ("grafana-https", "--check-grafana-https", None),
 )
 STAGE_BY_NAME = {name: (check, prepare) for name, check, prepare in STAGES}
-RESUMABLE = ("postgres", "backend-agent", "backend", "support-services", "frontend", "nginx")
+RESUMABLE = (
+    "postgres", "backend-agent", "backend", "support-services",
+    "frontend", "nginx", "prometheus", "grafana-agent", "grafana",
+)
 READ_ONLY_ATTEMPTS = 3
 READ_ONLY_RETRY_DELAY = 1
+
+
+
+# Exact, reviewed equivalents of bootstrap.sh's read-only dispatch.
+# Host and optional Vault UI checks retain their shell entry points.
+DIRECT_READ_ONLY_CHECKS = {
+    "--check-resources": "bootstrap_resources.py",
+    "--check-vault": "bootstrap_vault.py",
+    "--check-vault-config": "bootstrap_vault_config.py",
+    "--check-vault-secrets": "bootstrap_vault_secrets.py",
+    "--check-postgres": "bootstrap_postgres.py",
+    "--check-postgres-roles": "bootstrap_postgres_roles.py",
+    "--check-migrations": "bootstrap_migrations.py",
+    "--check-backend-agent": "bootstrap_backend_agent.py",
+    "--check-backend": "bootstrap_backend.py",
+    "--check-support-services": "bootstrap_support_services.py",
+    "--check-frontend": "bootstrap_frontend.py",
+    "--check-nginx": "bootstrap_nginx.py",
+    "--check-prometheus": "bootstrap_prometheus.py",
+    "--check-grafana-secrets": "bootstrap_grafana_secrets.py",
+    "--check-grafana-agent": "bootstrap_grafana_agent.py",
+    "--check-grafana": "bootstrap_grafana.py",
+    "--check-grafana-https": "bootstrap_grafana_https.py",
+}
+
+
+def preflight_once():
+    """Run standard shell/platform/dependency guards before direct probes."""
+    try:
+        result = subprocess.run(
+            [str(BOOTSTRAP), "--orchestrator-preflight"],
+            cwd=ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        raise UnifiedStartupError(
+            "Cannot complete trusted orchestrator preflight"
+        ) from None
+    if result.returncode:
+        raise UnifiedStartupError(
+            "Orchestrator prerequisites failed; inspect bootstrap preflight"
+        )
 
 
 class UnifiedStartupError(Exception):
@@ -55,19 +109,91 @@ class UnifiedStartupError(Exception):
 
 def command(flag, *, quiet=False):
     """Invoke only fixed, reviewed bootstrap flags; no user-controlled argv."""
-    if flag not in {item for _, check, prepare in STAGES for item in (check, prepare)}:
+    if flag is None or flag not in {
+        item
+        for _, check, prepare in STAGES
+        for item in (check, prepare)
+        if item is not None
+    }:
         raise UnifiedStartupError("Refusing unrecognized bootstrap operation")
     kwargs = {"cwd":ROOT, "check":False}
     if quiet:
         kwargs.update(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if flag in DIRECT_READ_ONLY_CHECKS:
+        script = ROOT / "scripts/dev" / DIRECT_READ_ONLY_CHECKS[flag]
+        argv = [sys.executable, str(script), "check"]
+        tls = Path(os.environ.get(
+            "XDG_STATE_HOME", str(Path.home() / ".local/state")
+        )) / "transcendence/dev/tls"
+        kwargs["env"] = {
+            **os.environ,
+            "FT_DEV_TLS_DIR": str(tls),
+        }
+    else:
+        argv = [str(BOOTSTRAP), flag]
     try:
-        result = subprocess.run([str(BOOTSTRAP), flag], **kwargs)
+        result = subprocess.run(argv, **kwargs)
     except OSError:
-        raise UnifiedStartupError("Cannot execute trusted bootstrap.sh") from None
+        raise UnifiedStartupError(
+            "Cannot execute trusted bootstrap operation"
+        ) from None
     return result.returncode == 0
 
 
-def checked(name):
+# Names are fixed by the reviewed Compose contracts.
+# This inventory is a performance hint, never an identity check.
+FIRST_RUN_CONTAINERS = {
+    "vault": ("transcendence-vault-dev-vault-1",),
+    "postgres": ("transcendence-app-dev-postgres-1",),
+    "backend-agent": ("transcendence-app-dev-vault-backend-agent-1",),
+    "backend": ("transcendence-app-dev-backend-1",),
+    "support-services": (
+        "transcendence-app-dev-docker-proxy-1",
+        "transcendence-app-dev-collector-1",
+        "transcendence-app-dev-graph-engine-1",
+    ),
+    "frontend": ("transcendence-app-dev-frontend-1",),
+    "nginx": ("transcendence-app-dev-nginx-1",),
+    "prometheus": ("transcendence-app-dev-prometheus-1",),
+    "grafana-agent": ("transcendence-app-dev-vault-grafana-agent-1",),
+    "grafana": ("transcendence-app-dev-grafana-1",),
+}
+
+
+def definitely_missing_container(name):
+    """True only when Docker confirms a required container is absent.
+
+    Unknown Docker state, failed inventory and unlisted stages retain
+    the existing retry behavior. This never establishes trust.
+    """
+    expected = FIRST_RUN_CONTAINERS.get(name)
+    if expected is None:
+        return False
+
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "-a", "--format", "{{.Names}}"],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+    if result.returncode != 0:
+        return False
+
+    try:
+        existing = set(result.stdout.decode("utf-8").splitlines())
+    except UnicodeError:
+        return False
+
+    return all(item not in existing for item in expected)
+
+
+def checked(name, *, first_run=False):
     """Retry read-only probes; optionally trace safe stage names and durations.
 
     FT_DEV_STAGE_TIMING=1 is diagnostic-only: it changes neither the number of
@@ -85,6 +211,8 @@ def checked(name):
                   f"result={outcome} elapsed={elapsed:.2f}s", flush=True)
         if result:
             return True
+        if first_run and attempt == 0 and definitely_missing_container(name):
+            return False
         if attempt + 1 < READ_ONLY_ATTEMPTS:
             time.sleep(READ_ONLY_RETRY_DELAY)
     return False
@@ -119,7 +247,10 @@ def guard_resume(name):
     No `up`, image builds, provisioning, unseal or migrations are allowed in
     routine recovery. Each target retains its exact inspected Docker ID.
     """
-    if name == "postgres":
+    if name == "vault-ui":
+        import bootstrap_vault_ui as ui
+        targets = ((ui.NAME, ui.inspect(), ui.verify_identity),)
+    elif name == "postgres":
         import bootstrap_postgres as pg
         targets = ((pg.NAME, pg.exact_container(pg.NAME), pg.verify_identity),)
     elif name == "backend-agent":
@@ -143,6 +274,27 @@ def guard_resume(name):
     elif name == "nginx":
         import bootstrap_nginx as nginx
         targets = ((nginx.NAME, nginx.container(), nginx.verify_identity),)
+    elif name == "prometheus":
+        import bootstrap_prometheus as prometheus
+        targets = ((prometheus.NAME, prometheus.container(), prometheus.verify_identity),)
+    elif name == "grafana-agent":
+        import bootstrap_grafana_agent as grafana_agent
+        if grafana_agent.credential_inventory() != "present":
+            raise UnifiedStartupError(
+                "Grafana AppRole missing; manual review required"
+            )
+        targets = ((
+            grafana_agent.NAME,
+            grafana_agent.container(),
+            grafana_agent.verify_identity,
+        ),)
+    elif name == "grafana":
+        import bootstrap_grafana as grafana
+        targets = ((
+            grafana.NAME,
+            grafana.container(),
+            grafana.verify_identity,
+        ),)
     else:
         raise UnifiedStartupError(f"Cannot resume stage {name}")
 
@@ -365,9 +517,18 @@ def initialize():
         raise UnifiedStartupError("--initialize requires an interactive terminal")
     print("=== Trusted first-time bootstrap (individual confirmations required) ===", flush=True)
     for name, check, prepare in STAGES:
-        if checked(name):
+        if name == "vault-ui":
+            # The administrative UI never gates core initialization.
+            # Its separate read-only status and make health remain strict.
+            print("SKIP: optional vault-ui; use make vault-ui-enable", flush=True)
+            continue
+        if checked(name, first_run=True):
             print(f"KEEP: {name} ready", flush=True)
             continue
+        if prepare is None:
+            raise UnifiedStartupError(
+                f"{name} verification failed; manual review required"
+            )
         if name == "vault":
             vault_seal_guard()
         print(f"PREPARE: {name}", flush=True)
@@ -382,16 +543,31 @@ def start():
     require("host")
     require("resources")
     vault_seal_guard()
+    # Report optional gateway drift without preventing core recovery after a
+    # reboot: HAProxy has restart: no and its enabled marker may persist.
+    # Full health remains fail-closed for unexpected UI lifecycle state.
+    if not checked("vault-ui"):
+        print("WARN: optional Vault UI state unhealthy; run make vault-ui-status", flush=True)
     # Nginx's check walks the full trusted dependency chain down to Vault and
     # PostgreSQL. Rechecking each dependency separately is expensive and can
     # saturate a small VM with redundant nested Docker/psql invocations.
-    if checked("nginx"):
+    if (
+        checked("nginx")
+        and checked("prometheus")
+        and checked("grafana")
+        and checked("grafana-https")
+    ):
         print("KEEP: complete Vault-backed stack ready", flush=True)
         print("RESULT: UNIFIED STARTUP READY", flush=True)
         return
     # Recover only existing trusted stopped containers, in dependency order.
     # A running but persistently unhealthy container still fails closed.
     for name, _, _ in STAGES[2:]:
+        if name == "vault-ui":
+            # Never provision, start or require the administrative gateway.
+            # A warning above and strict make health report any UI failure.
+            print("SKIP: optional vault-ui lifecycle", flush=True)
+            continue
         if name == "vault":
             require(name)
         elif name in RESUMABLE:
@@ -405,8 +581,15 @@ def check():
     print("=== Unified read-only readiness check ===", flush=True)
     require("host")
     require("resources")
+    # The administrative gateway may be explicitly disabled.
+    require("vault-ui")
     # Nginx's read-only check covers the entire transitive service chain.
     require("nginx")
+    require("prometheus")
+    # Grafana check includes Vault credentials, Agent delivery,
+    # provisioning and authentication.
+    require("grafana")
+    require("grafana-https")
     print("RESULT: UNIFIED STACK READY (read-only)", flush=True)
 
 
@@ -434,6 +617,46 @@ def health_report():
     # Vault configuration. Do not repeat this expensive chain on success.
     if checked("nginx"):
         print("PASS: end-to-end Nginx HTTPS, application and trusted dependencies", flush=True)
+        if not checked("vault-ui"):
+            print("FAIL: vault-ui; inspect --check-vault-ui-optional", flush=True)
+            raise UnifiedStartupError("Health report failed at vault-ui")
+        print("PASS: Vault UI expected lifecycle state and Docker isolation", flush=True)
+        if not checked("prometheus"):
+            print("FAIL: prometheus; inspect --check-prometheus", flush=True)
+            raise UnifiedStartupError("Health report failed at prometheus")
+
+        print("PASS: Prometheus readiness and trusted identity", flush=True)
+
+        if not checked("grafana"):
+            # Locate a failed Grafana dependency without provisioning.
+            for dependency in ("grafana-secrets", "grafana-agent"):
+                if not checked(dependency):
+                    print(
+                        f"FAIL: {dependency}; inspect "
+                        f"{STAGE_BY_NAME[dependency][0]}",
+                        flush=True,
+                    )
+                    raise UnifiedStartupError(
+                        f"Health report failed at {dependency}"
+                    )
+
+            print("FAIL: grafana; inspect --check-grafana", flush=True)
+            raise UnifiedStartupError(
+                "Health report failed at grafana or its checked dependencies"
+            )
+
+        print("PASS: Grafana authentication and provisioning", flush=True)
+
+        if not checked("grafana-https"):
+            print(
+                "FAIL: grafana-https; inspect --check-grafana-https",
+                flush=True,
+            )
+            raise UnifiedStartupError(
+                "Health report failed at grafana-https"
+            )
+
+        print("PASS: Grafana HTTPS and WAF protection", flush=True)
         print("RESULT: DEVELOPMENT HEALTHY (read-only)", flush=True)
         return
 
@@ -487,6 +710,7 @@ def main(argv=None):
     try:
         if os.geteuid() == 0:
             raise UnifiedStartupError("Run as an ordinary user, not with sudo")
+        preflight_once()
         if args.mode == "check":
             check()
         elif args.mode == "health-report":
