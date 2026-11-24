@@ -9,6 +9,7 @@ volumes, Vault or PostgreSQL. Publishes only loopback 8080/8443.
 import argparse
 import fcntl
 import json
+import re
 import subprocess
 import sys
 import time
@@ -42,6 +43,21 @@ FORBIDDEN_ENV = (
 
 class NginxBootstrapError(Exception):
     """Public errors exclude Docker command output and HTTP response bodies."""
+
+
+# Private recovery-probe exit codes. Only these fixed routes returning HTTP
+# 502 after verified TLS are eligible for additional recovery waiting.
+RECOVERY_502 = {"/": 20, "/src/main.tsx": 21, "/api/v1/health": 22}
+
+
+class NginxReadinessError(NginxBootstrapError):
+    """Observed HTTP 502 on a reviewed HTTPS route, not proof of a DNS race."""
+
+    def __init__(self, path):
+        if path not in RECOVERY_502:
+            raise ValueError("Unexpected recovery route")
+        self.path = path
+        super().__init__(f"Nginx HTTPS upstream returned HTTP 502 on {path}")
 
 
 def run(argv, *, env=None, timeout=30):
@@ -130,6 +146,8 @@ def curl_bytes(url, *, port, path, timeout=12):
         body, status = raw.rsplit(b"\n", 1)
     except ValueError:
         raise NginxBootstrapError("Nginx HTTPS response status missing") from None
+    if status == b"502" and path in RECOVERY_502:
+        raise NginxReadinessError(path)
     if status != b"200":
         raise NginxBootstrapError("Nginx HTTPS request did not return HTTP 200")
     return body
@@ -241,11 +259,49 @@ def apply():
     print("RESULT: NGINX HTTPS READY (apply)", flush=True)
 
 
+def verify_recovery_target(expected_id):
+    """Pin the already-running gateway before and after each full probe."""
+    item = container()
+    if item is None or item.get("Id") != expected_id:
+        raise NginxBootstrapError("Nginx identity changed during recovery")
+    verify_identity(item)
+    if not running(item):
+        raise NginxBootstrapError("Nginx stopped during recovery")
+
+
+def recovery_probe(expected_id):
+    """Same full readiness checks, with a distinct outcome for route HTTP 502."""
+    verify_recovery_target(expected_id)
+    require_prerequisites()
+    verify_recovery_target(expected_id)
+    try:
+        verify_routes()
+    except NginxReadinessError:
+        # Never return a retryable result if the inspected target changed.
+        verify_recovery_target(expected_id)
+        raise
+    verify_recovery_target(expected_id)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("plan", "check", "apply"))
+    parser.add_argument("mode", choices=("plan", "check", "apply", "check-recovery"))
+    parser.add_argument("--expected-id", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.mode == "check-recovery":
+        if not args.expected_id or not re.fullmatch(r"[0-9a-f]{64}", args.expected_id):
+            parser.error("Recovery probe requires the full inspected Docker ID")
+    elif args.expected_id is not None:
+        parser.error("Expected ID is only valid for the recovery probe")
     try:
+        if args.mode == "check-recovery":
+            try:
+                recovery_probe(args.expected_id)
+            except NginxReadinessError as exc:
+                print(f"WAIT: {exc}", file=sys.stderr, flush=True)
+                return RECOVERY_502[exc.path]
+            print("RESULT: NGINX HTTPS READY (read-only)", flush=True)
+            return 0
         if args.mode == "plan":
             item = container()
             if item is None:
