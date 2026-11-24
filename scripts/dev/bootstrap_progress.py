@@ -60,6 +60,7 @@ class Progress:
         self.next_index = 0
         self.stopped = False
         self.rendered = False
+        self.paused = False
         self.width = terminal_width or (lambda: shutil.get_terminal_size((80, 24)).columns)
         tty = self.stream.isatty() and sys.stderr.isatty()
         if interactive is not None:
@@ -118,8 +119,25 @@ class Progress:
             self._render(self.active)
 
     def refresh(self):
-        if self.live and self.active is not None:
+        if self.live and not self.paused and self.active is not None:
             self._render(self.active)
+
+    def pause(self):
+        if self.live and self.rendered:
+            self._write("\n")
+            self.rendered = False
+        self.paused = True
+
+    def resume(self):
+        self.paused = False
+        self.refresh()
+
+    def notice(self, message):
+        if self.live and self.rendered:
+            self._write("\r\x1b[2K")
+            self.rendered = False
+        self._write(message + "\n")
+        self.refresh()
 
     def finish(self, status):
         if self.active is None or status not in (Status.CACHED, Status.DONE,

@@ -42,34 +42,14 @@ class ImageTests(unittest.TestCase):
         self.assertFalse(declared - set(images.IMAGES))
 
     def test_only_initialize_installs_images(self):
-        source = (ROOT / "scripts/bootstrap.sh").read_text()
-
-        # Use actual lines, not escaped newline matching.
-        lines = source.splitlines()
-
-        start = lines.index("  --initialize)")
-        end = lines.index("  --start)", start)
-
-        section = "\n".join(lines[start:end])
-
-        self.assertLess(
-            section.index("bootstrap_images.py initialize"),
-            section.index("bootstrap_unified.py initialize"),
-        )
-
-        self.assertIn(
-            '"$MODE" == --initialize || "$MODE" == --upgrade-waf',
-            source,
-        )
-
-        for mode in ("--start", "--recover"):
-            start = lines.index(f"  {mode})")
-            end = lines.index("    ;;", start)
-
-            self.assertNotIn(
-                "bootstrap_images.py",
-                "\n".join(lines[start:end]),
-            )
+        shell = (ROOT / "scripts/bootstrap.sh").read_text()
+        unified = (ROOT / "scripts/dev/bootstrap_unified.py").read_text()
+        self.assertIn("exec python3 scripts/dev/bootstrap_unified.py initialize", shell)
+        self.assertNotIn("bootstrap_images.py", shell)
+        self.assertIn('str(ROOT / "scripts/dev/bootstrap_images.py"), "initialize"', unified)
+        for mode in ("start", "recover", "check"):
+            section = unified.split(f"def {mode}():", 1)[1].split("\ndef ", 1)[0]
+            self.assertNotIn("prepare_prerequisites", section)
 
     def test_present_images_never_pulled(self):
         with patch.object(images, "run") as runner:

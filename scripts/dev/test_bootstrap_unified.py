@@ -112,36 +112,38 @@ class UnifiedTests(unittest.TestCase):
         preflight.assert_called_once_with()
         lock.assert_not_called()
 
-    def test_initialization_requires_tty(self):
-        with patch.object(unified.sys.stdin, "isatty", return_value=False):
-            with self.assertRaises(unified.UnifiedStartupError):
-                unified.initialize()
+    def fake_prerequisites(self, runner, progress):
+        for index in range(2):
+            progress.begin(index)
+            progress.finish(unified.Status.DONE)
 
-    def test_initialization_all_ready_has_no_apply(self):
-        with patch.object(unified.sys.stdin, "isatty", return_value=True), \
+    def test_initialization_all_ready_without_tty_has_no_apply(self):
+        with patch.object(unified.sys.stdin, "isatty", return_value=False), \
+             patch.object(unified, "prepare_prerequisites", side_effect=self.fake_prerequisites), \
              patch.object(unified, "command", return_value=True) as cmd, \
              contextlib.redirect_stdout(io.StringIO()):
-            unified.initialize()
+            unified.initialize(9)
         self.assertEqual([call.args[0] for call in cmd.call_args_list],
                          [stage[1] for stage in unified.STAGES if stage[0] != "vault-ui"])
 
     def test_initialization_prepares_only_missing_stage(self):
         responses = [False] * unified.READ_ONLY_ATTEMPTS + [True, True] + [True] * (len(unified.STAGES) - 1)
-        with patch.object(unified.sys.stdin, "isatty", return_value=True), \
+        with patch.object(unified, "prepare_prerequisites", side_effect=self.fake_prerequisites), \
              patch.object(unified, "command", side_effect=responses) as cmd, \
              patch.object(unified.time, "sleep"), \
              contextlib.redirect_stdout(io.StringIO()):
-            unified.initialize()
+            unified.initialize(9)
         self.assertEqual([call.args[0] for call in cmd.call_args_list][:5],
                          ["--check-host"] * unified.READ_ONLY_ATTEMPTS + ["--prepare-host", "--check-host"])
+        self.assertEqual(cmd.call_args_list[3].kwargs["lock_fd"], 9)
         self.assertNotIn("--prepare-vault", [call.args[0] for call in cmd.call_args_list])
 
-    def test_initialization_halts_on_denied_prepare(self):
-        with patch.object(unified.sys.stdin, "isatty", return_value=True), \
+    def test_initialization_halts_on_failed_prepare(self):
+        with patch.object(unified, "prepare_prerequisites", side_effect=self.fake_prerequisites), \
              patch.object(unified, "command", side_effect=[False] * (unified.READ_ONLY_ATTEMPTS + 1)) as cmd, \
              patch.object(unified.time, "sleep"):
             with self.assertRaises(unified.UnifiedStartupError):
-                unified.initialize()
+                unified.initialize(9)
         self.assertEqual(cmd.call_count, unified.READ_ONLY_ATTEMPTS + 1)
 
     def test_routine_does_not_run_any_prepare_flag(self):
@@ -187,15 +189,15 @@ class UnifiedTests(unittest.TestCase):
 
     def test_initialize_never_requires_optional_gateway(self):
         with (
-            patch.object(unified.sys.stdin, "isatty", return_value=True),
+            patch.object(unified, "prepare_prerequisites", side_effect=self.fake_prerequisites),
             patch.object(unified, "checked", side_effect=lambda name, **_: name != "vault-ui") as probe,
             patch.object(unified, "command") as command,
             contextlib.redirect_stdout(io.StringIO()) as output,
         ):
-            unified.initialize()
+            unified.initialize(9)
         command.assert_not_called()
         self.assertNotIn("vault-ui", [call.args[0] for call in probe.call_args_list])
-        self.assertIn("SKIP: optional vault-ui", output.getvalue())
+        self.assertIn("vault-ui SKIPPED", output.getvalue())
 
     def test_health_report_rejects_missing_enabled_gateway(self):
         with (
@@ -783,7 +785,7 @@ class UnifiedTests(unittest.TestCase):
 
     def test_initialize_does_not_repair_failed_grafana_https(self):
         with (
-            patch.object(unified.sys.stdin, "isatty", return_value=True),
+            patch.object(unified, "prepare_prerequisites", side_effect=self.fake_prerequisites),
             patch.object(
                 unified, "checked",
                 side_effect=lambda name, **_: name != "grafana-https",
@@ -794,7 +796,7 @@ class UnifiedTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 unified.UnifiedStartupError, "grafana-https"
             ):
-                unified.initialize()
+                unified.initialize(9)
 
         command.assert_not_called()
 

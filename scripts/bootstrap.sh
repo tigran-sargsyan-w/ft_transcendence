@@ -73,7 +73,7 @@ Usage: ./scripts/bootstrap.sh [--initialize|--start|--recover|--check-all|--heal
   --upgrade-waf            One-time confirmed upgrade of ONLY legacy Nginx to WAF.
   --help          Show this message.
 
-Phase 6A: --initialize is the confirmed first-time entry point; --start
+--initialize authorizes guarded development provisioning without prompts; --start
 never creates new Vault, database, credentials, or applies new migrations.
 After reboot use --recover in a terminal; shares are entered at hidden Vault
 CLI prompts, never as command arguments or Compose environment variables.
@@ -247,14 +247,16 @@ inventory_docker() {
   fi
 }
 
+# Initialize owns the complete lifecycle (including packages and images).
+# exec keeps the orchestrator as the direct child of make.
+if [[ "$MODE" == --initialize ]]; then
+  exec python3 scripts/dev/bootstrap_unified.py initialize
+fi
+
 say "=== Fresh Ubuntu bootstrap: host + Docker resources ==="
-if [[ "$MODE" == --initialize || "$MODE" == --upgrade-waf ]]; then
+if [[ "$MODE" == --upgrade-waf ]]; then
   # Only explicitly approved initialization/maintenance installs packages.
-  if [[ "$MODE" == --initialize ]]; then
-    ./scripts/install-deps.sh --initialize-dev || fail "Dependency initialization stopped; inspect the installer and rerun"
-  else
-    ./scripts/install-deps.sh || fail "Dependency installation stopped; inspect the installer and rerun"
-  fi
+  ./scripts/install-deps.sh || fail "Dependency installation stopped; inspect the installer and rerun"
   ./scripts/install-deps.sh --check || fail "Docker dependencies or access still unavailable"
 elif [[ "$MODE" == --prepare-* ]]; then
   # Provisioning still verifies packages and Docker on every entry.
@@ -277,10 +279,6 @@ case "$MODE" in
   --orchestrator-preflight)
     # Internal read-only entry: all standard shell guards above still run.
     say "RESULT: ORCHESTRATOR PREFLIGHT READY (read-only)"
-    ;;
-  --initialize)
-    python3 scripts/dev/bootstrap_images.py initialize || fail "Required images unavailable"
-    python3 scripts/dev/bootstrap_unified.py initialize
     ;;
   --start)
     python3 scripts/dev/bootstrap_unified.py start

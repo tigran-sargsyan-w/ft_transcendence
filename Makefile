@@ -12,7 +12,7 @@ BOOTSTRAP := ./scripts/bootstrap.sh
 up start:
 	$(BOOTSTRAP) --start
 
-# First-time operator-approved provisioning (interactive; not for routine use).
+# First-time guarded development provisioning (no approval prompts).
 initialize:
 	$(BOOTSTRAP) --initialize
 

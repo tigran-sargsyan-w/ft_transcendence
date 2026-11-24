@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Phase 6A: trusted, sequential development bootstrap orchestration.
 
-initialize: explicit interactive first-time provisioning using established stages.
+initialize: confirmation-free guarded development provisioning.
 start: resume ONLY existing, verified containers after Vault is unsealed.
 check: read-only validation of the entire already-running stack.
 recover: resume a known Vault container, prompt for manual Shamir shares,
@@ -21,6 +21,13 @@ import stat
 import subprocess
 import sys
 import time
+
+if __package__:
+    from .bootstrap_progress import Phase, Progress, Status
+    from .bootstrap_process import Cancellation, ChildRunner, InitializationCancelled
+else:
+    from bootstrap_progress import Phase, Progress, Status
+    from bootstrap_process import Cancellation, ChildRunner, InitializationCancelled
 
 ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP = ROOT / "scripts/bootstrap.sh"
@@ -107,7 +114,7 @@ class UnifiedStartupError(Exception):
     """Public diagnostic intentionally contains no subprocess output or secrets."""
 
 
-def command(flag, *, quiet=False):
+def command(flag, *, quiet=False, runner=None, lock_fd=None):
     """Invoke only fixed, reviewed bootstrap flags; no user-controlled argv."""
     if flag is None or flag not in {
         item
@@ -131,6 +138,22 @@ def command(flag, *, quiet=False):
         }
     else:
         argv = [str(BOOTSTRAP), flag]
+    if runner is not None:
+        preparing = flag.startswith("--prepare-")
+        if preparing:
+            if lock_fd is None:
+                raise UnifiedStartupError("Initialization stage requires the orchestrator lock")
+            argv = [str(BOOTSTRAP), "--initialize-stage", flag, str(lock_fd)]
+        try:
+            return runner.run(argv, cwd=ROOT, env=kwargs.get("env"),
+                              pass_fds=(lock_fd,) if preparing else (),
+                              foreground=flag == "--prepare-host",
+                              critical=flag == "--prepare-vault",
+                              probe=not preparing) == 0
+        except OSError:
+            raise UnifiedStartupError("Cannot execute trusted bootstrap operation") from None
+    if lock_fd is not None:
+        raise UnifiedStartupError("Unexpected initialization lock")
     try:
         result = subprocess.run(argv, **kwargs)
     except OSError:
@@ -193,7 +216,7 @@ def definitely_missing_container(name):
     return all(item not in existing for item in expected)
 
 
-def checked(name, *, first_run=False):
+def checked(name, *, first_run=False, runner=None):
     """Retry read-only probes; optionally trace safe stage names and durations.
 
     FT_DEV_STAGE_TIMING=1 is diagnostic-only: it changes neither the number of
@@ -203,7 +226,10 @@ def checked(name, *, first_run=False):
     trace = os.environ.get("FT_DEV_STAGE_TIMING") == "1"
     for attempt in range(READ_ONLY_ATTEMPTS):
         started = time.monotonic() if trace else None
-        result = command(STAGE_BY_NAME[name][0], quiet=True)
+        if runner is None:
+            result = command(STAGE_BY_NAME[name][0], quiet=True)
+        else:
+            result = command(STAGE_BY_NAME[name][0], quiet=True, runner=runner)
         if trace:
             elapsed = max(0.0, time.monotonic() - started)
             outcome = "PASS" if result else "FAIL"
@@ -512,29 +538,75 @@ def recover():
     print("RESULT: REBOOT RECOVERY READY", flush=True)
 
 
-def initialize():
-    if not sys.stdin.isatty():
-        raise UnifiedStartupError("--initialize requires an interactive terminal")
-    print("=== Trusted first-time bootstrap (individual confirmations required) ===", flush=True)
-    for name, check, prepare in STAGES:
-        if name == "vault-ui":
-            # The administrative UI never gates core initialization.
-            # Its separate read-only status and make health remain strict.
-            print("SKIP: optional vault-ui; use make vault-ui-enable", flush=True)
-            continue
-        if checked(name, first_run=True):
-            print(f"KEEP: {name} ready", flush=True)
-            continue
-        if prepare is None:
-            raise UnifiedStartupError(
-                f"{name} verification failed; manual review required"
-            )
-        if name == "vault":
-            vault_seal_guard()
-        print(f"PREPARE: {name}", flush=True)
-        if not command(prepare):
-            raise UnifiedStartupError(f"{name} preparation failed or was declined; stopped safely")
-        require(name)
+def prepare_prerequisites(runner, progress):
+    """System authentication may still be required; never feed sudo credentials."""
+    for index, operations in enumerate((
+        (([str(ROOT / "scripts/install-deps.sh"), "--initialize-dev"], True),
+         ([str(BOOTSTRAP), "--orchestrator-preflight"], False)),
+        (([sys.executable, str(ROOT / "scripts/dev/bootstrap_images.py"), "initialize"], False),),
+    )):
+        progress.begin(index)
+        progress.phase(Phase.PREPARE)
+        for argv, foreground in operations:
+            if runner.run(argv, cwd=ROOT, foreground=foreground) != 0:
+                diagnostic = ("./scripts/install-deps.sh --check" if index == 0
+                              else "python3 scripts/dev/bootstrap_images.py check")
+                raise UnifiedStartupError(
+                    f"Prerequisite preparation failed (exit {runner.last_returncode}); run {diagnostic}"
+                )
+        progress.finish(Status.DONE)
+
+
+def initialize(lock_fd, *, cancellation=None):
+    """Single fixed, sequential provisioning flow; no approval prompts."""
+    cancellation = cancellation or Cancellation()
+    progress = Progress(("System dependencies", "Docker images") + tuple(
+        name for name, _, _ in STAGES))
+    runner = ChildRunner(progress, cancellation)
+    try:
+        prepare_prerequisites(runner, progress)
+        for index, (name, check, prepare) in enumerate(STAGES, 2):
+            cancellation.check()
+            progress.begin(index)
+            if name == "vault-ui":
+                progress.finish(Status.SKIPPED)
+                continue
+            progress.phase(Phase.CHECK)
+            if checked(name, first_run=True, runner=runner):
+                progress.finish(Status.CACHED)
+                continue
+            if prepare is None:
+                raise UnifiedStartupError(f"{name} verification failed; inspect {check}")
+            if name == "vault":
+                vault_seal_guard()
+            cancellation.check()
+            progress.phase(Phase.PREPARE)
+            if os.environ.get("FT_DEV_STAGE_TIMING") == "1":
+                print(f"PREPARE: {name}", flush=True)
+            if not command(prepare, runner=runner, lock_fd=lock_fd):
+                raise UnifiedStartupError(
+                    f"{name} preparation failed (exit {runner.last_returncode}); "
+                    f"inspect ./scripts/bootstrap.sh {check}"
+                )
+            progress.phase(Phase.VERIFY)
+            if not checked(name, runner=runner):
+                raise UnifiedStartupError(
+                    f"{name} verification failed (exit {runner.last_returncode}); "
+                    f"inspect ./scripts/bootstrap.sh {check}"
+                )
+            progress.finish(Status.DONE)
+        cancellation.check()
+    except InitializationCancelled:
+        if progress.active is not None:
+            progress.finish(Status.CANCELLED)
+            progress.summary()
+        raise
+    except (UnifiedStartupError, OSError):
+        if progress.active is not None:
+            progress.finish(Status.FAILED)
+            progress.summary()
+        raise
+    progress.summary()
     print("RESULT: UNIFIED INITIALIZATION READY", flush=True)
 
 
@@ -698,7 +770,7 @@ def exclusive_orchestrator_lock():
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise UnifiedStartupError("Another unified bootstrap is already running") from None
-        yield
+        yield fd
     finally:
         os.close(fd)
 
@@ -710,6 +782,16 @@ def main(argv=None):
     try:
         if os.geteuid() == 0:
             raise UnifiedStartupError("Run as an ordinary user, not with sudo")
+        if args.mode == "initialize":
+            # Do not mutate Windows trust or a remote Docker daemon.
+            import platform
+            if platform.system() != "Linux" or "microsoft" in platform.release().lower():
+                raise UnifiedStartupError("Initialization requires native Ubuntu Linux")
+            if os.environ.get("DEV_DOMAIN", "transcendence.test") != "transcendence.test":
+                raise UnifiedStartupError("Initialization requires the default development domain")
+            with exclusive_orchestrator_lock() as lock_fd, Cancellation().handling() as cancellation:
+                initialize(lock_fd, cancellation=cancellation)
+            return 0
         preflight_once()
         if args.mode == "check":
             check()
@@ -717,13 +799,18 @@ def main(argv=None):
             health_report()
         else:
             with exclusive_orchestrator_lock():
-                if args.mode == "initialize":
-                    initialize()
-                elif args.mode == "recover":
+                if args.mode == "recover":
                     recover()
                 else:
                     start()
         return 0
+    except InitializationCancelled as exc:
+        print("RESULT: INITIALIZATION CANCELLED (no automatic rollback; inspect existing state)",
+              file=sys.stderr, flush=True)
+        return 128 + exc.signum
+    except OSError:
+        print("ERROR: Local bootstrap operation failed; inspect the active stage", file=sys.stderr)
+        return 1
     except UnifiedStartupError as exc:
         print(f"ERROR: {exc}", file=sys.stderr, flush=True)
         print("RESULT: UNIFIED BOOTSTRAP STOPPED (no resources removed)",
