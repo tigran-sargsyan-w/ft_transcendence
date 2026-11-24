@@ -5,10 +5,11 @@ set -Eeuo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/install-deps.sh [--check|--initialize-dev|--help]
+Usage: ./scripts/install-deps.sh [--check|--initialize-check|--initialize-dev|--help]
 
   (default)   Install missing Ubuntu packages with confirmation.
   --initialize-dev  Explicit development initialization (packages and local Docker access).
+  --initialize-check  Read-only local development prerequisites and daemon guard.
   --check     Read-only prerequisites report; no sudo or mutations.
   --help      Print this help.
 
@@ -22,6 +23,7 @@ case "${1:-}" in
   "") ;;
   --check) MODE=check ;;
   --initialize-dev) MODE=initialize-dev ;;
+  --initialize-check) MODE=initialize-check ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -109,8 +111,19 @@ if (( docker_packages_needed )); then
   fi
 fi
 
-if [[ "$MODE" == check ]]; then
+if [[ "$MODE" == check || "$MODE" == initialize-check ]]; then
   issues=0
+  if [[ "$MODE" == initialize-check ]]; then
+    [[ -z ${DOCKER_HOST:-} || "$DOCKER_HOST" == unix:///var/run/docker.sock ]] \
+      || fail "Unexpected DOCKER_HOST; manual Docker access review required"
+    if (( docker_cli )); then
+      endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}')" \
+        || fail "Cannot inspect Docker context"
+      [[ "$endpoint" == unix:///var/run/docker.sock ]] \
+        || fail "Unexpected Docker context; manual Docker access review required"
+    fi
+    systemctl is-active --quiet docker || issues=1
+  fi
   (( ${#missing_base[@]} == 0 )) || issues=1
   (( !docker_packages_needed )) || issues=1
   if (( docker_cli )); then

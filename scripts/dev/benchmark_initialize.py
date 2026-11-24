@@ -35,7 +35,7 @@ TIMING = re.compile(
 YES_NO_PROMPT = re.compile(r"\[[yYnN]/[yYnN]\]")
 STAGE_END = re.compile(
     r"^=> \[(\d+)/(\d+)\] ([A-Za-z0-9 -]+) "
-    r"(DONE|CACHED|SKIPPED|FAILED|CANCELLED) (\d+(?:\.\d+)?)s \| total (\d+(?:\.\d+)?)s$"
+    r"(DONE|CACHED|SKIPPED|FAILED|CANCELLED|ACTION REQUIRED) (\d+(?:\.\d+)?)s \| total (\d+(?:\.\d+)?)s$"
 )
 PROMPT_REFUSED = "ERROR: Unexpected initialization approval prompt; stopped safely."
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")

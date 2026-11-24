@@ -110,6 +110,10 @@ def preflight_once():
         )
 
 
+class SessionRefreshRequired(Exception):
+    """Docker group enrollment succeeded; a fresh login is required."""
+
+
 class UnifiedStartupError(Exception):
     """Public diagnostic intentionally contains no subprocess output or secrets."""
 
@@ -544,22 +548,31 @@ def recover():
 
 def prepare_prerequisites(runner, progress):
     """System authentication may still be required; never feed sudo credentials."""
-    for index, operations in enumerate((
-        (([str(ROOT / "scripts/install-deps.sh"), "--initialize-dev"], True),
-         ([str(BOOTSTRAP), "--orchestrator-preflight"], False),
-         ([sys.executable, "-m", "scripts.dev.bootstrap_linux_ca", "preflight"], False)),
-        (([sys.executable, str(ROOT / "scripts/dev/bootstrap_images.py"), "initialize"], False),),
-    )):
-        progress.begin(index)
+    installer = str(ROOT / "scripts/install-deps.sh")
+    images = str(ROOT / "scripts/dev/bootstrap_images.py")
+    progress.begin(0, Phase.CHECK)
+    cached = runner.run([installer, "--initialize-check"], cwd=ROOT, probe=True) == 0
+    if not cached:
         progress.phase(Phase.PREPARE)
-        for argv, foreground in operations:
-            if runner.run(argv, cwd=ROOT, foreground=foreground) != 0:
-                diagnostic = ("./scripts/install-deps.sh --check" if index == 0
-                              else "python3 scripts/dev/bootstrap_images.py check")
-                raise UnifiedStartupError(
-                    f"Prerequisite preparation failed (exit {runner.last_returncode}); run {diagnostic}"
-                )
-        progress.finish(Status.DONE)
+        code = runner.run([installer, "--initialize-dev"], cwd=ROOT, foreground=True)
+        if code == 2 and runner.last_diagnostics.session_refresh:
+            raise SessionRefreshRequired()
+        if code:
+            raise UnifiedStartupError("System prerequisites failed; inspect ./scripts/install-deps.sh --check")
+    progress.phase(Phase.VERIFY)
+    for argv in ([str(BOOTSTRAP), "--orchestrator-preflight"],
+                 [sys.executable, "-m", "scripts.dev.bootstrap_linux_ca", "preflight"]):
+        if runner.run(argv, cwd=ROOT):
+            raise UnifiedStartupError("System prerequisite verification failed; inspect local host state")
+    progress.finish(Status.CACHED if cached else Status.DONE)
+
+    progress.begin(1, Phase.CHECK)
+    cached = runner.run([sys.executable, images, "check"], cwd=ROOT, probe=True) == 0
+    if not cached:
+        progress.phase(Phase.PREPARE)
+        if runner.run([sys.executable, images, "initialize"], cwd=ROOT):
+            raise UnifiedStartupError("Docker image preparation failed; inspect bootstrap_images.py check")
+    progress.finish(Status.CACHED if cached else Status.DONE)
 
 
 def initialize(lock_fd, *, cancellation=None):
@@ -572,11 +585,10 @@ def initialize(lock_fd, *, cancellation=None):
         prepare_prerequisites(runner, progress)
         for index, (name, check, prepare) in enumerate(STAGES, 2):
             cancellation.check()
-            progress.begin(index)
+            progress.begin(index, None if name == "vault-ui" else Phase.CHECK)
             if name == "vault-ui":
                 progress.finish(Status.SKIPPED)
                 continue
-            progress.phase(Phase.CHECK)
             if checked(name, first_run=True, runner=runner):
                 progress.finish(Status.CACHED)
                 continue
@@ -601,6 +613,10 @@ def initialize(lock_fd, *, cancellation=None):
                 )
             progress.finish(Status.DONE)
         cancellation.check()
+    except SessionRefreshRequired:
+        progress.finish(Status.ACTION_REQUIRED)
+        progress.summary()
+        raise
     except InitializationCancelled:
         if progress.active is not None:
             progress.finish(Status.CANCELLED)
@@ -809,6 +825,10 @@ def main(argv=None):
                 else:
                     start()
         return 0
+    except SessionRefreshRequired:
+        print("RESULT: INITIALIZATION PAUSED (sign out and back in; rerun make initialize)",
+              file=sys.stderr, flush=True)
+        return 2
     except InitializationCancelled as exc:
         print("RESULT: INITIALIZATION CANCELLED (no automatic rollback; inspect existing state)",
               file=sys.stderr, flush=True)
