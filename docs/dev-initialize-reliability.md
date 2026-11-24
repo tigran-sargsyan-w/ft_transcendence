@@ -335,7 +335,7 @@ Related guides:
 
 The fixed 21-stage display includes system dependencies and Docker images before the 19 existing service stages. CACHED means a fresh readiness check passed, not an on-disk cache. DONE means the guarded preparation and required verification succeeded. Optional Vault UI remains SKIPPED. FAILED, CANCELLED and ACTION REQUIRED stop the sequence; later stages are not executed. ACTION REQUIRED is used only for verified Docker group enrollment/session refresh and preserves a nonzero exit status.
 
-An interactive terminal colors only the status field, uses adaptive-width stage columns and a completed-stage progress bar, commits one final row per stage and previews transient reviewed substeps. The renderer limits timer updates to five frames per second (apart from phase transitions, notices and resize) and overwrites only changed rows. Supported xterm-compatible terminals use a separate alternate screen for the live viewport. SIGWINCH invalidates the cached geometry, and a resize repaints only that screen. Final stage rows and reviewed notices are retained in memory and appended once to normal terminal history before foreground sudo authentication or on exit. Normal scrollback is never erased. Unsupported terminals fall back to plain text. Pending stages are previewed within the available terminal height. MISSING means a reviewed absence event; NOT READY means a probe did not establish readiness. Neither authorizes provisioning or changes an exit code. UNCONFIRMED means a named child event did not report completion; no success is inferred. A terminal-stage failure still stops the sequence. CI, NO_COLOR, redirected output, verbose mode and timing mode use plain append-only text. The installer authenticates using sudo -v on the controlling terminal, then uses sudo -n for actual package/service operations so their progress stays live. Host operations that may invoke sudo indirectly (mkcert) clear the transient region and pause repainting until the foreground command returns; elapsed time still includes authentication and execution. This avoids interfering with the controlling terminal or intercepting passwords. Noninteractive initialization requires any necessary sudo authorization to be available already; it never requests or stores a password itself.
+An interactive terminal colors only the status field, uses adaptive-width stage columns and a completed-stage progress bar, commits one final row per stage and previews transient reviewed substeps. The renderer limits timer updates to five frames per second (apart from phase transitions, notices and resize) and overwrites only changed rows. Supported xterm-compatible terminals use inline progress under the invoking command, without switching to an alternate screen. SIGWINCH or a changed terminal size invalidates the tracked cursor anchor. If a preview is active, the renderer abandons it and uses append-only stage transitions for the rest of that run; it never tries to erase or seek the invalidated region. Old preview lines may remain above an explicitly labeled final report. If committed rows were formatted at different widths, the final report is also emitted. Durable rows retain full stage names and actual elapsed/cumulative times, even if a very narrow terminal wraps them. A terminal resize racing an individual cursor-control write cannot be made atomic; the renderer checks geometry again before writing and stops using the anchor once a resize is observed. Unsupported terminals fall back to plain text. Pending stages are previewed within the available terminal height. MISSING means a reviewed absence event; NOT READY means a probe did not establish readiness. Neither authorizes provisioning or changes an exit code. UNCONFIRMED means a named child event did not report completion; no success is inferred. A terminal-stage failure still stops the sequence. CI, NO_COLOR, redirected output, verbose mode and timing mode use plain append-only text. The installer authenticates using sudo -v on the controlling terminal, then uses sudo -n for actual package/service operations so their progress stays live. Host operations that may invoke sudo indirectly (mkcert) clear the transient region and pause repainting until the foreground command returns; elapsed time still includes authentication and execution. This avoids interfering with the controlling terminal or intercepting passwords. Noninteractive initialization requires any necessary sudo authorization to be available already; it never requests or stores a password itself.
 
 Each operation retains its existing security checks. The internal stage dispatch is allowlisted and receives the held orchestrator lock descriptor, not a global yes flag. The Linux CA workflow will trust only an already trusted CA or a newly generated, recorded and validated CA. Unexpected CA paths, files and untrusted existing CAs are refused. Windows trust is outside this automatic path. Docker enrollment is restricted to a checked local socket and still requires normal sudo; sign out/in when instructed.
 
@@ -458,3 +458,28 @@ tests, normal startup/initialize identity and the targeted reboot-recovery
 case if an appropriate disposable VM is available. A new cold-install run is
 not required merely to verify resize. Final end-to-end timing measurements
 remain separate from the renderer-only benchmark.
+
+
+## Issue #160 fourth-round VM findings and V5 follow-up
+
+At 9cee4d4, 874 offline tests ran (868 passed, six skipped, no failures).
+Fresh installation on the clean Ubuntu VM paused for Docker group enrollment
+(32.0 s) and completed all 21 stages after session refresh (518.3 s). Live
+resize no longer duplicated or overlapped stages, and the normal terminal
+history returned on completion. Two read-only cancellations (postgres-roles
+at 8.8 s and backend at 19.2 s) restored the prompt, reported Error 130,
+and were followed by a passing health report. The operator disliked the
+alternate-screen transition, inconsistent alignment across sudo pauses and
+truncated or misaligned labels at narrow widths. V5 changes presentation only:
+inline display, conservative resize fallback, one shared live status column,
+ellipses and a consistently formatted final report when needed. No provisioning,
+resume, cancellation or recovery decisions are changed. The old preview may
+remain in scrollback after a resize; the final report is authoritative.
+
+V4 synthetic benchmark vs V3: 445 vs 464 writes, 242216 vs 240188 bytes,
+80 vs 336 full-row erases. The two median renderer elapsed-time measurements
+were 37.80 vs 19.38 ms and 31.20 vs 21.48 ms. This workload does not model
+terminal rendering or full installation. V5 needs targeted inline/resize,
+cancellation and final-report verification on an already healthy VM, not a
+repeated fresh install. The targeted live reboot-recovery test and final
+end-to-end benchmark remain pending.

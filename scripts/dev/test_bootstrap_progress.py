@@ -11,26 +11,36 @@ class Terminal(io.StringIO):
         return True
 
 
-def primary_output(log):
-    """Return bytes sent to the permanent screen, excluding alternate frames."""
+def primary_output(log, *, height=100):
+    """Interpret the exact inline cursor-control subset in a bounded terminal."""
     import re
-    parts = re.split(r"(\x1b\[\?1049[hl])", log)
-    alternate = False
-    primary = []
-    for part in parts:
-        if part == "\x1b[?1049h":
-            if alternate:
-                raise AssertionError("nested alternate screen")
-            alternate = True
-        elif part == "\x1b[?1049l":
-            if not alternate:
-                raise AssertionError("alternate screen not active")
-            alternate = False
-        elif not alternate:
-            primary.append(part)
-    if alternate:
-        raise AssertionError("alternate screen left active")
-    return "".join(primary)
+    rows = ["" for _ in range(height)]
+    row = col = top = 0
+    for token in re.findall(r"\x1b\[[0-9;?]*[A-Za-z]|[\s\S]", log):
+        if re.fullmatch(r"\x1b\[\d+A", token):
+            row = max(top, row-int(token[2:-1]))
+        elif re.fullmatch(r"\x1b\[\d+B", token):
+            row = min(top+height-1, row+int(token[2:-1]))
+        elif token == "\x1b[2K":
+            rows[row] = ""
+        elif token == "\x1b[K":
+            rows[row] = rows[row][:col]
+        elif token.startswith("\x1b"):
+            if not re.fullmatch(r"\x1b\[[0-9;]*m", token):
+                raise AssertionError(f"unexpected terminal command {token!r}")
+        elif token == "\r":
+            col = 0
+        elif token == "\n":
+            row += 1
+            col = 0
+            if row >= top+height:
+                top += 1
+                rows.append("")
+        else:
+            line = rows[row].ljust(col)
+            rows[row] = line[:col]+token+line[col+1:]
+            col += 1
+    return "\n".join(rows)
 
 
 class ProgressTests(unittest.TestCase):
@@ -77,8 +87,8 @@ class ProgressTests(unittest.TestCase):
         progress.begin(1)
         progress.finish(Status.SKIPPED)
         log = output.getvalue()
-        self.assertIn("\x1b[?1049h", log)
-        self.assertIn("\x1b[?1049l", log)
+        self.assertNotIn("\x1b[?1049", log)
+        self.assertIn("\x1b[2K", log)
         self.assertIn("\x1b[36mRUNNING\x1b[0m", log)
         self.assertIn("2.0s | total 2.0s", log)
         self.assertIn("\x1b[32m", log)
@@ -138,10 +148,10 @@ class ProgressTests(unittest.TestCase):
         output = Terminal()
         progress = self.progress(output, width=20)
         progress.begin(0)
-        import re
-        for line in progress._rows:
-            clean = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line)
-            self.assertLessEqual(len(clean), 19)
+        self.assertEqual(progress.drawn, 0)
+        self.assertFalse(progress._inline)
+        self.assertNotIn("\r", output.getvalue())
+        self.assertIn("Terminal too small", output.getvalue())
 
     def test_pause_erases_active_region_and_substeps_are_transient(self):
         output = Terminal()
@@ -181,6 +191,7 @@ class ProgressTests(unittest.TestCase):
         self.assertNotIn("Pulling image", screen)
         self.assertNotIn("PENDING", screen)
         self.assertNotIn("RUNNING", screen)
+        self.assertNotIn("Final stage report", screen)
 
     def test_scrolling_terminal_preserves_committed_rows_and_clears_preview(self):
         import re
@@ -205,7 +216,7 @@ class ProgressTests(unittest.TestCase):
             progress.finish(Status.CANCELLED if i == 16 else Status.DONE)
         progress.summary()
 
-        screen = primary_output(output.getvalue())
+        screen = primary_output(output.getvalue(), height=height)
         for i in range(1, 18):
             self.assertEqual(screen.count(f"[{i:02d}/21]"), 1)
         self.assertNotIn("[18/21]", screen)
@@ -242,7 +253,7 @@ class ProgressTests(unittest.TestCase):
                             clock=lambda: self.now, env={"TERM": "xterm"},
                             terminal_width=lambda: width, terminal_height=lambda: 12)
         progress.begin(0, Phase.CHECK)
-        active, pending = progress._rows[1:3]
+        active, pending = progress._rows[:2]
         self.assertEqual(active.index("\x1b["), pending.index("\x1b["))
         self.assertIn("\x1b[36mRUNNING\x1b[0m (check)", active)
         strip = lambda value: re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", value)
@@ -251,9 +262,10 @@ class ProgressTests(unittest.TestCase):
         width = 65
         self.now = 1
         progress.refresh()
-        self.assertTrue(all(len(strip(row)) <= 64 for row in progress._rows))
+        self.assertEqual(progress.drawn, 0)
+        self.assertFalse(progress._inline)
 
-    def test_resize_redraws_only_isolated_screen_and_preserves_history(self):
+    def test_resize_abandons_cursor_anchor_and_appends_final_report(self):
         import re
         output = Terminal()
         width, height = 120, 32
@@ -269,39 +281,136 @@ class ProgressTests(unittest.TestCase):
             progress.substep("Verify identity", Status.RUNNING)
             self.now = 2
             progress.refresh()
-            for width, height in ((40, 7), (12, 2), (150, 45)):
-                before = len(output.getvalue())
-                progress.refresh()  # geometry changes bypass the frame throttle
-                delta = output.getvalue()[before:]
-                self.assertIn("\x1b[2J", delta)
-                self.assertLessEqual(len(progress._rows), height)
-                for row in progress._rows:
-                    self.assertLessEqual(len(re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", row)), width-1)
-            # Simulate a resize and return to original dimensions between polls.
-            import signal
-            signal.getsignal(signal.SIGWINCH)(signal.SIGWINCH, None)
             before = len(output.getvalue())
+            width, height = 40, 7
             progress.refresh()
-            self.assertIn("\x1b[2J", output.getvalue()[before:])
+            self.assertEqual(progress.drawn, 0)
+            self.assertFalse(progress._inline)
+            width, height = 150, 45
+            progress.refresh()
             progress.notice("SECURITY: Preserve recovery material.")
             progress.finish(Status.CANCELLED)
             progress.summary()
-        screen = primary_output(output.getvalue())
-        self.assertEqual(screen.count("[01/04]"), 1)
-        self.assertEqual(screen.count("[02/04]"), 1)
-        self.assertIn("CACHED", screen)
-        self.assertIn("total 1.0s", screen)
-        self.assertIn("CANCELLED", screen)
-        self.assertIn("SECURITY:", re.sub(r"\x1b\[[0-9;]*m", "", screen))
-        self.assertNotIn("PENDING", screen)
-        self.assertNotIn("Verify identity", screen)
-        self.assertNotIn("\x1b[2J", screen)
-        self.assertNotIn("\x1b[2K", screen)
+        tail = output.getvalue()[before:]
+        self.assertNotIn("\r", tail)
+        self.assertNotRegex(tail, r"\x1b\[[0-9;?]*[ABHJK]")
+        self.assertNotIn("\x1b[?1049", output.getvalue())
+        self.assertIn("append-only progress", tail)
+        report = re.sub(r"\x1b\[[0-9;]*m", "", tail.split("Final stage report", 1)[1])
+        self.assertEqual(report.count("[01/04]"), 1)
+        self.assertEqual(report.count("[02/04]"), 1)
+        self.assertIn("total 1.0s", report)
+        self.assertIn("CANCELLED", report)
+        self.assertNotIn("PENDING", report)
+        self.assertNotIn("Verify identity", report)
+        rows = [line for line in report.splitlines() if line.startswith(" =>")]
+        self.assertEqual(rows[0].index("CACHED"), rows[1].index("CANCELLED"))
 
-    def test_exception_restores_screen_and_signal_handler(self):
+    def test_height_only_resize_before_notice_never_moves_cursor(self):
+        output = Terminal()
+        height = 32
+        progress = Progress(("Vault", "PostgreSQL"), stream=output,
+                            clock=lambda: self.now, env={"TERM": "xterm"},
+                            terminal_width=lambda: 120, terminal_height=lambda: height)
+        progress.begin(0, Phase.CHECK)
+        before = len(output.getvalue())
+        height = 8
+        progress.notice("SECURITY: Preserve recovery material.")
+        progress.finish(Status.FAILED)
+        progress.summary()
+        tail = output.getvalue()[before:]
+        self.assertNotIn("\r", tail)
+        self.assertNotRegex(tail, r"\x1b\[[0-9;?]*[ABHJK]")
+        self.assertIn("Preserve recovery material.", tail)
+        self.assertIn("Final stage report", tail)
+        self.assertNotIn("[02/02]", tail)
+
+    def test_geometry_changes_while_building_frame_abandon_before_write(self):
+        output = Terminal()
+        progress = self.progress(output, width=120)
+        progress.begin(0, Phase.CHECK)
+        before = len(output.getvalue())
+        self.now = 1
+        # refresh, first paint guard, second paint guard, last pre-write guard.
+        with patch.object(progress, "_size_key", side_effect=[
+                (119, 10), (119, 10), (119, 10), (79, 10)]):
+            progress.refresh()
+        tail = output.getvalue()[before:]
+        self.assertFalse(progress._inline)
+        self.assertNotIn("\r", tail)
+        self.assertNotRegex(tail, r"\x1b\[[0-9;?]*[ABHJK]")
+
+    def test_resize_signal_invalidates_anchor_even_when_geometry_returns(self):
+        import signal
+        output = Terminal()
+        progress = self.progress(output)
+        with progress.watch_resize():
+            progress.begin(0, Phase.CHECK)
+            before = len(output.getvalue())
+            signal.getsignal(signal.SIGWINCH)(signal.SIGWINCH, None)
+            progress.finish(Status.DONE)
+            progress.begin(1, Phase.CHECK)
+            progress.finish(Status.CACHED)
+            progress.summary()
+        tail = output.getvalue()[before:]
+        self.assertNotIn("\r", tail)
+        self.assertNotRegex(tail, r"\x1b\[[0-9;?]*[ABHJK]")
+        self.assertIn("Final stage report", tail)
+
+    def test_resize_while_paused_preserves_authentication_and_final_alignment(self):
+        output = Terminal()
+        width = 80
+        progress = Progress(("System dependencies", "Docker images", "host"),
+                            stream=output, clock=lambda: self.now,
+                            env={"TERM": "xterm"}, terminal_width=lambda: width,
+                            terminal_height=lambda: 32)
+        with progress.watch_resize():
+            progress.begin(0, Phase.CHECK)
+            self.now = 1
+            progress.finish(Status.CACHED)
+            progress.begin(1, Phase.PREPARE)
+            progress.pause()
+            output.write("[sudo] Password:\n")
+            width = 120
+            progress.resume()
+            self.now = 2
+            progress.finish(Status.DONE)
+            progress.begin(2, Phase.VERIFY)
+            self.now = 3
+            progress.finish(Status.DONE)
+            progress.summary()
+        screen = primary_output(output.getvalue())
+        self.assertIn("[sudo] Password:", screen)
+        report = screen.split("Final stage report", 1)[1]
+        rows = [line for line in report.splitlines() if line.startswith(" =>")]
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0].index("CACHED"), rows[1].index("DONE"))
+        self.assertEqual(rows[1].index("DONE"), rows[2].index("DONE"))
+        self.assertIn("total 1.0s", rows[0])
+        self.assertIn("total 2.0s", rows[1])
+
+    def test_long_nested_labels_share_status_column_and_have_spacing(self):
+        import re
+        for width in (36, 50, 65, 70, 120):
+            with self.subTest(width=width):
+                progress = self.progress(Terminal(), width=width)
+                progress.begin(0, Phase.CHECK)
+                progress.substep("Verify an intentionally very long nested operation label that exceeds the available status column width", Status.DONE)
+                progress.substep("Check Docker CLI", Status.RUNNING)
+                self.now += 1
+                progress.refresh()
+                lines = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in progress._rows[:3]]
+                self.assertEqual(lines[0].index("RUNNING"), lines[1].index("DONE"))
+                self.assertEqual(lines[0].index("RUNNING"), lines[2].index("RUNNING"))
+                self.assertTrue(all(len(line) < width for line in lines))
+                self.assertIn("...", lines[1])
+                self.assertIn("  DONE", lines[1])
+
+    def test_exception_restores_inline_preview_and_signal_handler(self):
         import signal
         old = signal.getsignal(signal.SIGWINCH)
         output = Terminal()
+        output.write("previous command history\n")
         progress = self.progress(output)
         with self.assertRaises(RuntimeError):
             with progress.watch_resize():
@@ -311,9 +420,10 @@ class ProgressTests(unittest.TestCase):
                 raise RuntimeError("synthetic failure")
         self.assertIs(signal.getsignal(signal.SIGWINCH), old)
         screen = primary_output(output.getvalue())
+        self.assertIn("previous command history", screen)
         self.assertEqual(screen.count("[01/02]"), 1)
         self.assertNotIn("RUNNING", screen)
-        self.assertIn("\x1b[?25h", output.getvalue())
+        self.assertNotIn("\x1b[?1049", output.getvalue())
 
     def test_unsupported_terminal_uses_plain_output(self):
         output = Terminal()
