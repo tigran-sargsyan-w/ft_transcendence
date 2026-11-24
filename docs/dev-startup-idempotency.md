@@ -12,7 +12,7 @@ procedure, or production disaster-recovery certification.
   unsealed, and the full stack healthy.
 - Do not run concurrently with another bootstrap, migration, Docker maintenance,
   team deployment, or container restart. Stop if anything else changes resources.
-- Never invoke `--initialize`, `docker compose down -v`, `docker volume rm`,
+- The default routine-start acceptance never invokes `--initialize`, `docker compose down -v`, `docker volume rm`,
   Vault init, AppRole rotation, or manual migration just to satisfy this test.
 - This acceptance **does not** deliberately stop or restart containers, seal
   Vault, drop network connections, or manipulate PostgreSQL data.
@@ -106,3 +106,19 @@ supporting evidence; Phase 6D does not require another reboot.
 ## Interrupted first initialization (Issue #160)
 
 This is distinct from the routine-start acceptance test above. An interrupted fresh setup may have created trusted resources already. Check the active stage using the reported read-only check and make plan. After reviewing partial state, rerun make initialize to continue missing guarded operations. Existing initialized sealed Vault requires manual unseal with make recover; if application provisioning is incomplete, recovery can stop at a missing service, after which reviewed initialization may resume. Never delete persistent volumes or rotate credentials just to resume. Cancellation during Vault recovery-material persistence waits for the critical write but cannot protect against SIGKILL or power loss.
+
+
+### Explicit initialize identity acceptance (Issue #160)
+
+On an already healthy development VM, opt in separately with:
+
+```sh
+python3 scripts/dev/verify_startup_idempotency.py --initialize --runs 3
+```
+
+This invokes the actual guarded initialize path, compares resource identities,
+restart counts and migration history immediately after each run and again after
+health verification. It stops on drift without rollback. The default
+`make acceptance` remains routine-start-only; `--check-only` is read-only and
+mutually exclusive with `--initialize`. Never run the opt-in test on an unhealthy
+or partially provisioned environment; use it on an isolated development VM.

@@ -78,15 +78,16 @@ To include stage check timings:
 FT_DEV_STAGE_TIMING=1 make initialize
 ```
 
-To request additional safe child diagnostic summaries:
+To request persistent reviewed substeps, retry reasons and timed child operation summaries:
 
 ```sh
 FT_DEV_BOOTSTRAP_VERBOSE=1 make initialize
 ```
 
 These flags can be combined. Neither exposes raw child output. Verbose mode
-reports child exit codes and diagnostic counts; targeted read-only checks can
-be run separately.
+retains reviewed substeps, operation labels, actual child durations, exit codes
+and diagnostic counts. Unknown child output is never forwarded; the reported
+read-only check remains the source for detailed local diagnosis.
 
 For a focused failure investigation, run the reported read-only
 check explicitly, for example:
@@ -332,9 +333,9 @@ Related guides:
 
 ## Issue #160 initialization progress and cancellation
 
-The fixed 21-stage display includes system dependencies and Docker images before the 19 existing service stages. CACHED means a fresh readiness check passed, not an on-disk cache. DONE means the guarded preparation and required verification succeeded. Optional Vault UI remains SKIPPED. FAILED and CANCELLED stop the sequence; later stages are not executed.
+The fixed 21-stage display includes system dependencies and Docker images before the 19 existing service stages. CACHED means a fresh readiness check passed, not an on-disk cache. DONE means the guarded preparation and required verification succeeded. Optional Vault UI remains SKIPPED. FAILED, CANCELLED and ACTION REQUIRED stop the sequence; later stages are not executed. ACTION REQUIRED is used only for verified Docker group enrollment/session refresh and preserves a nonzero exit status.
 
-An interactive terminal repaints the active row. CI, redirected output, verbose mode and timing mode use plain append-only text. Host operations may temporarily pause repainting to let normal sudo authentication use the controlling terminal. Noninteractive initialization requires any necessary sudo authorization to be available already; it never requests or stores a password itself.
+An interactive terminal uses color, a completed-stage progress bar, one final row per stage and transient nested reviewed substeps. Pending stages are previewed within the available terminal height. CI, NO_COLOR, redirected output, verbose mode and timing mode use plain append-only text. Host operations that may invoke sudo clear the transient region and pause repainting until the foreground command returns; elapsed time still includes authentication and execution. This avoids interfering with the controlling terminal or intercepting passwords. Noninteractive initialization requires any necessary sudo authorization to be available already; it never requests or stores a password itself.
 
 Each operation retains its existing security checks. The internal stage dispatch is allowlisted and receives the held orchestrator lock descriptor, not a global yes flag. The Linux CA workflow will trust only an already trusted CA or a newly generated, recorded and validated CA. Unexpected CA paths, files and untrusted existing CAs are refused. Windows trust is outside this automatic path. Docker enrollment is restricted to a checked local socket and still requires normal sudo; sign out/in when instructed.
 
@@ -342,4 +343,34 @@ Ctrl+C/SIGTERM stop further stages. Vault initialization defers cancellation whi
 
 Raw child output is not forwarded or saved, including verbose mode. Reviewed fixed notices, warning/error counts, actual exit codes and a targeted check are provided instead. Run the reported maintenance check locally for detailed diagnosis; do not share unreviewed logs or secret material.
 
-Issue #160 cold-VM and full CI results must be recorded separately from the historical #157 benchmark. No measurements for #160 are claimed here.
+## Issue #160 first-round VM findings
+
+On Ubuntu 26.04 amd64, commit aae14ad completed 835 offline tests (6 WSL-only
+skips), routine startup acceptance (3/3), read-only cancellation and Docker
+pull cancellation (exit 130), and a subsequent initialization from partial
+images (500.1 s). Repeated initialize on a healthy stack took 53.0 s;
+redirected output contained no escape or carriage-return bytes (52.9 s).
+Fresh initialization once failed at Grafana HTTPS (512.7 s), and resuming
+an uninitialized existing Vault preserved its container identity but once
+failed before Grafana creation. Later independent checks and manual Grafana
+preparation succeeded. The specific first-round failed probes were not retained.
+
+The follow-up implementation adds a typed bounded Prometheus readiness check
+at the shell prerequisite boundary, bounded retries for explicit Grafana HTTPS
+502/503/504 responses, and distinguishes validated missing Grafana credentials
+from a failed inspection. Identity, authorization, WAF and TLS checks remain
+required. This is not proof of the original failure causes or of a fixed
+cold-VM failure rate. Repeat clean-VM runs and benchmark the final commit.
+
+For an explicitly opted-in comparison of resource identities around repeated
+initialize, on a healthy development VM only:
+
+```sh
+python3 scripts/dev/verify_startup_idempotency.py --initialize --runs 3
+```
+
+The offline cancellation integration test simulates the Vault server response
+but exercises the real recovery-file writer, fsync, isolated child and signal
+handling. A real Vault server cancellation within the critical section and
+manual unseal/resume remain live acceptance checks. Cold-VM and full CI
+results for #160 must be recorded separately from the historical #157 benchmark.

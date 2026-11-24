@@ -142,6 +142,18 @@ if [[ "$MODE" == check || "$MODE" == initialize-check ]]; then
   exit 0
 fi
 
+# Refuse remote contexts before any package changes when Docker already exists.
+if [[ "$MODE" == initialize-dev ]]; then
+  [[ -z ${DOCKER_HOST:-} || "$DOCKER_HOST" == unix:///var/run/docker.sock ]] \
+    || fail "Unexpected DOCKER_HOST; manual Docker access review required"
+  if (( docker_cli )); then
+    endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}')" \
+      || fail "Cannot inspect Docker context"
+    [[ "$endpoint" == unix:///var/run/docker.sock ]] \
+      || fail "Unexpected Docker context; manual Docker access review required"
+  fi
+fi
+
 if (( ${#missing_base[@]} || docker_packages_needed )); then
   say ""
   say "Missing packages will be installed through Ubuntu APT and (if needed) Docker's official APT repository."

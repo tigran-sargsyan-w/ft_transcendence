@@ -85,6 +85,51 @@ class ChildRunnerTests(unittest.TestCase):
         self.assertIn('ERROR: Unexpected initialization approval prompt; stopped safely.',
                       display.notices)
 
+    def test_real_vault_persistence_with_isolated_mock_init_and_sigint(self):
+        # Exercise the real recovery-file writer, real process groups, actual
+        # signal handler and fsync; only the Vault server is simulated.
+        import json
+        import stat
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state/private/vault-init.json"
+            code = """
+import json, os, signal, sys
+from pathlib import Path
+from unittest.mock import patch
+import bootstrap_vault as vault
+path = Path(sys.argv[1])
+vault.STATE, vault.RECOVERY = path.parent.parent, path
+original_call = vault.call
+payload = {"root_token": "synthetic-token", "unseal_keys_b64": ["a", "b", "c"]}
+def fake_server(args, **kwargs):
+    assert "init" in args and kwargs["isolated"]
+    helper = "import os, signal, sys; os.kill(os.getppid(), signal.SIGINT); print(sys.argv[1])"
+    return original_call([sys.executable, "-c", helper, json.dumps(payload)],
+                         timeout=5, isolated=True)
+state = {"initialized": False, "sealed": True, "n": 0, "t": 0,
+         "seal_type": "shamir", "storage_type": "raft"}
+with patch.object(vault, "call", side_effect=fake_server) as call, \
+     patch.object(vault, "inspect_container", return_value=None), \
+     patch.object(vault, "start_or_keep"), \
+     patch.object(vault, "status", return_value=state):
+    result = vault.main(["apply"])
+    assert call.call_count == 1, "unexpected unseal/reinitialization"
+    sys.exit(result)
+"""
+            display = Display()
+            runner = ChildRunner(display, Cancellation())
+            with self.assertRaises(InitializationCancelled) as exc:
+                runner.run([sys.executable, "-c", code, str(path)],
+                           cwd=Path(__file__).resolve().parent, critical=True)
+            self.assertEqual(exc.exception.signum, signal.SIGINT)
+            self.assertEqual(runner.last_returncode, 130)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
+            self.assertEqual(json.loads(path.read_text())["unseal_keys_b64"], ["a", "b", "c"])
+            self.assertIn("CANCELLED: Vault recovery material persisted privately; review seal state.",
+                          display.notices)
+            self.assertNotIn("synthetic-token", str(display.notices) + str(display.steps))
+
     def test_critical_child_can_commit_after_interrupt(self):
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp) / 'persisted'

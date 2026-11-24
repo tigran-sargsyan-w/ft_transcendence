@@ -296,16 +296,57 @@ def verify(*, runs=3, read_only=False):
     print("RESULT: STARTUP IDEMPOTENCY VERIFIED", flush=True)
 
 
+def trusted_initialize():
+    """Explicit operator opt-in only, after a healthy baseline.
+
+    Do not impose a parent-only timeout on the mutating orchestrator: its
+    cancellation boundary must be allowed to finish the current critical write.
+    """
+    try:
+        completed = subprocess.run(
+            [str(BOOTSTRAP), "--initialize"], cwd=ROOT, check=False,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        raise AcceptanceError("Trusted initialize unavailable") from None
+    if completed.returncode:
+        raise AcceptanceError("Trusted initialize failed; inspect it manually")
+
+
+def verify_initialize(*, runs=3):
+    """Compare identities around the actual initialize workflow on a healthy VM."""
+    if not 1 <= runs <= 5:
+        raise AcceptanceError("Runs must be between 1 and 5")
+    print("=== Development initialize idempotency acceptance ===", flush=True)
+    trusted("--health-report")
+    baseline = snapshot()
+    for index in range(1, runs + 1):
+        print(f"RUN: guarded --initialize ({index}/{runs})", flush=True)
+        trusted_initialize()
+        compare(baseline, snapshot())
+        trusted("--health-report")
+        compare(baseline, snapshot())
+        print(f"PASS: initialize {index}/{runs}; no recreation, restart or migration history drift", flush=True)
+    print("RESULT: INITIALIZE IDEMPOTENCY VERIFIED", flush=True)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runs", type=int, default=3)
-    parser.add_argument("--check-only", action="store_true",
-                        help="read-only baseline; do not invoke --start")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check-only", action="store_true",
+                      help="read-only baseline; do not invoke --start")
+    mode.add_argument("--initialize", action="store_true",
+                      help="opt-in repeated initialize on an already healthy development VM")
     args = parser.parse_args(argv)
     try:
         if os.geteuid() == 0:
             raise AcceptanceError("Run as ordinary developer, never sudo")
-        verify(runs=args.runs, read_only=args.check_only)
+        if args.initialize:
+            verify_initialize(runs=args.runs)
+        else:
+            verify(runs=args.runs, read_only=args.check_only)
         return 0
     except AcceptanceError as exc:
         print(f"ERROR: {exc}", file=sys.stderr, flush=True)

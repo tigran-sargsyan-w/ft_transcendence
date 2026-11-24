@@ -240,6 +240,10 @@ SAFE_ERRORS = {
 }
 for message in SAFE_ERRORS:
     NOTICES.setdefault(message.encode("ascii"), message)
+for command in ("curl", "docker"):
+    for code in (1, 2, 6, 7, 22, 28, 35, 56, 60, 125, 126, 127):
+        message = f"ERROR: Nginx command failed: {command} (exit {code}; output withheld)"
+        NOTICES[message.encode("ascii")] = message
 # These exact shell notices accompany the dedicated installer exit code 2.
 SESSION_REFRESH = {
     b"ACTION REQUIRED: Docker group membership exists but is not active in this session.",

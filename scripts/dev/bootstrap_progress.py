@@ -184,7 +184,6 @@ class Progress:
         stage = self.stages[self.active]
         if stage.phase is not phase:
             stage.phase = phase
-            self.steps.clear()
             if self.live:
                 self.refresh()
             else:
@@ -200,15 +199,14 @@ class Progress:
         if len(self.steps) >= 128 and label not in self.steps:
             self.steps.pop(next(iter(self.steps)))
         self.steps[label] = status
-        if self.live:
-            self.refresh()
-        elif self.verbose:
+        if self.verbose:
             self._write(self._step_line(label, status) + "\n")
 
     def pause(self):
         if self.live:
             self._erase()
-            self._write("    => => Host authentication may be required (sudo)\n")
+            line = "    => => Host authentication may be required (sudo)"
+            self._write(line[:max(1, self.width()-1)] + "\n")
         self.paused = True
 
     def resume(self):
