@@ -6,14 +6,18 @@ import { TopologyCard } from "@/features/topology/Cards/TopologyCard";
 import { mockTopology } from "@/features/topology/mockTopology";
 import {
   getCriticality,
+  getDependances,
   getDownServices,
   getHealthyServices,
   getImpactedServices,
   getServices,
+  getIsUsedBy,
 } from "@/features/topology/utils";
 import { mockCriticalNodes } from "@/features/topology/mockCriticalNodes";
 import { useState } from "react";
 import type { GraphNode } from "@/features/topology/types";
+import { getRunningIncidents } from "@/features/incidents/utils";
+import { mockIncidents } from "@/features/incidents/mockIncidents";
 
 export default function Topology() {
   const services = getServices(mockTopology.nodes);
@@ -57,7 +61,22 @@ export default function Topology() {
           service={selectedService}
           criticality={
             selectedService
-              ? getCriticality(mockCriticalNodes, selectedService?.id)
+              ? getCriticality(mockCriticalNodes, selectedService.id)
+              : undefined
+          }
+          dependances={
+            selectedService
+              ? getDependances(mockTopology, selectedService.id)
+              : undefined
+          }
+          usedBy={
+            selectedService
+              ? getIsUsedBy(mockTopology, selectedService.id)
+              : undefined
+          }
+          runningIncidents={
+            selectedService
+              ? getRunningIncidents(selectedService.id, mockIncidents)
               : undefined
           }
         />

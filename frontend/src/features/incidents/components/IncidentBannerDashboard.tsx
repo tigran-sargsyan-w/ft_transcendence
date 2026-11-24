@@ -5,11 +5,13 @@ import { formatElapsedSince } from "../utils";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-interface IncidentBannerProps {
+interface IncidentBannerDashboardProps {
   incident: IncidentSummary;
 }
 
-export const IncidentBanner = ({ incident }: IncidentBannerProps) => {
+export const IncidentBannerDashboard = ({
+  incident,
+}: IncidentBannerDashboardProps) => {
   return (
     <Card className="bg-severity-sev1/15 text-severity-sev1 ring-severity-sev1/30">
       <CardContent
@@ -37,7 +39,9 @@ export const IncidentBanner = ({ incident }: IncidentBannerProps) => {
             <span aria-hidden="true" className="hidden md:inline">
               ·
             </span>
-            <span>{formatElapsedSince(incident.startedAt, incident.resolvedAt)}</span>
+            <span>
+              {formatElapsedSince(incident.startedAt, incident.resolvedAt)}
+            </span>
           </div>
         </div>
         <Button className="cursor-pointer [grid-area:action]">

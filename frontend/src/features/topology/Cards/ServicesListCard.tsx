@@ -10,7 +10,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import type { GraphNode, CriticalNodeRow } from "../types";
 import { formateDate } from "@/lib/date";
-import { getCriticality, getServiceDetails } from "../utils";
+import { getCriticality, getIsUsedBy, getServiceDetails } from "../utils";
+import { mockTopology } from "../mockTopology";
 
 interface ServicesListCardProps {
   services: GraphNode[];
@@ -57,7 +58,7 @@ export const ServicesListCard = ({
               <TableCell>
                 {getCriticality(criticalNodes, s.id)?.toFixed(2) ?? "-"}
               </TableCell>
-              <TableCell>{"used by"}</TableCell>
+              <TableCell>{getIsUsedBy(mockTopology, s.id).length}</TableCell>
               <TableCell>
                 {formateDate(s.lastEvent.at)} : {s.lastEvent.type}
               </TableCell>

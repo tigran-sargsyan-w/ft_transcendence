@@ -3,7 +3,7 @@ import type { IncidentSummary } from "./type";
 export const mockIncidents: IncidentSummary[] = [
   {
     id: "inc-0043",
-    title: "Payment service returning 500 errors",
+    title: "Backend returning 500 errors",
     severity: "sev1",
     status: "open",
     environmentId: "env-prod",
@@ -14,7 +14,7 @@ export const mockIncidents: IncidentSummary[] = [
       displayName: "Nathan",
       avatarUrl: null,
     },
-    seedNodeIds: ["node-payment", "node-postgres"],
+    seedNodeIds: ["svc:transcendence:backend", "svc:transcendence:postgres"],
   },
   {
     id: "inc-0042",
@@ -29,11 +29,11 @@ export const mockIncidents: IncidentSummary[] = [
       displayName: "Nathan",
       avatarUrl: null,
     },
-    seedNodeIds: ["node-postgres"],
+    seedNodeIds: ["svc:transcendence:postgres"],
   },
   {
     id: "inc-0041",
-    title: "High latency on api-gateway",
+    title: "High latency on nginx",
     severity: "sev2",
     status: "investigating",
     environmentId: "env-prod",
@@ -44,7 +44,7 @@ export const mockIncidents: IncidentSummary[] = [
       displayName: "Camille",
       avatarUrl: null,
     },
-    seedNodeIds: ["node-api-gateway", "node-redis"],
+    seedNodeIds: ["svc:transcendence:nginx", "svc:transcendence:redis"],
   },
   {
     id: "inc-0040",
@@ -59,7 +59,7 @@ export const mockIncidents: IncidentSummary[] = [
       displayName: "PA",
       avatarUrl: null,
     },
-    seedNodeIds: ["node-collector"],
+    seedNodeIds: ["svc:transcendence:collector"],
   },
   {
     id: "inc-0039",
@@ -74,6 +74,6 @@ export const mockIncidents: IncidentSummary[] = [
       displayName: "Tigran",
       avatarUrl: null,
     },
-    seedNodeIds: ["node-nginx"],
+    seedNodeIds: ["svc:transcendence:nginx"],
   },
 ];

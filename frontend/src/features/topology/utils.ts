@@ -90,4 +90,34 @@ export function getServiceDetails(node: GraphNode) {
   };
 }
 
+export function getDependances(
+  topology: TopologySnapshot,
+  nodeId: string,
+): string[] {
+  const dependancesId = topology.edges
+    .filter((e) => e.source == nodeId)
+    .map((s) => s.target);
+
+  const dependancesLabel = topology.nodes
+    .filter((n) => dependancesId.includes(n.id))
+    .map((n) => n.label);
+
+  return dependancesLabel;
+}
+
+export function getIsUsedBy(
+  topology: TopologySnapshot,
+  nodeId: string,
+): string[] {
+  const usedById = topology.edges
+    .filter((e) => e.target == nodeId)
+    .map((e) => e.source);
+
+  const usedByLabel = topology.nodes
+    .filter((n) => usedById.includes(n.id))
+    .map((n) => n.label);
+
+  return usedByLabel;
+}
+
 export type DetailedService = ReturnType<typeof getServiceDetails>;

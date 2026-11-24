@@ -1,4 +1,4 @@
-import { IncidentBanner } from "./components/IncidentBanner";
+import { IncidentBannerDashboard } from "./components/IncidentBannerDashboard";
 import type { IncidentSummary } from "./type";
 
 interface DashboardIncidentsBannersProps {
@@ -13,7 +13,7 @@ export const DashboardIncidentsBanners = ({
       {incidents
         .filter((i) => i.severity === "sev1" && i.status !== "resolved")
         .map((i) => {
-          return <IncidentBanner key={i.id} incident={i} />;
+          return <IncidentBannerDashboard key={i.id} incident={i} />;
         })}
     </div>
   );
