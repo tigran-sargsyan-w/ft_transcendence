@@ -103,3 +103,18 @@ After an authorized controlled reboot, record:
 Do **not** reboot the VM just to test until the offline tests and code review
 have passed, recovery shares are available from an independent secure backup,
 and all important local work has been saved.
+
+## Known first-recovery readiness issue (#155)
+
+The existing running-but-not-ready Nginx guard can stop the first recovery
+following a VM reboot. Issue #155 tracks investigation independently of
+CLI presentation (#165). On 2026-11-24, the #165 VM acceptance reproduced
+this refusal after successful manual unseal and existing-service resume.
+A second guarded recovery succeeded without manual repair; all 14
+container IDs were preserved, the optional gateway remained disabled,
+and full health passed. This is not proof of a particular readiness race.
+The first failure remains a failure; do not interpret the progress count
+as an overall success result. Inspect the failing read-only check locally
+and follow the existing recovery procedure only after trusted readiness
+has been established. Do not recreate resources or bypass identity checks.
+No new waiting, retry, restart or provisioning policy is introduced by #165.
