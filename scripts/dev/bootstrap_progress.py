@@ -4,6 +4,8 @@ from enum import Enum
 import os
 import re
 import shutil
+import signal
+from contextlib import contextmanager
 import sys
 import time
 
@@ -35,6 +37,7 @@ class Stage:
     phase: Phase | None = None
     started: float | None = None
     elapsed: float = 0.0
+    total: float = 0.0
 
 
 COMPLETE = (Status.CACHED, Status.DONE, Status.SKIPPED)
@@ -48,8 +51,10 @@ COLORS = {
 
 
 def live_enabled(stream, env):
+    # Only terminals with known alternate-screen support use live rendering.
+    term = env.get("TERM", "")
     return (stream.isatty() and sys.stderr.isatty()
-            and env.get("TERM", "") not in ("", "dumb")
+            and term.startswith(("xterm", "screen", "tmux", "rxvt", "alacritty", "foot", "kitty", "wezterm"))
             and not env.get("CI") and "NO_COLOR" not in env
             and env.get("FT_DEV_BOOTSTRAP_VERBOSE") != "1"
             and env.get("FT_DEV_STAGE_TIMING") != "1")
@@ -66,7 +71,7 @@ def emit_result(message, status, *, stream=None, env=None):
 
 
 class Progress:
-    """Commit final rows once, repaint only a bounded transient region.
+    """Isolate the live viewport from permanent terminal history.
 
     All strings from callers must be reviewed static labels, never raw child
     output. Plain mode is append-only; verbose keeps reviewed substeps.
@@ -88,16 +93,19 @@ class Progress:
         self.stopped = False
         self.paused = False
         self._rows = []
+        self._history = []
+        self._printed = 0
+        self._screen = False
+        self._geometry = None
+        self._resized = False
         self._last_refresh = float("-inf")
         self.steps = {}
         self.width = terminal_width or (lambda: self._size().columns)
         self.height = terminal_height or (lambda: self._size().lines)
         self.verbose = env.get("FT_DEV_BOOTSTRAP_VERBOSE") == "1"
         self.live = live_enabled(self.stream, env) and interactive is not False
-        header = "[+] Initializing ft_transcendence"
-        if self.live:
-            header = header[:max(1, self.width()-1)]
-        self._write(header + "\n")
+        self._header = "[+] Initializing ft_transcendence"
+        self._write(self._header + "\n")
 
     @property
     def drawn(self):
@@ -120,11 +128,12 @@ class Progress:
         stage = self.stages[index]
         now = self.clock() if now is None else now
         elapsed = (now - stage.started if stage.status is Status.RUNNING else stage.elapsed)
+        total = now-self.started if stage.status is Status.RUNNING else stage.total
         phase = f" ({stage.phase.value})" if stage.phase else ""
         prefix = f" => [{index + 1:02d}/{len(self.stages):02d}] "
         status = stage.status.value
         timing = ("" if stage.status is Status.PENDING else
-                  f"{max(0.0, elapsed):.1f}s | total {max(0.0, now-self.started):.1f}s")
+                  f"{max(0.0, elapsed):.1f}s | total {max(0.0, total):.1f}s")
         if not self.live:
             return prefix + stage.label + " " + status + phase + (" " + timing if timing else "")
         width = max(1, self.width()-1) if width is None else width
@@ -146,61 +155,92 @@ class Progress:
                         self._color(status, stage.status) + tail)
         return self._color(status[:width], stage.status)
 
-    def _paint(self, rows, suffix=""):
-        """Diff the bounded region; cursor rests at column zero of its last row.
+    @contextmanager
+    def watch_resize(self):
+        """The signal only invalidates the viewport; no terminal IO in a handler."""
+        previous = None
+        if self.live:
+            def resized(_signum, _frame):
+                self._resized = True
+            previous = signal.signal(signal.SIGWINCH, resized)
+        try:
+            yield
+        finally:
+            if previous is not None:
+                signal.signal(signal.SIGWINCH, previous)
+            self.close()
 
-        Write one frame at a time. Newlines grow the region, existing rows
-        use cursor movement. Unchanged rows are never erased or rewritten.
+    def _paint(self, rows, geometry):
+        """Absolute coordinates in an isolated screen, never in scrollback.
+
+        A resize can reflow rows between the size read and this write. Only
+        the disposable alternate screen is affected; SIGWINCH invalidates
+        the next frame even if the window has returned to its old size.
         """
-        old = self._rows
-        height = max(1, self.height())
-        if len(old) > height:
-            old = old[-height:]
-        if old == rows and not suffix:
-            return
-        cursor = max(0, len(old)-1)
-        extent = len(old)
+        reset = not self._screen or self._geometry != geometry or self._resized
+        self._resized = False
         chunks = []
-
-        def move(target):
-            nonlocal cursor, extent
-            chunks.append("\r")
-            if cursor > target:
-                chunks.append(f"\x1b[{cursor-target}A")
-                cursor = target
-            elif cursor < target:
-                existing = min(target-cursor, max(0, extent-1-cursor))
-                if existing:
-                    chunks.append(f"\x1b[{existing}B")
-                    cursor += existing
-                if cursor < target:
-                    chunks.append("\n" * (target-cursor))
-                    cursor = target
-                    extent = max(extent, cursor+1)
-
-        for i in range(max(len(old), len(rows))):
+        if not self._screen:
+            chunks.append("\x1b[?1049h\x1b[?25l")
+            self._screen = True
+        old = self._rows
+        if reset:
+            chunks.append("\x1b[2J\x1b[H")
+            old = []
+        height = geometry[1]
+        for i in range(min(height, max(len(old), len(rows)))):
             before = old[i] if i < len(old) else None
             after = rows[i] if i < len(rows) else None
             if before == after:
                 continue
-            move(i)
+            chunks.append(f"\x1b[{i+1};1H")
             if after is None:
                 chunks.append("\x1b[2K")
             else:
-                # Overwrite in place without blanking the row. Erase only
-                # the remainder, after the new text is already present.
                 chunks.extend((after, "\x1b[K"))
-            chunks.append("\r")
-        move(max(0, len(rows)-1))
-        chunks.append(suffix)
         self._rows = list(rows)
-        self._write("".join(chunks))
+        self._geometry = geometry
+        if chunks:
+            self._write("".join(chunks))
 
-    def _erase(self, suffix=""):
-        if self._rows:
-            self._paint([], suffix)
-        elif suffix:
-            self._write(suffix)
+    def _notice_line(self, message, width=None):
+        if width is not None:
+            message = message[:width]
+        prefix, sep, detail = message.partition(":")
+        status = (Status.FAILED if prefix == "ERROR" else
+                  Status.ACTION_REQUIRED if prefix in ("SECURITY", "WARNING", "ACTION REQUIRED") else
+                  Status.CANCELLED if prefix == "CANCELLED" else None)
+        return self._color(prefix, status) + sep + detail if status else message
+
+    def _history_line(self, entry, width=None):
+        if isinstance(entry, int):
+            # Permanent output must retain the complete stage name and timing,
+            # even in a narrow terminal (ordinary wrapping is safe there).
+            if width is None:
+                width = max(1, self.width()-1)
+                stage = self.stages[entry]
+                if width < len(stage.label) + 58:
+                    prefix = f" => [{entry+1:02d}/{len(self.stages):02d}] "
+                    return (prefix + stage.label + " " + self._color(stage.status.value, stage.status)
+                            + f" {stage.elapsed:.1f}s | total {stage.total:.1f}s")
+            return self._line(entry, width)
+        return self._notice_line(entry, width)
+
+    def close(self):
+        """Restore the original screen, then append each durable line once.
+
+        No cursor movement or erase is performed in the primary screen.
+        Also called before foreground authentication and on exceptional exits.
+        """
+        if self._screen:
+            self._screen = False
+            self._rows = []
+            self._geometry = None
+            self._write("\x1b[?25h\x1b[?1049l")
+        if self._printed < len(self._history):
+            lines = self._history[self._printed:]
+            self._write("".join(self._history_line(entry) + "\n" for entry in lines))
+            self._printed = len(self._history)
 
     def _step_line(self, label, status, width=None):
         prefix = "    => => "
@@ -228,26 +268,38 @@ class Progress:
         if not self.live or self.paused or self.active is None:
             return
         now = self.clock()
-        if not force and now-self._last_refresh < .2:
-            return
-        self._last_refresh = now
         width = max(1, self.width()-1)
         height = max(1, self.height())
-        budget = max(1, height-3)
+        geometry = (width, height)
+        if (not force and not self._resized and geometry == self._geometry
+                and now-self._last_refresh < .2):
+            return
+        self._last_refresh = now
+
+        # The current operation always has a row. Reserve room for the bar,
+        # recent committed stages and at least a few pending/substep rows.
+        header = [self._header[:width]] if height >= 4 else []
+        budget = height-len(header)
         rows = [self._line(self.active, width, now)]
-        if budget > 1:
-            step_budget = min(6, max(0, budget-2))
-            recent = list(self.steps.items())[-step_budget:] if step_budget else []
-            rows.extend(self._step_line(label, status, width) for label, status in recent)
+        if budget >= 2:
             pending = list(range(self.active+1, len(self.stages)))
-            remaining = max(0, budget-len(rows)-1)
+            reserve = min(len(self._history), max(0, budget-3))
+            remaining = max(0, budget-reserve-2)
+            step_budget = min(6, remaining, len(self.steps))
+            if step_budget:
+                rows.extend(self._step_line(label, status, width)
+                            for label, status in list(self.steps.items())[-step_budget:])
+            remaining -= step_budget
             if len(pending) > remaining and remaining:
                 rows.extend(self._line(i, width, now) for i in pending[:remaining-1])
                 rows.append(f"    ... {len(pending)-remaining+1} more pending"[:width])
             else:
                 rows.extend(self._line(i, width, now) for i in pending[:remaining])
             rows.append(self._bar(width, now))
-        self._paint(rows)
+        available = max(0, budget-len(rows))
+        history = self._history[-available:] if available else []
+        rows = header + [self._history_line(entry, width) for entry in history] + rows
+        self._paint(rows, geometry)
 
     def begin(self, index, phase=None):
         if self.stopped or self.active is not None or index != self.next_index or index >= len(self.stages):
@@ -294,9 +346,8 @@ class Progress:
 
     def pause(self):
         if self.live:
-            self._erase()
-            line = "    Authentication may be required (sudo)"
-            self._write(line[:max(1, self.width()-1)] + "\n")
+            self.close()
+            self._write("    Authentication may be required (sudo)\n")
         self.paused = True
 
     def resume(self):
@@ -304,33 +355,40 @@ class Progress:
         self.refresh(force=True)
 
     def notice(self, message):
-        # A persistent notice owns its own row; clear the preview and commit
-        # the notice before drawing a new preview below it.
-        prefix, sep, detail = message.partition(":")
-        status = (Status.FAILED if prefix == "ERROR" else
-                  Status.ACTION_REQUIRED if prefix in ("SECURITY", "WARNING", "ACTION REQUIRED") else
-                  Status.CANCELLED if prefix == "CANCELLED" else None)
-        line = self._color(prefix, status) + sep + detail if status else message
-        self._erase(line + "\n")
-        self.refresh(force=True)
+        if not self.live:
+            self._write(message + "\n")
+            return
+        self._history.append(message)
+        if self.paused or self.active is None:
+            self.close()
+        else:
+            self.refresh(force=True)
 
     def finish(self, status):
         if self.active is None or status not in COMPLETE + STOP:
             raise ValueError("Expected active stage and terminal status")
         index = self.active
         stage = self.stages[index]
-        stage.elapsed = max(0.0, self.clock() - stage.started)
+        now = self.clock()
+        stage.elapsed = max(0.0, now - stage.started)
+        stage.total = max(0.0, now - self.started)
         stage.status = status
         stage.phase = None
-        self._erase(self._line(index) + "\n")
+        if self.live:
+            self._history.append(index)
+        else:
+            self._write(self._line(index) + "\n")
         self.active = None
         self.steps.clear()
         self.next_index += 1
         self.stopped = status in STOP
+        if self.stopped or self.next_index == len(self.stages):
+            self.close()
 
     def summary(self):
         if self.active is not None or (not self.stopped and self.next_index != len(self.stages)):
             raise ValueError("Initialization is still in progress")
+        self.close()
         completed = sum(stage.status in COMPLETE for stage in self.stages)
         elapsed = max(0.0, self.clock() - self.started)
         self._write(f"[+] Finished {completed}/{len(self.stages)} stages in {elapsed:.1f}s\n")

@@ -593,57 +593,58 @@ def initialize(lock_fd, *, cancellation=None):
     cancellation = cancellation or Cancellation()
     progress = Progress(("System dependencies", "Docker images") + tuple(
         name for name, _, _ in STAGES))
-    runner = ChildRunner(progress, cancellation)
-    try:
-        prepare_prerequisites(runner, progress)
-        for index, (name, check, prepare) in enumerate(STAGES, 2):
+    with progress.watch_resize():
+        runner = ChildRunner(progress, cancellation)
+        try:
+            prepare_prerequisites(runner, progress)
+            for index, (name, check, prepare) in enumerate(STAGES, 2):
+                cancellation.check()
+                progress.begin(index, None if name == "vault-ui" else Phase.CHECK)
+                if name == "vault-ui":
+                    progress.finish(Status.SKIPPED)
+                    continue
+                if checked(name, first_run=True, runner=runner):
+                    progress.finish(Status.CACHED)
+                    continue
+                if prepare is None:
+                    runner.report_failure()
+                    raise UnifiedStartupError(f"{name} verification failed; inspect ./scripts/bootstrap.sh {check}")
+                if name == "vault":
+                    vault_seal_guard()
+                cancellation.check()
+                progress.phase(Phase.PREPARE)
+                if os.environ.get("FT_DEV_STAGE_TIMING") == "1":
+                    print(f"PREPARE: {name}", flush=True)
+                if not command(prepare, runner=runner, lock_fd=lock_fd):
+                    raise UnifiedStartupError(
+                        f"{name} preparation failed (exit {runner.last_returncode}); "
+                        f"inspect ./scripts/bootstrap.sh {check}"
+                    )
+                progress.phase(Phase.VERIFY)
+                if not checked(name, runner=runner):
+                    runner.report_failure()
+                    raise UnifiedStartupError(
+                        f"{name} verification failed (exit {runner.last_returncode}); "
+                        f"inspect ./scripts/bootstrap.sh {check}"
+                    )
+                progress.finish(Status.DONE)
             cancellation.check()
-            progress.begin(index, None if name == "vault-ui" else Phase.CHECK)
-            if name == "vault-ui":
-                progress.finish(Status.SKIPPED)
-                continue
-            if checked(name, first_run=True, runner=runner):
-                progress.finish(Status.CACHED)
-                continue
-            if prepare is None:
-                runner.report_failure()
-                raise UnifiedStartupError(f"{name} verification failed; inspect ./scripts/bootstrap.sh {check}")
-            if name == "vault":
-                vault_seal_guard()
-            cancellation.check()
-            progress.phase(Phase.PREPARE)
-            if os.environ.get("FT_DEV_STAGE_TIMING") == "1":
-                print(f"PREPARE: {name}", flush=True)
-            if not command(prepare, runner=runner, lock_fd=lock_fd):
-                raise UnifiedStartupError(
-                    f"{name} preparation failed (exit {runner.last_returncode}); "
-                    f"inspect ./scripts/bootstrap.sh {check}"
-                )
-            progress.phase(Phase.VERIFY)
-            if not checked(name, runner=runner):
-                runner.report_failure()
-                raise UnifiedStartupError(
-                    f"{name} verification failed (exit {runner.last_returncode}); "
-                    f"inspect ./scripts/bootstrap.sh {check}"
-                )
-            progress.finish(Status.DONE)
-        cancellation.check()
-    except SessionRefreshRequired:
-        progress.finish(Status.ACTION_REQUIRED)
+        except SessionRefreshRequired:
+            progress.finish(Status.ACTION_REQUIRED)
+            progress.summary()
+            raise
+        except InitializationCancelled:
+            if progress.active is not None:
+                progress.finish(Status.CANCELLED)
+                progress.summary()
+            raise
+        except (UnifiedStartupError, OSError, UnexpectedApproval):
+            if progress.active is not None:
+                progress.finish(Status.FAILED)
+                progress.summary()
+            raise
         progress.summary()
-        raise
-    except InitializationCancelled:
-        if progress.active is not None:
-            progress.finish(Status.CANCELLED)
-            progress.summary()
-        raise
-    except (UnifiedStartupError, OSError, UnexpectedApproval):
-        if progress.active is not None:
-            progress.finish(Status.FAILED)
-            progress.summary()
-        raise
-    progress.summary()
-    emit_result("UNIFIED INITIALIZATION READY", Status.DONE)
+        emit_result("UNIFIED INITIALIZATION READY", Status.DONE)
 
 
 def start():

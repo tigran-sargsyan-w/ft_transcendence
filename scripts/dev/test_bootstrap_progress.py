@@ -11,6 +11,28 @@ class Terminal(io.StringIO):
         return True
 
 
+def primary_output(log):
+    """Return bytes sent to the permanent screen, excluding alternate frames."""
+    import re
+    parts = re.split(r"(\x1b\[\?1049[hl])", log)
+    alternate = False
+    primary = []
+    for part in parts:
+        if part == "\x1b[?1049h":
+            if alternate:
+                raise AssertionError("nested alternate screen")
+            alternate = True
+        elif part == "\x1b[?1049l":
+            if not alternate:
+                raise AssertionError("alternate screen not active")
+            alternate = False
+        elif not alternate:
+            primary.append(part)
+    if alternate:
+        raise AssertionError("alternate screen left active")
+    return "".join(primary)
+
+
 class ProgressTests(unittest.TestCase):
     def setUp(self):
         self.now = 0.0
@@ -55,7 +77,8 @@ class ProgressTests(unittest.TestCase):
         progress.begin(1)
         progress.finish(Status.SKIPPED)
         log = output.getvalue()
-        self.assertIn("\x1b[2K", log)
+        self.assertIn("\x1b[?1049h", log)
+        self.assertIn("\x1b[?1049l", log)
         self.assertIn("\x1b[36mRUNNING\x1b[0m", log)
         self.assertIn("2.0s | total 2.0s", log)
         self.assertIn("\x1b[32m", log)
@@ -132,6 +155,7 @@ class ProgressTests(unittest.TestCase):
         progress.resume()
         progress.substep("Pulling image", Status.DONE)
         progress.finish(Status.DONE)
+        progress.close()
         self.assertEqual(progress.drawn, 0)
         self.assertEqual(progress.steps, {})
         self.assertIn("\x1b[32mDONE\x1b[0m", output.getvalue())
@@ -151,33 +175,7 @@ class ProgressTests(unittest.TestCase):
         progress.begin(1, Phase.CHECK)
         progress.finish(Status.CACHED)
         progress.summary()
-        # Minimal terminal interpretation of the renderer's exact CSI set.
-        rows, row, col = [""], 0, 0
-        for token in re.findall(r"\x1b\[[0-9;]*[A-Za-z]|[\s\S]", output.getvalue()):
-            if re.fullmatch(r"\x1b\[\d+A", token):
-                row = max(0, row - int(token[2:-1]))
-            elif re.fullmatch(r"\x1b\[\d+B", token):
-                row += int(token[2:-1])
-                while row >= len(rows):
-                    rows.append("")
-            elif token == "\x1b[2K":
-                rows[row] = ""
-            elif token == "\x1b[K":
-                rows[row] = rows[row][:col]
-            elif token.startswith("\x1b"):
-                continue
-            elif token == "\r":
-                col = 0
-            elif token == "\n":
-                row += 1
-                col = 0
-                if row == len(rows):
-                    rows.append("")
-            else:
-                line = rows[row].ljust(col)
-                rows[row] = line[:col] + token + line[col+1:]
-                col += 1
-        screen = "\n".join(rows)
+        screen = primary_output(output.getvalue())
         self.assertEqual(screen.count("[01/02]"), 1)
         self.assertEqual(screen.count("[02/02]"), 1)
         self.assertNotIn("Pulling image", screen)
@@ -207,35 +205,7 @@ class ProgressTests(unittest.TestCase):
             progress.finish(Status.CANCELLED if i == 16 else Status.DONE)
         progress.summary()
 
-        # A bounded viewport with scrollback. Cursor-up must not edit rows
-        # that have scrolled off screen; newline may extend the scrollback.
-        rows = ["" for _ in range(height)]
-        row = col = top = 0
-        for token in re.findall(r"\x1b\[[0-9;]*[A-Za-z]|[\s\S]", output.getvalue()):
-            if re.fullmatch(r"\x1b\[\d+A", token):
-                row = max(top, row-int(token[2:-1]))
-            elif re.fullmatch(r"\x1b\[\d+B", token):
-                row = min(top+height-1, row+int(token[2:-1]))
-            elif token == "\x1b[2K":
-                rows[row] = ""
-            elif token == "\x1b[K":
-                rows[row] = rows[row][:col]
-            elif token.startswith("\x1b"):
-                continue
-            elif token == "\r":
-                col = 0
-            elif token == "\n":
-                row += 1
-                col = 0
-                if row >= top+height:
-                    top += 1
-                    rows.append("")
-            else:
-                self.assertLess(col, width-1, "unexpected wrap")
-                line = rows[row].ljust(col)
-                rows[row] = line[:col]+token+line[col+1:]
-                col += 1
-        screen = "\n".join(rows)
+        screen = primary_output(output.getvalue())
         for i in range(1, 18):
             self.assertEqual(screen.count(f"[{i:02d}/21]"), 1)
         self.assertNotIn("[18/21]", screen)
@@ -271,7 +241,7 @@ class ProgressTests(unittest.TestCase):
                             clock=lambda: self.now, env={"TERM": "xterm"},
                             terminal_width=lambda: width, terminal_height=lambda: 12)
         progress.begin(0, Phase.CHECK)
-        active, pending = progress._rows[:2]
+        active, pending = progress._rows[1:3]
         self.assertEqual(active.index("\x1b["), pending.index("\x1b["))
         self.assertIn("\x1b[36mRUNNING\x1b[0m (check)", active)
         strip = lambda value: re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", value)
@@ -281,6 +251,75 @@ class ProgressTests(unittest.TestCase):
         self.now = 1
         progress.refresh()
         self.assertTrue(all(len(strip(row)) <= 64 for row in progress._rows))
+
+    def test_resize_redraws_only_isolated_screen_and_preserves_history(self):
+        import re
+        output = Terminal()
+        width, height = 120, 32
+        progress = Progress(("Vault", "PostgreSQL", "Backend", "Frontend"),
+                            stream=output, clock=lambda: self.now,
+                            env={"TERM": "xterm"}, terminal_width=lambda: width,
+                            terminal_height=lambda: height)
+        with progress.watch_resize():
+            progress.begin(0, Phase.CHECK)
+            self.now = 1
+            progress.finish(Status.CACHED)
+            progress.begin(1, Phase.PREPARE)
+            progress.substep("Verify identity", Status.RUNNING)
+            self.now = 2
+            progress.refresh()
+            for width, height in ((40, 7), (12, 2), (150, 45)):
+                before = len(output.getvalue())
+                progress.refresh()  # geometry changes bypass the frame throttle
+                delta = output.getvalue()[before:]
+                self.assertIn("\x1b[2J", delta)
+                self.assertLessEqual(len(progress._rows), height)
+                for row in progress._rows:
+                    self.assertLessEqual(len(re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", row)), width-1)
+            # Simulate a resize and return to original dimensions between polls.
+            import signal
+            signal.getsignal(signal.SIGWINCH)(signal.SIGWINCH, None)
+            before = len(output.getvalue())
+            progress.refresh()
+            self.assertIn("\x1b[2J", output.getvalue()[before:])
+            progress.notice("SECURITY: Preserve recovery material.")
+            progress.finish(Status.CANCELLED)
+            progress.summary()
+        screen = primary_output(output.getvalue())
+        self.assertEqual(screen.count("[01/04]"), 1)
+        self.assertEqual(screen.count("[02/04]"), 1)
+        self.assertIn("CACHED", screen)
+        self.assertIn("total 1.0s", screen)
+        self.assertIn("CANCELLED", screen)
+        self.assertIn("SECURITY:", screen)
+        self.assertNotIn("PENDING", screen)
+        self.assertNotIn("Verify identity", screen)
+        self.assertNotIn("\x1b[2J", screen)
+        self.assertNotIn("\x1b[2K", screen)
+
+    def test_exception_restores_screen_and_signal_handler(self):
+        import signal
+        old = signal.getsignal(signal.SIGWINCH)
+        output = Terminal()
+        progress = self.progress(output)
+        with self.assertRaises(RuntimeError):
+            with progress.watch_resize():
+                progress.begin(0, Phase.CHECK)
+                progress.finish(Status.CACHED)
+                progress.begin(1, Phase.PREPARE)
+                raise RuntimeError("synthetic failure")
+        self.assertIs(signal.getsignal(signal.SIGWINCH), old)
+        screen = primary_output(output.getvalue())
+        self.assertEqual(screen.count("[01/02]"), 1)
+        self.assertNotIn("RUNNING", screen)
+        self.assertIn("\x1b[?25h", output.getvalue())
+
+    def test_unsupported_terminal_uses_plain_output(self):
+        output = Terminal()
+        progress = self.progress(output, {"TERM": "linux"})
+        progress.begin(0, Phase.CHECK)
+        progress.finish(Status.CACHED)
+        self.assertNotIn("\x1b", output.getvalue())
 
     def test_phase_replaces_previous_transient_substeps(self):
         progress = self.progress(Terminal())
