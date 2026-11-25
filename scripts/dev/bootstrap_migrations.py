@@ -291,8 +291,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.mode == "plan":
-            if pg.main(["plan"]) != 0:
-                raise MigrationBootstrapError("PostgreSQL inventory unavailable")
+            with plan_events.nested():
+                if pg.main(["plan"]) != 0:
+                    raise MigrationBootstrapError("PostgreSQL inventory unavailable")
             item = pg.exact_container(pg.NAME)
             if item is None or not (item.get("State") or {}).get("Running"):
                 plan_events.report("Prisma migrations not inspectable", "UNVERIFIED")

@@ -233,10 +233,6 @@ def helper_plan(name, session):
             raise
     if code:
         raise PlanError(f"Plan helper failed: {name}; inspect its standalone plan with the trusted TLS path", code)
-    # Roles/migrations already call the PostgreSQL plan before their own
-    # observation. Their final observation describes the actual target.
-    if name in ("postgres_roles", "migrations") and statuses:
-        return statuses[-1]
     return summarize(statuses)
 
 

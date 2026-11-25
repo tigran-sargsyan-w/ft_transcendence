@@ -1,6 +1,6 @@
 """Offline plan presentation and command-boundary tests.
 
-Only the two metadata-free plan helpers run as real children. Docker, TLS
+Only a metadata-free plan helper runs as a real child. Docker, TLS
 commands and all other infrastructure operations are mocked.
 """
 from contextlib import redirect_stdout, redirect_stderr
@@ -205,6 +205,26 @@ class PlanProgressTests(unittest.TestCase):
                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             self.assertNotEqual(nginx.main(["plan"]), 0)
         self.assertEqual(sink.getvalue(), "")
+
+    def test_nested_prerequisite_cannot_be_mistaken_for_target_status(self):
+        sink = io.StringIO()
+        with patch.object(events, "_sink", sink):
+            with events.nested():
+                events.report("PostgreSQL", "MISSING")
+            events.report("Roles not inspectable", "UNVERIFIED")
+        rows = [plan.decode_observation(line) for line in sink.getvalue().splitlines()]
+        self.assertEqual(rows[0], ("PostgreSQL", Status.MISSING, False))
+        self.assertEqual(rows[1], ("Roles not inspectable", Status.UNVERIFIED, True))
+
+    def test_missing_primary_observation_is_refused(self):
+        child = MagicMock()
+        child.__enter__.return_value = child
+        child.stdout = iter([json.dumps(["PostgreSQL", "EXISTS", False])])
+        child.wait.return_value = 0
+        with patch.object(plan.subprocess, "Popen", return_value=child), \
+                redirect_stdout(io.StringIO()), self.assertRaisesRegex(
+                    plan.PlanError, "no reviewed observations"):
+            plan.helper_plan("postgres_roles", None)
 
     def test_decoder_rejects_unreviewed_data(self):
         for row in (["\x1b[31m", "READY", True], ["Valid", "INVALID", True],

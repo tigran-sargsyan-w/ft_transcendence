@@ -3,7 +3,7 @@ from contextlib import redirect_stdout, redirect_stderr
 import io
 import os
 import unittest
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 import verify_startup_idempotency as acceptance
 from test_verify_startup_idempotency import fixture

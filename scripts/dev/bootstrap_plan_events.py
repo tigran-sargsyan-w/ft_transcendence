@@ -1,16 +1,30 @@
 """Typed, opt-in plan observations; standalone helpers keep legacy output."""
+from contextlib import contextmanager
 import json
 
 _sink = None
+_primary = True
 STATUSES = frozenset(("EXISTS", "MISSING", "READY", "UNVERIFIED",
                       "OPTIONAL", "NOT_READY", "ACTION_REQUIRED"))
+
+
+@contextmanager
+def nested():
+    """Observations of existing nested prerequisite plans are not target results."""
+    global _primary
+    previous = _primary
+    _primary = False
+    try:
+        yield
+    finally:
+        _primary = previous
 
 
 def report(label, status, *, primary=True):
     if _sink is not None:
         if status not in STATUSES:
             raise ValueError("Unexpected plan observation")
-        _sink.write(json.dumps([label, status, primary]) + "\n")
+        _sink.write(json.dumps([label, status, primary and _primary]) + "\n")
         _sink.flush()
 
 
