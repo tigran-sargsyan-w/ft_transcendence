@@ -54,7 +54,7 @@ class MakefileStartupContractTests(unittest.TestCase):
                              ("vault-ui-disable", "disable"),
                              ("vault-ui-status", "status")):
             self.assertEqual(self.dry_run(target),
-                             f"python3 scripts/dev/bootstrap_vault_ui.py {mode}")
+                             f"python3 scripts/dev/bootstrap_vault_ui.py {mode} --progress")
 
     def test_documented_links_and_commands(self):
         readme = (ROOT / "README.md").read_text()

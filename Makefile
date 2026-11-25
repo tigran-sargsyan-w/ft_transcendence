@@ -36,13 +36,13 @@ acceptance:
 
 # Administrative Vault UI only. Never modifies Vault, DB or app containers.
 vault-ui-enable:
-	$(PYTHON) scripts/dev/bootstrap_vault_ui.py enable
+	$(PYTHON) scripts/dev/bootstrap_vault_ui.py enable --progress
 
 vault-ui-disable:
-	$(PYTHON) scripts/dev/bootstrap_vault_ui.py disable
+	$(PYTHON) scripts/dev/bootstrap_vault_ui.py disable --progress
 
 vault-ui-status:
-	$(PYTHON) scripts/dev/bootstrap_vault_ui.py status
+	$(PYTHON) scripts/dev/bootstrap_vault_ui.py status --progress
 
 # Legacy host-only helpers (not a substitute for --initialize).
 setup:
