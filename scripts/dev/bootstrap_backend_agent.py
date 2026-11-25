@@ -6,6 +6,11 @@ Existing AppRole identities and agent containers are always preserved. A
 healthy agent must render the backend DSN for the unprivileged backend group.
 """
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import fcntl
 import os
@@ -253,9 +258,11 @@ def main(argv=None):
         if args.mode == "plan":
             item = inspect_agent()
             if item is None:
+                plan_events.container("Backend Vault Agent", item)
                 print("TODO: Backend Vault Agent not created (read-only)")
             else:
                 verify_identity(item)
+                plan_events.container("Backend Vault Agent", item)
                 state = item.get("State") or {}
                 health = (state.get("Health") or {}).get("Status", "none")
                 print(f"EXISTS: Backend Vault Agent ({state.get('Status')}, health={health})")

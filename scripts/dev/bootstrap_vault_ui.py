@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Guarded local Vault Web UI gateway bootstrap."""
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import json
 import os
@@ -485,9 +490,11 @@ def main():
             compose()
             item = inspect()
             if item is None:
+                plan_events.container("Vault UI gateway", item, optional=True)
                 print("TODO: Vault UI gateway not created (read-only)")
             else:
                 verify_identity(item)
+                plan_events.container("Vault UI gateway", item, optional=True)
                 print("EXISTS: Vault UI gateway (read-only)")
             return 0
 

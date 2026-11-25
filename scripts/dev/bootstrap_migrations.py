@@ -8,6 +8,11 @@ printing. The migration file checksums and PostgreSQL ACLs are inspected both
 before and after the workflow; unknown migration history fails closed.
 """
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import fcntl
 import hashlib
@@ -290,10 +295,13 @@ def main(argv=None):
                 raise MigrationBootstrapError("PostgreSQL inventory unavailable")
             item = pg.exact_container(pg.NAME)
             if item is None or not (item.get("State") or {}).get("Running"):
+                plan_events.report("Prisma migrations not inspectable", "UNVERIFIED")
                 print("TODO: Prisma migrations not inspectable (read-only)")
             else:
                 pg.verify_identity(item)
                 state = migration_state()
+                plan_events.report("Prisma migration and grant metadata",
+                                   "READY" if state == "ready" else "NOT_READY")
                 print("EXISTS: Prisma migrations and grants (read-only)" if state == "ready"
                       else "TODO: Prisma migrations/grants need apply (read-only)")
             print("RESULT: PRISMA MIGRATIONS PLAN COMPLETE (read-only)")

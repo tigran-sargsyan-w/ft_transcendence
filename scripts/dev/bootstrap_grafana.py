@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Trusted Grafana startup without recreation or credential rotation."""
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import fcntl
 import json
@@ -448,9 +453,11 @@ def main(argv=None):
             item = container()
 
             if item is None:
+                plan_events.container("Grafana", item)
                 print("TODO: Grafana not created (read-only)")
             else:
                 verify_identity(item)
+                plan_events.container("Grafana", item)
                 print("EXISTS: Trusted Grafana container")
 
             return 0

@@ -6,6 +6,11 @@ an existing AppRole credential. Uses the existing validated provisioning
 workflow and its migration lock. Prisma migrations are a separate phase.
 """
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import fcntl
 import os
@@ -202,12 +207,15 @@ def main(argv=None):
                 raise RolesBootstrapError("PostgreSQL container inventory failed")
             item = pg.exact_container(pg.NAME)
             if item is None or not (item.get("State") or {}).get("Running"):
+                plan_events.report("PostgreSQL roles not inspectable", "UNVERIFIED")
                 print("TODO: PostgreSQL roles not inspectable (read-only)")
             else:
                 pg.verify_identity(item)
                 if role_state() == "ready":
+                    plan_events.report("PostgreSQL role and grant metadata", "READY")
                     print("EXISTS: PostgreSQL application and migrator roles (read-only)")
                 else:
+                    plan_events.report("PostgreSQL roles require provisioning", "NOT_READY")
                     print("TODO: PostgreSQL roles require provisioning (read-only)")
             print("RESULT: POSTGRESQL ROLES PLAN COMPLETE (read-only)")
             return 0

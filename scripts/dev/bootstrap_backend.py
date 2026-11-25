@@ -7,6 +7,11 @@ containers are identity-verified, retained and, if stopped, restarted without
 recreation. No other application service is started; no credentials are read.
 """
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import fcntl
 import subprocess
@@ -214,9 +219,11 @@ def main(argv=None):
         if args.mode == "plan":
             item = container()
             if item is None:
+                plan_events.container("NestJS backend", item)
                 print("TODO: NestJS backend not created (read-only)")
             else:
                 verify_identity(item)
+                plan_events.container("NestJS backend", item)
                 state = item.get("State") or {}
                 health = (state.get("Health") or {}).get("Status", "none")
                 print(f"EXISTS: NestJS backend ({state.get('Status')}, health={health})")

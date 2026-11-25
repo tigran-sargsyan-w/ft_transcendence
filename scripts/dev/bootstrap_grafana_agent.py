@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Prepare and verify only the dedicated Grafana Vault Agent."""
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import fcntl
 import sys
@@ -367,9 +372,11 @@ def main(argv=None):
             item = container()
 
             if item is None:
+                plan_events.container("Grafana Vault Agent", item)
                 print("TODO: Grafana Vault Agent not created")
             else:
                 verify_identity(item)
+                plan_events.container("Grafana Vault Agent", item)
                 print("EXISTS: Trusted Grafana Vault Agent")
 
             return 0

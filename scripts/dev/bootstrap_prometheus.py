@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Trusted Prometheus startup: no changes to existing application services."""
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import fcntl
 import sys
@@ -330,9 +335,11 @@ def main(argv=None):
         if args.mode == "plan":
             item = container()
             if item is None:
+                plan_events.container("Prometheus", item)
                 print("TODO: Prometheus not created (read-only)")
             else:
                 verify_identity(item)
+                plan_events.container("Prometheus", item)
                 print(f"EXISTS: Prometheus ({(item.get('State') or {}).get('Status')})")
             return 0
 

@@ -5,6 +5,11 @@ Read-only verification. Never starts or recreates containers, changes
 configuration, installs certificates or retrieves authentication secrets.
 """
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import json
 import sys
@@ -234,8 +239,11 @@ def main(argv=None):
 
     try:
         if args.mode == "plan":
+            plan_events.report("Nginx gateway and WAF policy check planned", "UNVERIFIED")
             print("PLAN: Verify existing Nginx gateway and WAF policy.")
+            plan_events.report("Grafana HTTPS routing and health check planned", "UNVERIFIED")
             print("PLAN: Verify Grafana HTTPS routing and health.")
+            plan_events.report("Anonymous access rejection and WAF blocking check planned", "UNVERIFIED")
             print("PLAN: Verify anonymous access rejection and WAF blocking.")
             print("RESULT: GRAFANA HTTPS PLAN COMPLETE (read-only)")
             return 0

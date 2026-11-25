@@ -12,6 +12,11 @@ Never sends credentials as command arguments, writes secrets to logs, or
 reinitializes an existing Vault. Never uses Docker Compose down or -v.
 """
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import json
 import os
@@ -297,15 +302,22 @@ def main(argv=None):
         item = inspect_container()
         if args.mode == "plan":
             if item is None:
+                plan_events.container("Vault container", item)
                 print("TODO: Vault container not created (read-only)")
                 if RECOVERY.exists():
+                    plan_events.report("Recovery material exists but Vault container is missing",
+                                       "ACTION_REQUIRED", primary=False)
                     print("WARNING: Recovery material exists but Vault container is missing")
             else:
                 verify_identity(item)
+                plan_events.container("Vault container", item)
                 print(f"EXISTS: Vault container ({(item.get('State') or {}).get('Status')})")
                 if (item.get("State") or {}).get("Running"):
                     v = status(tries=1)
                     verify_topology(v, require_ready=False)
+                    plan_events.report("Raft topology", "READY", primary=False)
+                    plan_events.report("Vault initialized", "READY" if v["initialized"] else "NOT_READY", primary=False)
+                    plan_events.report("Vault unsealed", "READY" if not v["sealed"] else "NOT_READY", primary=False)
                     print(f"Vault initialized: {v['initialized']}; sealed: {v['sealed']}")
             print("RESULT: VAULT PLAN COMPLETE (read-only)")
             return 0

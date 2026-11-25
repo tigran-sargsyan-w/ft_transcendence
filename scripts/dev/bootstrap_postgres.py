@@ -10,6 +10,11 @@ No PostgreSQL migrations, application roles, or Vault secrets are modified.
 Existing clusters are never reinitialized, and ambiguous data is refused.
 """
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import fcntl
 import json
@@ -300,9 +305,11 @@ def main(argv=None):
         item = exact_container(NAME)
         if args.mode == "plan":
             if item is None:
+                plan_events.container("PostgreSQL Compose container", item)
                 print("TODO: PostgreSQL Compose container not created (read-only)")
             else:
                 verify_identity(item)
+                plan_events.container("PostgreSQL Compose container", item)
                 print(f"EXISTS: PostgreSQL Compose container ({(item.get('State') or {}).get('Status')})")
             print("RESULT: POSTGRESQL PLAN COMPLETE (read-only)")
             return 0

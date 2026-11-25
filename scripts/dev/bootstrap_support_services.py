@@ -7,6 +7,11 @@ All published health checks are executed inside trusted running containers;
 no Docker socket, service port or secret is exposed on the host.
 """
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import fcntl
 import subprocess
@@ -272,9 +277,11 @@ def main(argv=None):
             for service in SERVICES:
                 item = inspect(service)
                 if item is None:
+                    plan_events.container(service, item)
                     print(f"TODO: {service} not created (read-only)")
                 else:
                     verify_identity(service, item)
+                    plan_events.container(service, item)
                     state = item.get("State") or {}
                     print(f"EXISTS: {service} ({state.get('Status')})")
             print("RESULT: SUPPORT SERVICES PLAN COMPLETE (read-only)")
