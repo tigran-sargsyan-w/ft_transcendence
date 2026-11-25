@@ -128,9 +128,71 @@ entry point. Do not share unreviewed output or recovery material.
 The renderer pauses for manual Shamir unseal; Vault CLI retains the real
 controlling terminal and hidden prompts. The timer thread is presentation
 only and is joined at exit. The original V3 visual limitation during
-terminal resize remains; keep terminal dimensions stable. The separate
-plan/acceptance and Vault UI presentation follow-ups are #166 and #167;
-their behavior is not changed by #165.
+terminal resize remains; keep terminal dimensions stable. Plan and acceptance presentation are the separate #166 follow-up described
+below. Vault UI command presentation remains the separate #167 scope.
+
+#### Plan and acceptance progress (Issue #166)
+
+`make plan` enters the same unified Python dispatcher after the existing
+shell/platform/TLS guards, then runs the dedicated read-only
+`scripts/dev/bootstrap_plan.py` workflow. It retains the original one
+dependency check and inspection sequence. The host and preliminary Docker
+inventory probes have Python equivalents of the former shell plan; the
+shell's host preparation/check functions remain unchanged for other
+commands. Each existing specialized helper still runs in its own process,
+in plan mode only. Explicit, reviewed observations travel through a
+dedicated structured pipe; ordinary child stdout/stderr are not displayed.
+
+The Full profile distinguishes plan outcomes from runtime readiness:
+
+- EXISTS: the inspected resource exists; specialized plan helpers also
+  verify the identity required by their existing plan branch. Preliminary
+  inventory confirms presence only.
+- MISSING: absence was confirmed by the existing inspection.
+- UNVERIFIED: readiness or authenticated inspection was not performed,
+  or preliminary inventory could not establish the result.
+- OPTIONAL: the optional component was not present; its enabled intent
+  or HTTPS readiness is not established by this plan.
+- READY: the specific represented check actually passed (for example,
+  a role/grant metadata check); it is not a whole-stack assertion.
+- NOT READY: a reviewed, incomplete planning outcome.
+- FAILED: the inspection refused unsafe state or failed; later stages stop.
+
+Only plan accepts these nonfatal planning outcomes as completed stages.
+There are 21 stages, and a completed plan is not a healthy stack.
+No additional readiness probe, installation, resource creation, migration,
+credential read or lifecycle repair is added for presentation.
+
+```sh
+make plan
+FT_DEV_BOOTSTRAP_VERBOSE=1 make plan
+NO_COLOR=1 make plan
+FT_DEV_STAGE_TIMING=1 make plan
+```
+
+Interactive output keeps the V3 active-stage preview and compact final
+rows. Plain/redirected output preserves reviewed inventory details;
+verbose output also shows nested results. For a failed specialized
+helper, use its named standalone **plan** entry on the same trusted
+development host, with the existing TLS state path, for local diagnostics:
+
+```sh
+FT_DEV_TLS_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/transcendence/dev/tls" \
+  python3 scripts/dev/bootstrap_nginx.py plan
+```
+
+Never share raw Docker inspect data, recovery material or credentials.
+The overall success marker remains
+`RESULT: BOOTSTRAP PLAN COMPLETE (read-only)`; a failed operation returns
+nonzero and does not print it.
+
+`make acceptance` uses the same Full profile with the healthy baseline
+and one stage per guarded startup attempt (four stages for three runs).
+It compares the existing inventory both before and after the health
+check. Child startup/health/initialize output remains suppressed, so the
+acceptance parent alone owns the terminal. See
+[the acceptance guide](dev-startup-idempotency.md) for the modes,
+boundaries and validation procedure.
 
 #### Issue #165 acceptance (2026-11-24)
 
