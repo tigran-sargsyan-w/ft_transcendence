@@ -203,54 +203,21 @@ host_check() {
   (( missing == 0 ))
 }
 
-inventory_docker() {
-  say "=== Existing Docker resources (read-only) ==="
-  local found=0 label item
-  for item in \
-    transcendence-vault-dev_vault_data \
-    transcendence-vault-dev_backend_agent_auth \
-    transcendence-vault-dev_backend_rendered \
-    transcendence-app-dev_postgres_data \
-    transcendence-app-dev_prometheus_data \
-    transcendence-app-dev_grafana_data \
-    transcendence-app-dev_grafana_vault_auth \
-    transcendence-app-dev_grafana_vault_rendered \
-    transcendence-app-dev_migrator_vault_auth \
-    transcendence-app-dev_migrator_vault_rendered \
-    transcendence-app-dev_postgres_provisioner_vault_auth \
-    transcendence-app-dev_postgres_provisioner_rendered; do
-    if docker volume inspect "$item" >/dev/null 2>&1; then
-      say "EXISTS: volume $item"
-      found=1
-    fi
-  done
-  for item in \
-    transcendence-vault-dev_vault_private \
-    transcendence-app-dev_default \
-    transcendence-app-dev_collector_control; do
-    if docker network inspect "$item" >/dev/null 2>&1; then
-      say "EXISTS: network $item"
-      found=1
-    fi
-  done
-  # Never print environment variables, mounts or secret content.
-  for label in transcendence-app-dev transcendence-vault-dev; do
-    if [[ -n $(docker ps -aq --filter "label=com.docker.compose.project=$label") ]]; then
-      say "EXISTS: containers owned by $label"
-      found=1
-    fi
-  done
-  if (( found == 0 )); then
-    say "PASS: No previously managed runtime resources found"
-  else
-    say "INFO: Existing runtime resources detected; later provisioning must inspect them before changes"
-  fi
-}
-
 # Initialize owns the complete lifecycle (including packages and images).
 # exec keeps the orchestrator as the direct child of make.
 if [[ "$MODE" == --initialize ]]; then
   exec python3 scripts/dev/bootstrap_unified.py initialize
+fi
+
+# Plan uses the same Python orchestration entry after the existing shell guards.
+# Keep the original single prerequisite check inside the plan presentation.
+if [[ "$MODE" == --plan ]]; then
+  if ! command -v python3 >/dev/null 2>&1; then
+    ./scripts/install-deps.sh --check || fail "Dependencies not ready; use make initialize on a fresh VM"
+    echo "ERROR: Python 3 unavailable" >&2
+    exit 127
+  fi
+  exec python3 scripts/dev/bootstrap_unified.py plan --shell-entry
 fi
 
 # The existing read-only dependency check is presented by the routine CLI
@@ -297,33 +264,6 @@ case "$MODE" in
   --orchestrator-preflight)
     # Internal read-only entry: all standard shell guards above still run.
     say "RESULT: ORCHESTRATOR PREFLIGHT READY (read-only)"
-    ;;
-  --plan)
-    if host_check; then
-      say "RESULT: HOST PREPARATION ALREADY READY"
-    else
-      say "RESULT: HOST PREPARATION NEEDED"
-    fi
-    inventory_docker
-    python3 scripts/dev/bootstrap_resources.py plan
-    python3 scripts/dev/bootstrap_vault.py plan
-    python3 scripts/dev/bootstrap_vault_ui.py plan
-    say "INFO: Vault config read-only check is available via --check-vault-config"
-    python3 scripts/dev/bootstrap_vault_secrets.py plan
-    python3 scripts/dev/bootstrap_postgres.py plan
-    python3 scripts/dev/bootstrap_postgres_roles.py plan
-    python3 scripts/dev/bootstrap_migrations.py plan
-    python3 scripts/dev/bootstrap_backend_agent.py plan
-    python3 scripts/dev/bootstrap_backend.py plan
-    python3 scripts/dev/bootstrap_support_services.py plan
-    python3 scripts/dev/bootstrap_frontend.py plan
-    python3 scripts/dev/bootstrap_nginx.py plan
-    python3 scripts/dev/bootstrap_prometheus.py plan
-    python3 scripts/dev/bootstrap_grafana_secrets.py plan
-    python3 scripts/dev/bootstrap_grafana_agent.py plan
-    python3 scripts/dev/bootstrap_grafana.py plan
-    python3 scripts/dev/bootstrap_grafana_https.py plan
-    say "RESULT: BOOTSTRAP PLAN COMPLETE (read-only)"
     ;;
   --check-host)
     if host_check; then

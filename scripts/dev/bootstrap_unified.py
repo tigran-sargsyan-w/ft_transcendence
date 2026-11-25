@@ -4,6 +4,7 @@
 initialize: confirmation-free guarded development provisioning.
 start: resume ONLY existing, verified containers after Vault is unsealed.
 check: read-only validation of the entire already-running stack.
+plan: read-only inventory without extra readiness probes or provisioning.
 recover: resume a known Vault container, prompt for manual Shamir shares,
          then resume existing application containers without provisioning.
 
@@ -1053,7 +1054,7 @@ def routine(mode, *, shell_entry=False):
 
 def main(argv=None, *, render=False):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("initialize", "start", "check", "recover", "health-report"))
+    parser.add_argument("mode", choices=("initialize", "start", "check", "recover", "health-report", "plan"))
     parser.add_argument("--shell-entry", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.shell_entry and args.mode == "initialize":
@@ -1061,6 +1062,16 @@ def main(argv=None, *, render=False):
     try:
         if os.geteuid() == 0:
             raise UnifiedStartupError("Run as an ordinary user, not with sudo")
+        if args.mode == "plan":
+            if not args.shell_entry:
+                # Direct Python invocation still enters the standard shell guards.
+                code = subprocess.run([str(BOOTSTRAP), "--plan"], cwd=ROOT, check=False).returncode
+                return code if code >= 0 else 128 - code
+            if __package__:
+                from . import bootstrap_plan
+            else:
+                import bootstrap_plan
+            return bootstrap_plan.main(render=render)
         if args.mode == "initialize":
             # Do not mutate Windows trust or a remote Docker daemon.
             import platform
