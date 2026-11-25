@@ -10,9 +10,9 @@ from dataclasses import dataclass
 from threading import Event, RLock, Thread
 
 if __package__:
-    from .bootstrap_progress import Phase, Progress, ProgressProfile, Status, emit_result
+    from .bootstrap_progress import Phase, Progress, Status, emit_result
 else:
-    from bootstrap_progress import Phase, Progress, ProgressProfile, Status, emit_result
+    from bootstrap_progress import Phase, Progress, Status, emit_result
 
 
 _current = ContextVar("bootstrap_cli_presentation", default=None)
@@ -24,9 +24,8 @@ class Outcome:
 
 
 class Presentation:
-    def __init__(self, labels, header, *, profile=ProgressProfile.FULL,
-                 allow_not_ready=False, **kwargs):
-        self.progress = Progress(labels, header=header, profile=profile,
+    def __init__(self, labels, header, *, allow_not_ready=False, **kwargs):
+        self.progress = Progress(labels, header=header,
                                  allow_not_ready=allow_not_ready, **kwargs)
         self.lock = RLock()
         self.done = Event()
