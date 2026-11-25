@@ -18,6 +18,8 @@ import fcntl
 import os
 from pathlib import Path
 import stat
+import signal
+import re
 import subprocess
 import sys
 import time
@@ -67,6 +69,8 @@ READ_ONLY_ATTEMPTS = 3
 READ_ONLY_RETRY_DELAY = 1
 RECOVERY_AGENT_WAIT = 60
 RECOVERY_AGENT_POLL = 2
+RECOVERY_NGINX_WAIT = 60
+RECOVERY_NGINX_POLL = 2
 
 
 
@@ -489,6 +493,85 @@ def wait_recovery_backend_agent(targets):
     raise UnifiedStartupError("Backend-agent health wait expired; inspect --check-backend-agent; no restart attempted")
 
 
+def recovery_nginx_probe(expected_id, timeout):
+    """Bound the complete read-only child probe, including dependency checks.
+
+    Isolate the process group so timeout or Ctrl+C can stop the local probe
+    and its subprocesses. Never capture or forward child output.
+    """
+    tls = Path(os.environ.get(
+        "XDG_STATE_HOME", str(Path.home() / ".local/state")
+    )) / "transcendence/dev/tls"
+    argv = [sys.executable, str(ROOT / "scripts/dev/bootstrap_nginx.py"),
+            "check-recovery", "--expected-id", expected_id]
+    try:
+        child = subprocess.Popen(
+            argv, cwd=ROOT, env={**os.environ, "FT_DEV_TLS_DIR": str(tls)},
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, start_new_session=True,
+        )
+    except OSError:
+        raise UnifiedStartupError("Cannot execute trusted Nginx recovery probe") from None
+    try:
+        return child.wait(timeout=timeout)
+    except (subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        child.wait()
+        if isinstance(exc, KeyboardInterrupt):
+            raise
+        raise UnifiedStartupError(
+            "Nginx recovery readiness budget expired; inspect --check-nginx; no restart attempted"
+        ) from None
+
+
+def wait_recovery_nginx(targets):
+    """Extra bounded checks only for a verified running gateway in recovery."""
+    import bootstrap_nginx as nginx
+
+    if len(targets) != 1:
+        raise UnifiedStartupError("Unexpected Nginx recovery inventory")
+    name, expected_id, _, state = targets[0]
+    if (name != nginx.NAME or state != "running"
+            or not isinstance(expected_id, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", expected_id)):
+        raise UnifiedStartupError("Unexpected Nginx recovery target")
+
+    deadline = time.monotonic() + RECOVERY_NGINX_WAIT
+    routes = {code: path for path, code in nginx.RECOVERY_502.items()}
+    attempts = RECOVERY_NGINX_WAIT // RECOVERY_NGINX_POLL + 1
+    for attempt in range(attempts):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        with cli.step(f"Recovery Nginx HTTPS probe {attempt + 1}") as outcome:
+            code = recovery_nginx_probe(expected_id, remaining)
+            if time.monotonic() >= deadline:
+                raise UnifiedStartupError(
+                    "Nginx recovery readiness budget expired; inspect --check-nginx; no restart attempted"
+                )
+            if code == 0:
+                return
+            if code not in routes:
+                raise UnifiedStartupError(
+                    "Nginx recovery check failed outside retryable HTTP 502; "
+                    "inspect --check-nginx; no restart attempted"
+                )
+            outcome.status = Status.NOT_READY
+        # Only the fixed status/route contract is observable, never child text.
+        cli.notice(f"WAIT: Nginx HTTPS {routes[code]} returned HTTP 502 "
+                   "(bounded recovery readiness)")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or attempt + 1 == attempts:
+            break
+        time.sleep(min(RECOVERY_NGINX_POLL, remaining))
+    raise UnifiedStartupError(
+        "Nginx recovery readiness budget expired; inspect --check-nginx; no restart attempted"
+    )
+
+
 def resume(name, *, recovery=False):
     if observed_check(name):
         cli.legacy(f"KEEP: {name} ready")
@@ -498,10 +581,16 @@ def resume(name, *, recovery=False):
         targets = guard_resume(name)
     except RunningNotReady as exc:
         cli.substep("Inspect trusted " + name + " containers", Status.DONE)
-        if not recovery or name != "backend-agent":
+        if not recovery:
             raise
-        with cli.step("Wait for trusted backend-agent health"):
-            wait_recovery_backend_agent(exc.targets)
+        if name == "backend-agent":
+            with cli.step("Wait for trusted backend-agent health"):
+                wait_recovery_backend_agent(exc.targets)
+        elif name == "nginx":
+            with cli.step("Wait for trusted Nginx HTTPS readiness"):
+                wait_recovery_nginx(exc.targets)
+        else:
+            raise
         return
     except UnifiedStartupError:
         cli.substep("Inspect trusted " + name + " containers", Status.FAILED)
@@ -792,7 +881,7 @@ def start(*, recovery=False):
                 if name == "vault":
                     require(name)
                 elif name in RESUMABLE:
-                    if recovery and name == "backend-agent":
+                    if recovery and name in ("backend-agent", "nginx"):
                         resume(name, recovery=True)
                     else:
                         resume(name)
