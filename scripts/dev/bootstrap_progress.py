@@ -26,11 +26,6 @@ class Status(Enum):
     CANCELLED = "CANCELLED"
 
 
-class ProgressProfile(Enum):
-    FULL = "full"
-    COMPACT = "compact"
-
-
 class Phase(Enum):
     CHECK = "check"
     PREPARE = "prepare"
@@ -87,7 +82,7 @@ class Progress:
 
     def __init__(self, labels, *, stream=None, clock=time.monotonic, env=None,
                  terminal_width=None, terminal_height=None, interactive=None,
-                 header="Initializing ft_transcendence", profile=ProgressProfile.FULL,
+                 header="Initializing ft_transcendence",
                  allow_not_ready=False, planning=False):
         self.stream = sys.stdout if stream is None else stream
         self.clock = clock
@@ -109,11 +104,8 @@ class Progress:
         self.height = terminal_height or (lambda: self._size().lines)
         self.verbose = env.get("FT_DEV_BOOTSTRAP_VERBOSE") == "1"
         self.live = live_enabled(self.stream, env) and interactive is not False
-        if not isinstance(profile, ProgressProfile):
-            raise ValueError("Expected a reviewed progress profile")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _-]{0,119}", header):
             raise ValueError("Expected a static command header")
-        self.profile = profile
         # Only routine startup may record a nonfatal readiness result before
         # entering its existing guarded resume path. Initialization stays strict.
         self.completed_statuses = COMPLETE + (PLAN_COMPLETE if planning else
@@ -259,11 +251,7 @@ class Progress:
         height = max(1, self.height())
         budget = max(1, height-3)
         rows = [self._line(self.active, width, now)]
-        if budget > 1 and self.profile is ProgressProfile.COMPACT:
-            step_budget = min(6, budget-1)
-            recent = list(self.steps.items())[-step_budget:] if step_budget else []
-            rows.extend(self._step_line(label, status, width) for label, status in recent)
-        elif budget > 1:
+        if budget > 1:
             step_budget = min(6, max(0, budget-2))
             recent = list(self.steps.items())[-step_budget:] if step_budget else []
             rows.extend(self._step_line(label, status, width) for label, status in recent)

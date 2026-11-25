@@ -33,3 +33,44 @@ When upgrading a VM that already has a running gateway, run
 No operation rotates Vault tokens or reinitializes/unseals Vault. Disabling
 HAProxy does not disable the built-in Vault UI on the private network and is
 not a substitute for ACL, authentication, TLS, or secure handling of tokens.
+
+## Shared V3 progress (Issue #167)
+
+The three public Makefile commands use the same V3 presentation as
+initialize, start, recover, health, plan and acceptance. The unused Compact
+profile and profile selector were removed; the existing Full layout is
+the single layout. Internal shell/helper invocations do not pass
+`--progress`, so they retain their original output and cannot start a
+second live renderer.
+
+Enable records the operator intent only after the existing configuration
+and identity checks, verifies Vault readiness, then creates, starts or
+keeps only the optional gateway. Disable verifies identity and isolation,
+stops or keeps the gateway, then clears intent and verifies disabled state.
+A no-op lifecycle or intent operation is CACHED. Status is read-only,
+shows desired and actual state, and treats an absent or stopped gateway
+as healthy only when disabled is intended. No extra readiness probes
+or recovery operations are added for presentation.
+
+The public final RESULT/STATUS markers and exit codes are unchanged.
+Redundant intermediate RESULT markers are retained in verbose output and
+in legacy internal calls; ordinary public output reports one final
+outcome. The loopback URL is shown only after enabled HTTPS verification
+succeeds. Refusals retain their secret-safe ERROR and RESULT markers.
+
+```sh
+make vault-ui-status
+FT_DEV_BOOTSTRAP_VERBOSE=1 make vault-ui-status
+NO_COLOR=1 make vault-ui-status
+CI=1 make vault-ui-status
+```
+
+For #167 validation, run the offline renderer, gateway security,
+lifecycle, progress and Makefile suites. On an already healthy isolated
+development VM, record the unrelated container identities before and
+after enable/status/enable/disable/status/disable, verify the final
+health and check-all results, and restore the original intended UI
+state if needed. Do not remove resources or manipulate Vault itself to
+exercise an output path. Test missing/unsafe gateway, lock contention
+and failed HTTPS using the offline fixtures. Record actual runtime and
+CI results only after execution.

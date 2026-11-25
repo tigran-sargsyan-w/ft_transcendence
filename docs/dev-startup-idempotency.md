@@ -127,7 +127,7 @@ or partially provisioned environment; use it on an isolated development VM.
 
 ## Shared V3 progress (Issue #166)
 
-The acceptance parent uses the Full progress profile. Its stages are the
+The acceptance parent uses the shared V3 progress renderer. Its stages are the
 healthy baseline followed by each requested guarded attempt. Nested
 observations cover inventory capture, optional gateway verification,
 container identities and restart metadata, volume/network inventory and
