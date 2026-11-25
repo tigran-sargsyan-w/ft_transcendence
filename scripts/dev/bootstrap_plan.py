@@ -120,14 +120,17 @@ def host_plan(session):
 
     # Equivalent to bootstrap.sh's vault_tls_status: absent is normal,
     # partial/invalid material is fatal, and chain/hostname/expiry are checked.
-    tls = Path(os.environ["FT_DEV_TLS_DIR"])
+    tls_value = os.environ.get("FT_DEV_TLS_DIR")
+    if not tls_value:
+        raise PlanError("Trusted TLS path unavailable; use make plan")
+    tls = Path(tls_value)
     ca = Path(os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local/share")) / "ft-transcendence/vault-ca"
     paths = (tls / "ca.crt", tls / "vault.crt", tls / "vault.key", ca / "ca.key")
     label = "Vault TLS chain hostname and expiry"
     cli.substep(label, Status.RUNNING)
     present = 0
     for path in paths:
-        if path.exists():
+        if os.path.exists(path):
             if not path.is_file() or path.stat().st_size == 0:
                 raise PlanError("Invalid Vault TLS file; inspect trusted TLS state")
             present += 1
@@ -221,13 +224,15 @@ def helper_plan(name, session):
                 if primary:
                     statuses.append(status)
             code = child.wait()
-        except BaseException:
+        except BaseException as exc:
             if child.poll() is None:
                 child.kill()
             child.wait()
+            if isinstance(exc, UnicodeError):
+                raise PlanError("Invalid structured plan observation") from None
             raise
     if code:
-        raise PlanError(f"Plan helper failed; inspect python3 scripts/dev/bootstrap_{name}.py plan", code)
+        raise PlanError(f"Plan helper failed: {name}; inspect its standalone plan with the trusted TLS path", code)
     # Roles/migrations already call the PostgreSQL plan before their own
     # observation. Their final observation describes the actual target.
     if name in ("postgres_roles", "migrations") and statuses:

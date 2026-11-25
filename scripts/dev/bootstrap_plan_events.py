@@ -15,16 +15,21 @@ def report(label, status, *, primary=True):
 
 
 def container(label, item, *, optional=False):
+    if _sink is None:
+        return
     if item is None:
         report(label, "OPTIONAL" if optional else "MISSING")
         return
-    state = item.get("State") or {}
+    state = item.get("State")
+    state = state if isinstance(state, dict) else {}
     status = state.get("Status")
-    health = (state.get("Health") or {}).get("Status")
+    health_state = state.get("Health")
+    health = health_state.get("Status") if isinstance(health_state, dict) else None
     # Never interpolate arbitrary Docker fields into the presentation.
     if status in ("created", "running", "paused", "restarting", "removing",
                   "exited", "dead"):
         label += " (" + status + ")"
     report(label, "EXISTS")
     if health in ("healthy", "unhealthy", "starting"):
-        report("Docker health " + health, "UNVERIFIED", primary=False)
+        report("Docker health reported " + health + " (readiness not checked)",
+               "UNVERIFIED", primary=False)

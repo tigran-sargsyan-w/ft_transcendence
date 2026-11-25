@@ -20,11 +20,11 @@ import sys
 
 if __package__:
     from . import bootstrap_vault_ui as ui, bootstrap_cli_progress as cli
-    from .bootstrap_progress import Phase
+    from .bootstrap_progress import Phase, Status
 else:
     import bootstrap_vault_ui as ui
     import bootstrap_cli_progress as cli
-    from bootstrap_progress import Phase
+    from bootstrap_progress import Phase, Status
 
 ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP = ROOT / "scripts/bootstrap.sh"
@@ -270,8 +270,10 @@ def snapshot():
                 state.get("Running"),
             )
 
-    with inspection_step("verify optional edge inventory"):
-        if edge_present and ui.EDGE not in result["network_inventory"]:
+    with inspection_step("verify optional edge inventory") as outcome:
+        if not edge_present:
+            outcome.status = Status.SKIPPED
+        elif ui.EDGE not in result["network_inventory"]:
             raise AcceptanceError("Vault UI network inventory mismatch")
 
     with inspection_step("capture volume lifecycle metadata"):
@@ -357,7 +359,7 @@ def verify(*, runs=3, read_only=False):
         raise AcceptanceError("Runs must be between 1 and 5")
     cli.legacy("=== Development startup idempotency acceptance ===")
     baseline = baseline_snapshot()
-    cli.legacy("PASS: healthy baseline, container/volume/network/migration inventory recorded in memory")
+    cli.notice("PASS: healthy baseline, container/volume/network/migration inventory recorded in memory")
     if read_only:
         cli.result("IDEMPOTENCY BASELINE READY (read-only)")
         return
@@ -371,7 +373,7 @@ def verify(*, runs=3, read_only=False):
             with cli.step("Verify stack health"):
                 trusted("--health-report")
             compare_snapshot(baseline, "Post-health")
-            cli.legacy(f"PASS: attempt {index}/{runs}; no recreation, restart or migration history drift")
+        cli.notice(f"PASS: attempt {index}/{runs}; no recreation, restart or migration history drift")
     cli.result("STARTUP IDEMPOTENCY VERIFIED")
 
 
@@ -408,7 +410,7 @@ def verify_initialize(*, runs=3):
             with cli.step("Verify stack health"):
                 trusted("--health-report")
             compare_snapshot(baseline, "Post-health")
-            cli.legacy(f"PASS: initialize {index}/{runs}; no recreation, restart or migration history drift")
+        cli.notice(f"PASS: initialize {index}/{runs}; no recreation, restart or migration history drift")
     cli.result("INITIALIZE IDEMPOTENCY VERIFIED")
 
 
