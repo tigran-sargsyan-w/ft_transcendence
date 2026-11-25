@@ -129,7 +129,8 @@ The renderer pauses for manual Shamir unseal; Vault CLI retains the real
 controlling terminal and hidden prompts. The timer thread is presentation
 only and is joined at exit. The original V3 visual limitation during
 terminal resize remains; keep terminal dimensions stable. Plan and acceptance presentation are the separate #166 follow-up described
-below. Vault UI command presentation remains the separate #167 scope.
+below. Issue #167 extends the same V3 renderer to the public Vault UI
+commands and removes the unused Compact profile.
 
 #### Plan and acceptance progress (Issue #166)
 
@@ -143,7 +144,7 @@ commands. Each existing specialized helper still runs in its own process,
 in plan mode only. Explicit, reviewed observations travel through a
 dedicated structured pipe; ordinary child stdout/stderr are not displayed.
 
-The Full profile distinguishes plan outcomes from runtime readiness:
+The shared V3 renderer distinguishes plan outcomes from runtime readiness:
 
 - EXISTS: the inspected resource exists; specialized plan helpers also
   verify the identity required by their existing plan branch. Preliminary
@@ -186,7 +187,7 @@ The overall success marker remains
 `RESULT: BOOTSTRAP PLAN COMPLETE (read-only)`; a failed operation returns
 nonzero and does not print it.
 
-`make acceptance` uses the same Full profile with the healthy baseline
+`make acceptance` uses the same V3 renderer with the healthy baseline
 and one stage per guarded startup attempt (four stages for three runs).
 It compares the existing inventory both before and after the health
 check. Child startup/health/initialize output remains suppressed, so the
