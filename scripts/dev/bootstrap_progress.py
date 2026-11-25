@@ -12,6 +12,10 @@ class Status(Enum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     MISSING = "MISSING"
+    EXISTS = "EXISTS"
+    READY = "READY"
+    UNVERIFIED = "UNVERIFIED"
+    OPTIONAL = "OPTIONAL"
     NOT_READY = "NOT READY"
     UNCONFIRMED = "UNCONFIRMED"
     CACHED = "CACHED"
@@ -43,12 +47,16 @@ class Stage:
 
 
 COMPLETE = (Status.CACHED, Status.DONE, Status.SKIPPED)
+PLAN_COMPLETE = (Status.EXISTS, Status.READY, Status.MISSING, Status.UNVERIFIED,
+                 Status.OPTIONAL, Status.NOT_READY)
 STOP = (Status.FAILED, Status.CANCELLED, Status.ACTION_REQUIRED)
 COLORS = {
     Status.RUNNING: "36", Status.DONE: "32", Status.CACHED: "32",
     Status.SKIPPED: "90", Status.PENDING: "90", Status.ACTION_REQUIRED: "33",
     Status.FAILED: "31", Status.CANCELLED: "33",
     Status.MISSING: "33", Status.NOT_READY: "33", Status.UNCONFIRMED: "33",
+    Status.EXISTS: "32", Status.READY: "32",
+    Status.UNVERIFIED: "90", Status.OPTIONAL: "90",
 }
 
 
@@ -80,7 +88,7 @@ class Progress:
     def __init__(self, labels, *, stream=None, clock=time.monotonic, env=None,
                  terminal_width=None, terminal_height=None, interactive=None,
                  header="Initializing ft_transcendence", profile=ProgressProfile.FULL,
-                 allow_not_ready=False):
+                 allow_not_ready=False, planning=False):
         self.stream = sys.stdout if stream is None else stream
         self.clock = clock
         env = os.environ if env is None else env
@@ -108,7 +116,8 @@ class Progress:
         self.profile = profile
         # Only routine startup may record a nonfatal readiness result before
         # entering its existing guarded resume path. Initialization stays strict.
-        self.completed_statuses = COMPLETE + ((Status.NOT_READY,) if allow_not_ready else ())
+        self.completed_statuses = COMPLETE + (PLAN_COMPLETE if planning else
+                                                ((Status.NOT_READY,) if allow_not_ready else ()))
         header = "[+] " + header
         if self.live:
             header = header[:max(1, self.width()-1)]
