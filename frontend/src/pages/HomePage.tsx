@@ -1,78 +1,25 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router'
-import {
-  TopologyView,
-  type TopologyViewState,
-} from '../features/topology/TopologyView'
-import { sampleTopology } from '../features/topology/sampleTopology'
-import { getBackendHealth } from '../services/health'
+import { Hero } from "@/components/Hero";
+import { LoginCard } from "@/features/auth/LoginCard";
+import { RegisterCard } from "@/features/auth/RegisterCard";
+import { useState } from "react";
 
-type BackendStatus = 'loading' | 'healthy' | 'unavailable'
+type Mode = "login" | "register";
 
 export function HomePage() {
-  const [backendStatus, setBackendStatus] =
-    useState<BackendStatus>('loading')
-  const [topologyState, setTopologyState] = useState<TopologyViewState>({
-    status: 'loading',
-  })
-
-  useEffect(() => {
-    async function checkBackendHealth() {
-      try {
-        await getBackendHealth()
-        setBackendStatus('healthy')
-      } catch {
-        setBackendStatus('unavailable')
-      }
-    }
-
-    void checkBackendHealth()
-  }, [])
-
-  useEffect(() => {
-    // Boundary for a future Nest/Socket.IO topology source
-    // For now -> we resolve the local fixture asynchronously
-    let cancelled = false
-
-    async function loadTopology() {
-      setTopologyState({ status: 'loading' })
-      try {
-        await new Promise((resolve) => setTimeout(resolve, 200))
-        if (cancelled) return
-
-        if (sampleTopology.nodes.length === 0) {
-          setTopologyState({ status: 'empty' })
-          return
-        }
-
-        setTopologyState({ status: 'ready', topology: sampleTopology })
-      } catch (error) {
-        if (cancelled) return
-        const message =
-          error instanceof Error ? error.message : 'Unknown topology error'
-        setTopologyState({ status: 'error', message })
-      }
-    }
-
-    void loadTopology()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const [mode, setMode] = useState<Mode>("login");
 
   return (
-    <main>
-      <h1>Infrastructure Intelligence Platform</h1>
-      <p>Frontend is running.</p>
-
-      <p>Backend status: {backendStatus}</p>
-
-      <p>
-        <Link to="/register">Create account</Link>
-      </p>
-
-      <h2>Infrastructure topology</h2>
-      <TopologyView state={topologyState} />
+    <main className="flex flex-col gap-6 md:flex-row justify-center align-middle p-6 h-screen w-full">
+      <div className="flex md:flex-1 justify-center items-center md:my-auto">
+        <Hero />
+      </div>
+      <div className="flex md:flex-1 justify-center items-center md:my-auto">
+        {mode === "login" ? (
+          <LoginCard onSwitch={() => setMode("register")} />
+        ) : (
+          <RegisterCard onSwitch={() => setMode("login")} />
+        )}
+      </div>
     </main>
-  )
+  );
 }
