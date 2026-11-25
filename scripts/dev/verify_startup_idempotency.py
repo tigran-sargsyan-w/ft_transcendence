@@ -9,6 +9,8 @@ Docker inspect responses are kept in memory and never printed or saved.
 """
 
 import argparse
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 import json
 import os
 from pathlib import Path
@@ -17,9 +19,12 @@ import subprocess
 import sys
 
 if __package__:
-    from . import bootstrap_vault_ui as ui
+    from . import bootstrap_vault_ui as ui, bootstrap_cli_progress as cli
+    from .bootstrap_progress import Phase
 else:
     import bootstrap_vault_ui as ui
+    import bootstrap_cli_progress as cli
+    from bootstrap_progress import Phase
 
 ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP = ROOT / "scripts/bootstrap.sh"
@@ -192,72 +197,116 @@ def vault_ui_inventory():
         ) from None
 
 
+_inspection_phase = ContextVar("acceptance_inspection_phase", default="Baseline")
+
+
+@contextmanager
+def inspection_phase(prefix):
+    token = _inspection_phase.set(prefix)
+    try:
+        yield
+    finally:
+        _inspection_phase.reset(token)
+
+
+def inspection_step(label):
+    return cli.step(_inspection_phase.get() + " " + label)
+
+
 def snapshot():
     """Select only non-secret immutable identities and lifecycle metadata."""
-    containers = inspected("container", CONTAINERS)
-    volumes = inspected("volume", VOLUMES)
+    with inspection_step("inspect containers"):
+        containers = inspected("container", CONTAINERS)
+    with inspection_step("inspect volumes"):
+        volumes = inspected("volume", VOLUMES)
 
-    ui_enabled, gateway, edge_present = vault_ui_inventory()
+    with inspection_step("verify optional Vault UI"):
+        ui_enabled, gateway, edge_present = vault_ui_inventory()
 
     expected_networks = NETWORKS + (
         (ui.EDGE,) if edge_present else ()
     )
-    networks = inspected("network", expected_networks)
+    with inspection_step("inspect networks"):
+        networks = inspected("network", expected_networks)
+    with inspection_step("list project containers"):
+        container_inventory = names_for("container")
+    with inspection_step("list project volumes"):
+        volume_inventory = names_for("volume")
+    with inspection_step("list project networks"):
+        network_inventory = names_for("network")
+    with inspection_step("capture migration fingerprint"):
+        migration_history = migration_fingerprint()
 
     result = {
         "vault_ui_enabled": ui_enabled,
-        "container_inventory": names_for("container"),
-        "volume_inventory": names_for("volume"),
-        "network_inventory": names_for("network"),
-        "migration_history": migration_fingerprint(),
+        "container_inventory": container_inventory,
+        "volume_inventory": volume_inventory,
+        "network_inventory": network_inventory,
+        "migration_history": migration_history,
         "containers": {}, "volumes": {}, "networks": {},
     }
-    for name, item in containers.items():
-        state = item.get("State") or {}
-        if state.get("Running") is not True or state.get("Status") != "running":
-            raise AcceptanceError(f"Container not running: {name}")
-        if not isinstance(item.get("Id"), str) or not item["Id"]:
-            raise AcceptanceError(f"Missing Docker identity: {name}")
-        result["containers"][name] = (
-            item["Id"], item.get("Created"), item.get("RestartCount"),
-            state.get("StartedAt"),
-        )
-    if gateway is not None:
-        if ui.NAME not in result["container_inventory"]:
-            raise AcceptanceError("Vault UI inventory mismatch")
+    with inspection_step("capture container identities and restart metadata"):
+        for name, item in containers.items():
+            state = item.get("State") or {}
+            if state.get("Running") is not True or state.get("Status") != "running":
+                raise AcceptanceError(f"Container not running: {name}")
+            if not isinstance(item.get("Id"), str) or not item["Id"]:
+                raise AcceptanceError(f"Missing Docker identity: {name}")
+            result["containers"][name] = (
+                item["Id"], item.get("Created"), item.get("RestartCount"),
+                state.get("StartedAt"),
+            )
+        if gateway is not None:
+            if ui.NAME not in result["container_inventory"]:
+                raise AcceptanceError("Vault UI inventory mismatch")
 
-        state = gateway.get("State") or {}
-        result["containers"][ui.NAME] = (
-            gateway["Id"],
-            gateway.get("Created"),
-            gateway.get("RestartCount"),
-            state.get("StartedAt"),
-            state.get("Status"),
-            state.get("Running"),
-        )
+            state = gateway.get("State") or {}
+            result["containers"][ui.NAME] = (
+                gateway["Id"],
+                gateway.get("Created"),
+                gateway.get("RestartCount"),
+                state.get("StartedAt"),
+                state.get("Status"),
+                state.get("Running"),
+            )
 
-    if edge_present and ui.EDGE not in result["network_inventory"]:
-        raise AcceptanceError("Vault UI network inventory mismatch")
+    with inspection_step("verify optional edge inventory"):
+        if edge_present and ui.EDGE not in result["network_inventory"]:
+            raise AcceptanceError("Vault UI network inventory mismatch")
 
-    for name, item in volumes.items():
-        result["volumes"][name] = (item.get("CreatedAt"), item.get("Driver"), item.get("Mountpoint"))
-    for name, item in networks.items():
-        result["networks"][name] = (item.get("Id"), item.get("Created"))
+    with inspection_step("capture volume lifecycle metadata"):
+        for name, item in volumes.items():
+            result["volumes"][name] = (item.get("CreatedAt"), item.get("Driver"), item.get("Mountpoint"))
+    with inspection_step("capture network lifecycle metadata"):
+        for name, item in networks.items():
+            result["networks"][name] = (item.get("Id"), item.get("Created"))
     return result
 
 
 def compare(expected, current):
-    if current["vault_ui_enabled"] != expected["vault_ui_enabled"]:
-        raise AcceptanceError("Vault UI enabled state changed")
+    with inspection_step("compare Vault UI intent"):
+        if current["vault_ui_enabled"] != expected["vault_ui_enabled"]:
+            raise AcceptanceError("Vault UI enabled state changed")
 
     # Prevent silent creation of additional project resources; no raw IDs printed.
-    for group in ("container_inventory", "volume_inventory", "network_inventory", "migration_history"):
-        if current[group] != expected[group]:
-            raise AcceptanceError(f"Unexpected change: {group}")
-    for group in ("containers", "volumes", "networks"):
-        for name, value in expected[group].items():
-            if current[group].get(name) != value:
-                raise AcceptanceError(f"Unexpected {group} lifecycle change: {name}")
+    for group, label in (
+        ("container_inventory", "compare container inventory"),
+        ("volume_inventory", "compare volume inventory"),
+        ("network_inventory", "compare network inventory"),
+        ("migration_history", "compare migration history"),
+    ):
+        with inspection_step(label):
+            if current[group] != expected[group]:
+                raise AcceptanceError(f"Unexpected change: {group}")
+    for group, label in (
+        ("containers", "compare container identities and restarts"),
+        ("volumes", "compare volume lifecycle"),
+        ("networks", "compare network lifecycle"),
+    ):
+        with inspection_step(label):
+            for name, value in expected[group].items():
+                if current[group].get(name) != value:
+                    raise AcceptanceError(f"Unexpected {group} lifecycle change: {name}")
 
 
 def trusted(flag):
@@ -274,26 +323,56 @@ def trusted(flag):
         raise AcceptanceError(f"Trusted {flag} failed; inspect it manually")
 
 
+def attempt_label(index, runs, *, initialize=False):
+    return f"{'Initialize' if initialize else 'Startup'} attempt {index} of {runs}"
+
+
+def labels(runs, *, read_only=False, initialize=False):
+    return ("Healthy baseline",) + (() if read_only else tuple(
+        attempt_label(index, runs, initialize=initialize)
+        for index in range(1, runs + 1)
+    ))
+
+
+def compare_snapshot(baseline, prefix):
+    with inspection_phase(prefix):
+        with cli.step(prefix + " capture inventory"):
+            current = snapshot()
+        with cli.step(prefix + " compare inventory"):
+            compare(baseline, current)
+
+
+def baseline_snapshot():
+    with cli.stage("Healthy baseline", Phase.VERIFY):
+        with cli.step("Verify healthy stack"):
+            trusted("--health-report")
+        with inspection_phase("Baseline"):
+            with cli.step("Capture baseline inventory"):
+                return snapshot()
+
+
 def verify(*, runs=3, read_only=False):
     """Reject an unhealthy baseline; compare state after each safe no-op start."""
     if not 1 <= runs <= 5:
         raise AcceptanceError("Runs must be between 1 and 5")
-    print("=== Development startup idempotency acceptance ===", flush=True)
-    trusted("--health-report")
-    baseline = snapshot()
-    print("PASS: healthy baseline, container/volume/network/migration inventory recorded in memory", flush=True)
+    cli.legacy("=== Development startup idempotency acceptance ===")
+    baseline = baseline_snapshot()
+    cli.legacy("PASS: healthy baseline, container/volume/network/migration inventory recorded in memory")
     if read_only:
-        print("RESULT: IDEMPOTENCY BASELINE READY (read-only)", flush=True)
+        cli.result("IDEMPOTENCY BASELINE READY (read-only)")
         return
     for index in range(1, runs + 1):
-        print(f"RUN: guarded --start ({index}/{runs})", flush=True)
-        trusted("--start")
-        # Inspect immediately, before any health request; catch hidden restarts.
-        compare(baseline, snapshot())
-        trusted("--health-report")
-        compare(baseline, snapshot())
-        print(f"PASS: attempt {index}/{runs}; no recreation, restart or migration history drift", flush=True)
-    print("RESULT: STARTUP IDEMPOTENCY VERIFIED", flush=True)
+        with cli.stage(attempt_label(index, runs), Phase.VERIFY):
+            cli.legacy(f"RUN: guarded --start ({index}/{runs})")
+            with cli.step("Guarded start"):
+                trusted("--start")
+            # Inspect immediately, before any health request; catch hidden restarts.
+            compare_snapshot(baseline, "Pre-health")
+            with cli.step("Verify stack health"):
+                trusted("--health-report")
+            compare_snapshot(baseline, "Post-health")
+            cli.legacy(f"PASS: attempt {index}/{runs}; no recreation, restart or migration history drift")
+    cli.result("STARTUP IDEMPOTENCY VERIFIED")
 
 
 def trusted_initialize():
@@ -318,20 +397,22 @@ def verify_initialize(*, runs=3):
     """Compare identities around the actual initialize workflow on a healthy VM."""
     if not 1 <= runs <= 5:
         raise AcceptanceError("Runs must be between 1 and 5")
-    print("=== Development initialize idempotency acceptance ===", flush=True)
-    trusted("--health-report")
-    baseline = snapshot()
+    cli.legacy("=== Development initialize idempotency acceptance ===")
+    baseline = baseline_snapshot()
     for index in range(1, runs + 1):
-        print(f"RUN: guarded --initialize ({index}/{runs})", flush=True)
-        trusted_initialize()
-        compare(baseline, snapshot())
-        trusted("--health-report")
-        compare(baseline, snapshot())
-        print(f"PASS: initialize {index}/{runs}; no recreation, restart or migration history drift", flush=True)
-    print("RESULT: INITIALIZE IDEMPOTENCY VERIFIED", flush=True)
+        with cli.stage(attempt_label(index, runs, initialize=True), Phase.VERIFY):
+            cli.legacy(f"RUN: guarded --initialize ({index}/{runs})")
+            with cli.step("Guarded initialize"):
+                trusted_initialize()
+            compare_snapshot(baseline, "Pre-health")
+            with cli.step("Verify stack health"):
+                trusted("--health-report")
+            compare_snapshot(baseline, "Post-health")
+            cli.legacy(f"PASS: initialize {index}/{runs}; no recreation, restart or migration history drift")
+    cli.result("INITIALIZE IDEMPOTENCY VERIFIED")
 
 
-def main(argv=None):
+def main(argv=None, *, render=False):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runs", type=int, default=3)
     mode = parser.add_mutually_exclusive_group()
@@ -343,10 +424,18 @@ def main(argv=None):
     try:
         if os.geteuid() == 0:
             raise AcceptanceError("Run as ordinary developer, never sudo")
-        if args.initialize:
-            verify_initialize(runs=args.runs)
-        else:
-            verify(runs=args.runs, read_only=args.check_only)
+        if not 1 <= args.runs <= 5:
+            raise AcceptanceError("Runs must be between 1 and 5")
+        header = ("Verifying initialize idempotency" if args.initialize else
+                  "Verifying startup idempotency")
+        context = (cli.presentation(labels(args.runs, read_only=args.check_only,
+                                           initialize=args.initialize), header)
+                   if render else nullcontext())
+        with context:
+            if args.initialize:
+                verify_initialize(runs=args.runs)
+            else:
+                verify(runs=args.runs, read_only=args.check_only)
         return 0
     except AcceptanceError as exc:
         print(f"ERROR: {exc}", file=sys.stderr, flush=True)
@@ -355,4 +444,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(render=True))
