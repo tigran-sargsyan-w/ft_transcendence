@@ -15,33 +15,20 @@ import sys
 
 if __package__:
     from . import bootstrap_cli_progress as cli, bootstrap_plan_events as events
+    from . import bootstrap_resources as resources
     from .bootstrap_progress import Status
 else:
     import bootstrap_cli_progress as cli
     import bootstrap_plan_events as events
+    import bootstrap_resources as resources
     from bootstrap_progress import Status
 
 ROOT = Path(__file__).resolve().parents[2]
-VOLUMES = (
-    "transcendence-vault-dev_vault_data",
-    "transcendence-vault-dev_backend_agent_auth",
-    "transcendence-vault-dev_backend_rendered",
-    "transcendence-app-dev_postgres_data",
-    "transcendence-app-dev_prometheus_data",
-    "transcendence-app-dev_grafana_data",
-    "transcendence-app-dev_grafana_vault_auth",
-    "transcendence-app-dev_grafana_vault_rendered",
-    "transcendence-app-dev_migrator_vault_auth",
-    "transcendence-app-dev_migrator_vault_rendered",
-    "transcendence-app-dev_postgres_provisioner_vault_auth",
-    "transcendence-app-dev_postgres_provisioner_rendered",
-)
-NETWORKS = (
-    "transcendence-vault-dev_vault_private",
-    "transcendence-app-dev_default",
-    "transcendence-app-dev_collector_control",
-)
-PROJECTS = ("transcendence-app-dev", "transcendence-vault-dev")
+# The existing manifest has exactly the former shell inventory order.
+# Keep one source of truth for future resource additions.
+VOLUMES = tuple(resources.VOLUMES)
+NETWORKS = tuple(resources.NETWORKS)
+PROJECTS = (resources.APP_PROJECT, resources.VAULT_PROJECT)
 HOST_CHECKS = (
     ("Development domain", "scripts.dev.domains"),
     ("Browser TLS certificate", "scripts.dev.certificates"),
