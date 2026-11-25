@@ -24,6 +24,8 @@ procedure, or production disaster-recovery certification.
 ```sh
 python3 -m unittest discover -s scripts/dev -p 'test_bootstrap_unified.py' -q
 python3 -m unittest discover -s scripts/dev -p 'test_verify_startup_idempotency.py' -q
+python3 -m unittest discover -s scripts/dev -p 'test_acceptance_progress.py' -q
+python3 -m unittest discover -s scripts/dev -p 'test_bootstrap_plan.py' -q
 python3 -m py_compile scripts/dev/verify_startup_idempotency.py
 ```
 
@@ -122,3 +124,40 @@ health verification. It stops on drift without rollback. The default
 `make acceptance` remains routine-start-only; `--check-only` is read-only and
 mutually exclusive with `--initialize`. Never run the opt-in test on an unhealthy
 or partially provisioned environment; use it on an isolated development VM.
+
+## Shared V3 progress (Issue #166)
+
+The acceptance parent uses the Full progress profile. Its stages are the
+healthy baseline followed by each requested guarded attempt. Nested
+observations cover inventory capture, optional gateway verification,
+container identities and restart metadata, volume/network inventory and
+lifecycle metadata, migration history comparison and health. Pre-health
+and post-health comparisons remain distinct and in their original order.
+The progress count includes the baseline, so default acceptance has four
+stages for three attempts; check-only has one stage. The existing PASS
+and RESULT markers remain authoritative together with the exit code.
+
+```sh
+make acceptance
+FT_DEV_BOOTSTRAP_VERBOSE=1 make acceptance
+python3 scripts/dev/verify_startup_idempotency.py --check-only
+```
+
+The child commands keep their existing suppressed-output subprocess
+path; there is no second live renderer, new Docker inspection or new
+database query for display. CI, redirected output, NO_COLOR and
+FT_DEV_STAGE_TIMING keep the plain-output policy. The existing V3 resize
+limitation remains.
+
+For #166 acceptance, first run the offline suites (including simulated
+missing/partial plan state and drift rejection). On the already healthy
+isolated VM, run plan, baseline check-only and three guarded starts, then
+health/check-all. Check interactive and verbose output, actual exit codes
+and the preserved result markers. Do not remove resources to simulate a
+fresh plan and do not repeat a clean installation for this presentation
+change. The explicit initialize mode remains covered by offline tests;
+no extra live provisioning is required for #166.
+
+Record the tested commit, actual results and timings only after execution.
+The implementation and offline test additions do not themselves establish
+that the VM acceptance or CI has passed.

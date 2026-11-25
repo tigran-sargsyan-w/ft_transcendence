@@ -6,6 +6,11 @@ recreates existing containers; does not modify TLS certificates, credentials,
 volumes, Vault or PostgreSQL. Publishes only loopback 8080/8443.
 """
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import fcntl
 import json
@@ -305,9 +310,11 @@ def main(argv=None):
         if args.mode == "plan":
             item = container()
             if item is None:
+                plan_events.container("Nginx HTTPS gateway", item)
                 print("TODO: Nginx HTTPS gateway not created (read-only)")
             else:
                 verify_identity(item)
+                plan_events.container("Nginx HTTPS gateway", item)
                 print(f"EXISTS: Nginx HTTPS gateway ({(item.get('State') or {}).get('Status')})")
             print("RESULT: NGINX HTTPS PLAN COMPLETE (read-only)")
             return 0

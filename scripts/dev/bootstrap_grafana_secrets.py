@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Trusted Grafana secret provisioning with create-once semantics."""
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import os
 import subprocess
@@ -130,6 +135,7 @@ def main(argv=None):
 
     try:
         if args.mode == "plan":
+            plan_events.report("Grafana secrets use create-once KV v2 provisioning", "UNVERIFIED")
             print("INFO: Grafana secrets use create-once KV v2 provisioning")
             print("RESULT: GRAFANA SECRET PLAN COMPLETE (read-only)")
             return 0

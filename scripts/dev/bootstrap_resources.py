@@ -5,6 +5,11 @@ Never creates containers, starts services, or changes existing resources.
 Does not initialize Vault or PostgreSQL. All modifications are explicit via apply.
 """
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import json
 import os
@@ -260,6 +265,9 @@ def scan(*, batch=False, detailed=False):
                     print(f"KEEP: {kind} {name}", flush=True)
             elif detailed:
                 print(f"TODO: {kind} {name}", flush=True)
+            if detailed:
+                plan_events.report(f"{kind.capitalize()} {name}",
+                                   "EXISTS" if data is not None else "MISSING")
             existing[(kind, name)] = data is not None
     return existing
 
@@ -308,6 +316,8 @@ def main():
 
     try:
         validate_compose_contract()
+        if args.mode == "plan":
+            plan_events.report("Compose resource contract", "READY", primary=False)
         detailed = (
             args.mode == "plan"
             or os.environ.get("FT_DEV_BOOTSTRAP_VERBOSE") == "1"

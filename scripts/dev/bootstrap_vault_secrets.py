@@ -6,6 +6,11 @@ container environment, logs, or host files. The ephemeral helper generates
 passwords in memory and writes missing secrets with KV v2 CAS=0.
 """
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import json
 import os
@@ -104,6 +109,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.mode == "plan":
+            plan_events.report("Authenticated database secret inspection not performed", "UNVERIFIED")
             print("INFO: PostgreSQL Vault secret values require authenticated inspection; no secrets read")
             print("RESULT: DATABASE SECRETS PLAN COMPLETE (read-only)")
             return 0
