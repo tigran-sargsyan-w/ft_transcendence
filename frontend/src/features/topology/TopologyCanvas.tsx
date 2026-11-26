@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import {
   Background,
   Controls,
@@ -16,6 +16,17 @@ const nodeTypes = {
   service: ServiceNode,
 };
 
+const touchQuery = window.matchMedia("(pointer: coarse)");
+
+function subscribeTouch(onChange: () => void) {
+  touchQuery.addEventListener("change", onChange);
+  return () => touchQuery.removeEventListener("change", onChange);
+}
+
+function getIsTouch() {
+  return touchQuery.matches;
+}
+
 type TopologyCanvasProps = {
   topology: TopologySnapshot;
   selectedId?: string;
@@ -29,6 +40,8 @@ export function TopologyCanvas({
   onNodeClick,
   onPaneClick,
 }: TopologyCanvasProps) {
+  // On touch screens, a swipe over the graph scrolls the page instead of panning
+  const isTouch = useSyncExternalStore(subscribeTouch, getIsTouch);
   const initial = useMemo(() => topologyToFlowElements(topology), [topology]);
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
@@ -57,6 +70,9 @@ export function TopologyCanvas({
         fitView
         fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
         nodesConnectable={false}
+        panOnDrag={!isTouch}
+        zoomOnPinch={!isTouch}
+        preventScrolling={!isTouch}
         nodesDraggable={false}
         onNodeClick={(_event, node) => onNodeClick?.(node.id)}
         onPaneClick={() => onPaneClick?.()}

@@ -166,3 +166,9 @@
     @apply font-sans;
     }
 }
+/* React Flow sets touch-action: none on the pane, which blocks page scroll on touch screens */
+@media (pointer: coarse) {
+  .react-flow .react-flow__pane {
+    touch-action: pan-y;
+  }
+}
