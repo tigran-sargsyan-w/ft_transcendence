@@ -28,7 +28,7 @@ The browser calls NestJS via same-origin `/api/v1` REST and connects to the same
 ## Authentication and transport
 
 - A valid `sid` HttpOnly cookie authenticates both REST and Socket.IO; the browser should use same-origin URLs and `credentials: 'include'` for fetch. Do not read or store session tokens in JavaScript.
-- For local development, use the application's HTTPS entry point (`https://transcendence.test:8443`) configured by the project, not an insecure direct backend port.
+- For local development, use the application's HTTPS entry point (`https://localhost:8443`) configured by the project, not an insecure direct backend port.
 - REST returns `{ "data": ... }` on success and `{ "error": { "code": "...", "message": "...", "details": ... } }` on failure.
 - Live server events use `{ event, payload, timestamp }`; socket command acknowledgements use `{ data }` or `{ error }`.
 - In v1, **any signed-in user can read, update, and join any incident**. There are no incident roles or organization boundaries yet. This is suitable only for the project's demo data, not production multi-tenancy.

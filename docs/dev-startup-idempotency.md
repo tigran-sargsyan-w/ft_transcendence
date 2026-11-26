@@ -101,7 +101,7 @@ health check fails due to a transient Docker CLI timeout, inspect individual
 
 Record commit SHA, `unittest` results, `--check-only` and `--runs 3` exit codes,
 final `--health-report`, and whether the browser is accessible at
-`https://transcendence.test:8443`. Do not record secret values or full Docker
+`https://localhost:8443`. Do not record secret values or full Docker
 inspect output. The already completed Phase 6B reboot test is separate
 supporting evidence; Phase 6D does not require another reboot.
 

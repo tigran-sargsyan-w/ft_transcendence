@@ -41,7 +41,7 @@ may be configured automatically; log out and back in if instructed. Interactive
 terminals show live stage progress; CI and redirected logs are plain text.
 
 Do not use `sudo make initialize`. Existing installations and upgrades
-require separate review; initial setup is not a replacement for recovery.
+require separate review; see [localhost cutover](docs/development/localhost-cutover.md) for the original hostname; initial setup is not a replacement for recovery.
 
 After reboot, single-node Vault using Shamir 2-of-3 normally needs **manual unseal**; run `make recover` from a real terminal, and enter two distinct shares into the hidden Vault CLI prompts. Never provide shares in command arguments, Git, chat, screenshots or logs. This is development-only operator-assisted recovery, **not unattended Auto Unseal**.
 

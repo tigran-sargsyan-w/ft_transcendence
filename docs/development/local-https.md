@@ -15,7 +15,7 @@ The development environment provides:
 - Docker Compose orchestration through a root Makefile
 - Managed local domain mappings and CA trust
 
-**Primary application URL:** run `python3 -m scripts.dev.configuration origin` from the repository root. The URLs below use the initial development settings as examples; use the configured hostname and published ports for your deployment.
+**Primary application URL:** run `python3 -m scripts.dev.configuration origin` from the repository root. The URLs below use the target localhost development settings as examples; use the configured hostname and published ports for your deployment.
 
 The local setup is intended for development only. It is not a production deployment configuration.
 
@@ -92,17 +92,17 @@ make initialize  # First install only
 make health      # Read-only verification
 ```
 
-Changing the public configuration is not a live update: existing containers and certificates may require a reviewed cutover. Never remove volumes or reinitialize Vault to change a hostname or port.
+Changing the public configuration is not a live update: existing containers and certificates may require a reviewed cutover. For the original development hostname, see [the guarded localhost cutover](localhost-cutover.md). Never remove volumes or reinitialize Vault to change a hostname or port.
 
 ### 3.4 Open the application
 
 Frontend:
 
-`https://transcendence.test:8443/`
+`https://localhost:8443/`
 
 Backend health endpoint:
 
-`https://transcendence.test:8443/api/v1/health`
+`https://localhost:8443/api/v1/health`
 
 Expected backend response:
 
@@ -186,7 +186,7 @@ docker exec transcendence-app-dev-nginx-1 nginx -t
 
 ```bash
 curl -sS -D - -o /dev/null \
-  "http://transcendence.test:8080/api/v1/health?test=1"
+  "http://localhost:8080/api/v1/health?test=1"
 ```
 
 Expected HTTP status: `308 Permanent Redirect`.
@@ -194,7 +194,7 @@ Expected HTTP status: `308 Permanent Redirect`.
 Expected `Location` header:
 
 ```text
-https://transcendence.test:8443/api/v1/health?test=1
+https://localhost:8443/api/v1/health?test=1
 ```
 
 ### 6.5 Check HTTPS frontend
@@ -202,7 +202,7 @@ https://transcendence.test:8443/api/v1/health?test=1
 ```bash
 curl -sS -o /dev/null \
   -w 'HTTP: %{http_code}, TLS verification: %{ssl_verify_result}\n' \
-  https://transcendence.test:8443/
+  https://localhost:8443/
 ```
 
 Expected: HTTP `200`, TLS verification result `0`.
@@ -213,7 +213,7 @@ Do not use `curl -k` or `--insecure` for normal verification, since bypassing ce
 
 ```bash
 curl -sS -i \
-  https://transcendence.test:8443/api/v1/health
+  https://localhost:8443/api/v1/health
 ```
 
 Expected: HTTP `200` with the backend health response.
@@ -222,7 +222,7 @@ For an invalid API path, use:
 
 ```bash
 curl -sS -i \
-  https://transcendence.test:8443/api/v1/nonexistent
+  https://localhost:8443/api/v1/nonexistent
 ```
 
 The application should handle the invalid route rather than returning an Nginx upstream connection error. Inspect the actual response status and body according to the current backend implementation.
@@ -231,8 +231,8 @@ The application should handle the invalid route rather than returning an Nginx u
 
 ```bash
 openssl s_client \
-  -connect transcendence.test:8443 \
-  -servername transcendence.test \
+  -connect localhost:8443 \
+  -servername localhost \
   -verify_return_error \
   -brief </dev/null
 ```
@@ -257,7 +257,7 @@ The generated certificate includes the following names:
 
 Use:
 
-`GET https://transcendence.test:8443/api/v1/health`
+`GET https://localhost:8443/api/v1/health`
 
 Keep TLS certificate verification enabled.
 
@@ -283,7 +283,7 @@ Vite HMR uses a secure WebSocket connection through Nginx.
 
 To inspect it:
 
-1. Open `https://transcendence.test:8443/`.
+1. Open `https://localhost:8443/`.
 2. Open browser Developer Tools.
 3. Navigate to Network → WS.
 4. Reload the page.
@@ -291,7 +291,7 @@ To inspect it:
 
 Expected connection URL:
 
-`wss://transcendence.test:8443/...`
+`wss://localhost:8443/...`
 
 A successful WebSocket upgrade returns HTTP `101 Switching Protocols`.
 
@@ -299,7 +299,7 @@ Changing a React component should update the interface without manually reloadin
 
 Stop Docker Compose Watch with `Ctrl+C`.
 
-**Socket.IO note:** Nginx forwards `/socket.io/` to the backend, whose Socket.IO gateway is implemented. A connection needs a valid session cookie, and the backend must be given `APP_ORIGIN` (`https://transcendence.test:8443`): see the [realtime topology protocol](../architecture/realtime-topology.md). Testing it through Nginx and ModSecurity is still to do.
+**Socket.IO note:** Nginx forwards `/socket.io/` to the backend, whose Socket.IO gateway is implemented. A connection needs a valid session cookie, and the backend must be given `APP_ORIGIN` (`https://localhost:8443`): see the [realtime topology protocol](../architecture/realtime-topology.md). Testing it through Nginx and ModSecurity is still to do.
 
 ## 9. Cleanup and recovery
 

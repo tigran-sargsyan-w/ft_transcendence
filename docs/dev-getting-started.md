@@ -43,7 +43,7 @@ The Vault Web UI is an [optional, on-demand administrative gateway](dev-vault-ui
    make check-all
    ```
 
-   Open `https://transcendence.test:8443` from the configured VM browser and verify that the actual application works. A green infrastructure check does not substitute for login, session or WebSocket functional E2E tests.
+   Open `https://localhost:8443` from the configured VM browser and verify that the actual application works. A green infrastructure check does not substitute for login, session or WebSocket functional E2E tests.
 
 ### Independent fresh-VM verification (2026-11-22)
 
@@ -262,7 +262,7 @@ Only enter shares when the Vault CLI itself requests them with hidden input. The
 Prometheus and Grafana are part of the guarded startup,
 readiness and recovery contract.
 
-Use https://transcendence.test:8443/grafana/ from an
+Use https://localhost:8443/grafana/ from an
 authorized browser with trusted TLS.
 
 The monitoring guide documents initial image prerequisites,
