@@ -18,10 +18,17 @@ const nodeTypes = {
 
 type TopologyCanvasProps = {
   topology: TopologySnapshot;
+  selectedId?: string;
   onNodeClick?: (nodeId: string) => void;
+  onPaneClick?: () => void;
 };
 
-export function TopologyCanvas({ topology, onNodeClick }: TopologyCanvasProps) {
+export function TopologyCanvas({
+  topology,
+  selectedId,
+  onNodeClick,
+  onPaneClick,
+}: TopologyCanvasProps) {
   const initial = useMemo(() => topologyToFlowElements(topology), [topology]);
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
@@ -31,6 +38,12 @@ export function TopologyCanvas({ topology, onNodeClick }: TopologyCanvasProps) {
     setNodes(initial.nodes);
     setEdges(initial.edges);
   }, [initial, setNodes, setEdges]);
+
+  useEffect(() => {
+    setNodes((current) =>
+      current.map((node) => ({ ...node, selected: node.id === selectedId })),
+    );
+  }, [initial, selectedId, setNodes]);
 
   return (
     <div style={{ width: "100%", height: 420 }}>
@@ -45,6 +58,7 @@ export function TopologyCanvas({ topology, onNodeClick }: TopologyCanvasProps) {
         fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
         nodesConnectable={false}
         onNodeClick={(_event, node) => onNodeClick?.(node.id)}
+        onPaneClick={() => onPaneClick?.()}
       >
         <Background gap={20} size={1} color="var(--border)" />
         <Controls showInteractive={false} />

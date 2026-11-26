@@ -64,7 +64,12 @@ export default function Topology() {
         <StatCard title="Last Scan" value={5} description="" />
       </div>
       <div className="flex gap-4">
-        <TopologyCard topology={serviceGraph} onNodeClick={handleNodeClick} />
+        <TopologyCard
+          topology={serviceGraph}
+          selectedId={selectedService?.id}
+          onNodeClick={handleNodeClick}
+          onPaneClick={() => setSelectedService(undefined)}
+        />
         <SelectedServiceCard
           service={selectedService}
           criticality={
