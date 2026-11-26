@@ -47,7 +47,7 @@ class HTTPReadinessTests(unittest.TestCase):
         self.assertNotIn("-k", command)
         self.assertIn("--noproxy", command)
         self.assertIn(
-            "https://transcendence.test:8443/api/v1/health",
+            startup.configuration.load().health_url,
             command,
         )
 

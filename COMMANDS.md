@@ -74,13 +74,15 @@ make health
 
 **Never** paste keys into shell command arguments, environment variables, tickets or chat; do not attempt `vault operator init` on an initialized volume. Recovery never silently recreates missing Docker resources or runs migrations.
 
-Open the UI: **https://transcendence.test:8443** (on the configured VM/browser). Backend health: **https://transcendence.test:8443/api/v1/health**. For a local terminal-only check:
+Print the configured application URL and verify the backend with strict TLS:
 
 ```bash
-curl -k -I https://127.0.0.1:8443
+APP_ORIGIN=$(python3 -m scripts.dev.configuration origin)
+printf '%s\n' "$APP_ORIGIN"
+curl -q --cacert "$(mkcert -CAROOT)/rootCA.pem" "$APP_ORIGIN/api/v1/health"
 ```
 
-`-k` disables TLS verification and is only a local diagnostic fallback; it is not proof that the application's login/WebSocket flow works. The localhost gateway is bound to the VM loopback interface.
+The gateway is bound to the VM loopback interface. A successful health probe is not proof that the login/WebSocket flow works.
 
 ## D. After pulling changes / migrations
 
@@ -124,7 +126,7 @@ make health
 ./scripts/bootstrap.sh --check-grafana-https
 ```
 
-Open Grafana at https://transcendence.test:8443/grafana/
+Open Grafana at the configured application origin followed by `/grafana/`
 using authorized credentials on the configured trusted host.
 
 For initial provisioning, recovery limitations, dashboards

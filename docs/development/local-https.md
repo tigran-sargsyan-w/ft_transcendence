@@ -6,7 +6,7 @@ ft_transcendence uses Nginx as the local HTTPS entry point for the React fronten
 
 The development environment provides:
 
-- A local domain: `transcendence.test`
+- A local domain configured in `config/development.env`
 - Trusted development TLS certificates generated with `mkcert`
 - HTTPS termination at Nginx
 - Automatic HTTP-to-HTTPS redirection
@@ -15,7 +15,7 @@ The development environment provides:
 - Docker Compose orchestration through a root Makefile
 - Managed local domain mappings and CA trust
 
-**Primary application URL:** `https://transcendence.test:8443`
+**Primary application URL:** run `python3 -m scripts.dev.configuration origin` from the repository root. The URLs below use the initial development settings as examples; use the configured hostname and published ports for your deployment.
 
 The local setup is intended for development only. It is not a production deployment configuration.
 
@@ -75,45 +75,24 @@ cd ft_transcendence
 
 Use the actual repository URL supplied by the project team.
 
-### 3.2 Configure environment variables
-
-Create `.env` from the provided example:
+### 3.2 Validate public configuration
 
 ```bash
-cp .env.example .env
+python3 -m scripts.dev.configuration
 ```
 
-Do not overwrite an existing `.env` containing settings you intend to preserve.
-
-Review the database credentials and other local development settings before proceeding.
-
-Never commit `.env` or share actual credentials in logs.
+The tracked `config/development.env` is the single source for the public development domain, published ports and session policy. No `.env` creation is needed for the guarded deployment. Database credentials are provisioned through the protected bootstrap and Vault. The root `.env.example` was retired; do not delete existing private files blindly. Standalone component runs and CI use their own explicit environment (see [backend E2E tests](backend-e2e.md)).
 
 ### 3.3 Start the project
 
-From the repository root:
+On a new supported native Ubuntu VM, use `make initialize`. On an already initialized VM, use `make up`, or `make recover` if Vault is sealed. See the [team quick start](../dev-team-quickstart.md) for prerequisites and recovery instructions. Do not use raw Compose to recreate the guarded runtime.
 
 ```bash
-make
+make initialize  # First install only
+make health      # Read-only verification
 ```
 
-This is equivalent to `make up`.
-
-The command performs the following operations:
-
-1. Inspects the local domain mappings.
-2. Requests authorization before modifying hosts files when necessary.
-3. Checks for existing development TLS certificates.
-4. Generates missing certificates with `mkcert`.
-5. Checks the required local CA trust.
-6. Requests authorization before installing missing trust.
-7. Builds and starts the Docker Compose services.
-
-On WSL2, Windows UAC may appear when the Windows hosts file needs modification. Linux hosts changes may require `sudo`.
-
-Trust installation is a security-sensitive operation and requires explicit confirmation.
-
-After the initial configuration, repeated `make` commands reuse valid domain mappings, certificates, and trust settings without unnecessary regeneration.
+Changing the public configuration is not a live update: existing containers and certificates may require a reviewed cutover. Never remove volumes or reinitialize Vault to change a hostname or port.
 
 ### 3.4 Open the application
 
@@ -147,7 +126,7 @@ Browser / Client
        |
        | HTTPS :8443
        v
-  Nginx :443
+  Nginx :8443
        |
        +-- /            -> Frontend / Vite :5173
        |
@@ -192,7 +171,7 @@ make check
 ### 6.2 Check containers
 
 ```bash
-docker compose -f compose.yml ps
+docker ps --filter label=com.docker.compose.project=transcendence-app-dev
 ```
 
 All expected services should be running, and PostgreSQL should be healthy.
@@ -200,7 +179,7 @@ All expected services should be running, and PostgreSQL should be healthy.
 ### 6.3 Check Nginx configuration
 
 ```bash
-docker compose -f compose.yml exec nginx nginx -t
+docker exec transcendence-app-dev-nginx-1 nginx -t
 ```
 
 ### 6.4 Check HTTP-to-HTTPS redirection
@@ -270,7 +249,7 @@ openssl x509 \
 
 The generated certificate includes the following names:
 
-- `transcendence.test`
+- The configured development domain (if different from localhost)
 - `localhost`
 - `127.0.0.1`
 
@@ -293,7 +272,9 @@ The Docker Compose configuration supports development file synchronization.
 To watch frontend source changes while the stack is running:
 
 ```bash
-docker compose -f compose.yml watch --no-up frontend
+FT_DEV_TLS_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/transcendence/dev/tls" \
+python3 -m scripts.dev.configuration compose -p transcendence-app-dev \
+  -f compose.yml watch --no-up frontend
 ```
 
 When files under `frontend/src` change, Docker Compose synchronizes them to the frontend container.

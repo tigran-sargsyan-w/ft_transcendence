@@ -51,7 +51,7 @@ def responses():
         b'<div id="root"></div><script src="/src/main.tsx"></script>\n200',
         b"/* Vite */ createRoot(document.querySelector('#root'))\n200",
         b'{"data":{"status":"ok","database":"ok"}}\n200',
-        b'308\nhttps://transcendence.test:8443/',
+        f"308\n{nginx.PUBLIC.app_origin}/".encode("ascii"),
     ]
 
 
@@ -251,7 +251,7 @@ class NginxTests(unittest.TestCase):
             with self.subTest(path=path), \
                  patch.object(nginx, "run", return_value=b"SECRET-CANARY\n502"):
                 with self.assertRaises(nginx.NginxReadinessError) as error:
-                    nginx.curl_bytes("https://transcendence.test:8443", port=8443, path=path)
+                    nginx.curl_bytes(nginx.PUBLIC.app_origin, port=nginx.HTTPS_PORT, path=path)
                 self.assertEqual(error.exception.path, path)
                 self.assertNotIn("SECRET-CANARY", str(error.exception))
         for path, status in (("/", b"403"), ("/", b"503"), ("/", b"504"),
@@ -259,7 +259,7 @@ class NginxTests(unittest.TestCase):
             with self.subTest(path=path, status=status), \
                  patch.object(nginx, "run", return_value=b"SECRET-CANARY\n" + status):
                 with self.assertRaises(nginx.NginxBootstrapError) as error:
-                    nginx.curl_bytes("https://transcendence.test:8443", port=8443, path=path)
+                    nginx.curl_bytes(nginx.PUBLIC.app_origin, port=nginx.HTTPS_PORT, path=path)
                 self.assertNotIsInstance(error.exception, nginx.NginxReadinessError)
 
     def test_recovery_probe_runs_full_checks_and_pins_identity(self):
@@ -349,7 +349,7 @@ class NginxTests(unittest.TestCase):
             with self.assertRaises(nginx.NginxBootstrapError): nginx.verify_routes()
 
     def test_rejects_bad_redirect(self):
-        samples = responses(); samples[4] = b"301\nhttps://transcendence.test:8443/"
+        samples = responses(); samples[4] = f"301\n{nginx.PUBLIC.app_origin}/".encode("ascii")
         with patch.object(nginx, "run", side_effect=samples):
             with self.assertRaises(nginx.NginxBootstrapError): nginx.verify_routes()
 

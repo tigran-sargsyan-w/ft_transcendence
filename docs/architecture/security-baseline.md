@@ -6,8 +6,8 @@ These rules apply regardless of the final product concept or technology stack.
 
 - Never store passwords in plaintext.
 - Never commit real secrets, tokens, API keys, private keys, or credentials.
-- Local secrets belong in ignored environment/configuration files.
-- Keep `.env.example` free of real secret values.
+- Development runtime secrets are delivered through Vault and protected local bootstrap state. Never put credentials in the tracked `config/development.env`.
+- Keep isolated test credentials and any standalone local configuration separate from the guarded deployment.
 - Secret rotation must not require changing business logic.
 
 ## Validation and authorization
