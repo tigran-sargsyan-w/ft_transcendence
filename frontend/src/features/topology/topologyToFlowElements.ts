@@ -3,15 +3,13 @@ import { MarkerType, type Edge, type Node } from "@xyflow/react";
 import type { ServiceNodeData } from "./ServiceNode";
 import type { TopologySnapshot } from "./types";
 
-// Approximate size of ServiceNode, used by dagre to space the nodes.
 const NODE_WIDTH = 160;
-const NODE_HEIGHT = 70;
+const NODE_HEIGHT = 50;
 
-// Places the nodes in levels from left to right, following the edges.
 function layout(topology: TopologySnapshot) {
   const graph = new dagre.graphlib.Graph();
   graph.setDefaultEdgeLabel(() => ({}));
-  graph.setGraph({ rankdir: "LR", nodesep: 30, ranksep: 80 });
+  graph.setGraph({ rankdir: "TB", nodesep: 24, ranksep: 60 });
 
   topology.nodes.forEach((node) =>
     graph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT }),
@@ -31,7 +29,6 @@ export function topologyToFlowElements(topology: TopologySnapshot): {
 
   const nodes: Node<ServiceNodeData, "service">[] = topology.nodes.map(
     (node) => {
-      // dagre gives the center of the node, React Flow expects its top-left corner.
       const { x, y } = graph.node(node.id);
       return {
         id: node.id,
@@ -49,13 +46,21 @@ export function topologyToFlowElements(topology: TopologySnapshot): {
     },
   );
 
-  const edges: Edge[] = topology.edges.map((edge) => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    type: "smoothstep",
-    markerEnd: { type: MarkerType.ArrowClosed },
-  }));
+  const statusById = new Map(topology.nodes.map((n) => [n.id, n.status]));
+
+  const edges: Edge[] = topology.edges.map((edge) => {
+    const isDown = statusById.get(edge.target) === "down";
+    const color = isDown ? "var(--health-down)" : "var(--muted-foreground)";
+    return {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      type: "smoothstep",
+      animated: isDown,
+      style: { stroke: color, strokeWidth: 1.5 },
+      markerEnd: { type: MarkerType.ArrowClosed, color },
+    };
+  });
 
   return { nodes, edges };
 }

@@ -2,7 +2,6 @@ import { useEffect, useMemo } from "react";
 import {
   Background,
   Controls,
-  MiniMap,
   ReactFlow,
   useEdgesState,
   useNodesState,
@@ -34,20 +33,21 @@ export function TopologyCanvas({ topology, onNodeClick }: TopologyCanvasProps) {
   }, [initial, setNodes, setEdges]);
 
   return (
-    <div style={{ width: "100%", height: "70vh", minHeight: 420 }}>
+    <div style={{ width: "100%", height: 420 }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        colorMode="dark"
         fitView
+        fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
         nodesConnectable={false}
         onNodeClick={(_event, node) => onNodeClick?.(node.id)}
       >
-        <Background />
-        <Controls />
-        <MiniMap />
+        <Background gap={20} size={1} color="var(--border)" />
+        <Controls showInteractive={false} />
       </ReactFlow>
     </div>
   );
