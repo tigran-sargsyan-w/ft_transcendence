@@ -1,4 +1,6 @@
-import { StatCard } from "@/components/cards/StatCard";
+import { StatCard, toneClasses } from "@/components/cards/StatCard";
+import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { SectionBanner } from "@/components/SectionBanner";
 import { SelectedServiceCard } from "@/features/topology/Cards/SelectedServiceCard";
 import { ServicesListCard } from "@/features/topology/Cards/ServicesListCard";
@@ -26,6 +28,13 @@ export default function Topology() {
   const totalHealthyServices = getHealthyServices(mockTopology).length;
   const totalImpactedServices = getImpactedServices(mockTopology).length;
   const totalDownServices = getDownServices(mockTopology).length;
+  const stats = [
+    { title: "Services", value: totalServices, tone: "default" },
+    { title: "Healthy", value: totalHealthyServices, tone: "success" },
+    { title: "Impacted", value: totalImpactedServices, tone: "warning" },
+    { title: "Down", value: totalDownServices, tone: "danger" },
+    { title: "Last Scan", value: 5, tone: "default" },
+  ] as const;
 
   const [selectedService, setSelectedService] = useState<GraphNode | undefined>(
     undefined,
@@ -41,27 +50,24 @@ export default function Topology() {
   return (
     <section className="flex flex-col gap-4 w-screen p-4">
       <SectionBanner title="Topology" />
-      <div className="flex flex-wrap md:flex-row gap-4">
-        <StatCard title="Services" value={totalServices} description="" />
-        <StatCard
-          title="Healthy"
-          value={totalHealthyServices}
-          description=""
-          tone="success"
-        />
-        <StatCard
-          title="Impacted"
-          value={totalImpactedServices}
-          description=""
-          tone="warning"
-        />
-        <StatCard
-          title="Down"
-          value={totalDownServices}
-          description=""
-          tone="danger"
-        />
-        <StatCard title="Last Scan" value={5} description="" />
+      <Card className="py-3 md:hidden">
+        <CardContent className="grid grid-cols-5 divide-x divide-border text-center">
+          {stats.map((stat) => (
+            <div key={stat.title} className="flex flex-col gap-0.5 px-1">
+              <span className={cn("text-lg font-bold", toneClasses[stat.tone])}>
+                {stat.value}
+              </span>
+              <span className="text-[10px] uppercase text-muted-foreground">
+                {stat.title}
+              </span>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+      <div className="hidden md:flex gap-4">
+        {stats.map((stat) => (
+          <StatCard key={stat.title} {...stat} description="" />
+        ))}
       </div>
       <div className="flex flex-col md:flex-row gap-4">
         <TopologyCard

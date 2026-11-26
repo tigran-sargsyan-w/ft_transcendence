@@ -1,6 +1,6 @@
 import { Card, CardHeader, CardTitle, CardContent } from "../ui/card";
 
-const toneClasses = {
+export const toneClasses = {
   default: "",
   danger: "text-severity-sev1",
   warning: "text-amber-400",
