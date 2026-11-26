@@ -1,4 +1,5 @@
-import { StatCard, toneClasses } from "@/components/cards/StatCard";
+import { StatCard } from "@/components/cards/StatCard";
+import { toneClasses } from "@/components/cards/statTones";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { SectionBanner } from "@/components/SectionBanner";
