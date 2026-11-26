@@ -22,6 +22,40 @@ Configuration:
 - `infra/nginx/default.conf.template`
 - `scripts/dev/bootstrap_nginx.py`
 
+## Secret-safe development logging (#161)
+
+The gateway uses a minimal native ModSecurity audit format (`AZ`).
+This retains transaction metadata and record boundaries, rather than
+request/response headers, bodies or matched values. The JSON audit
+format is intentionally avoided because it can retain the request URI
+independently of the selected audit parts. WAF blocking, request and
+response inspection, and scoped Socket.IO/Grafana rules are unchanged.
+
+Both HTTP and HTTPS servers use `safe_main` access logs: remote address,
+timestamp, response status, bytes sent and request duration. Raw URLs,
+query strings, referer and other request headers are not included.
+Server error logging is restricted to `crit`; the Grafana-specific
+logging protection is retained.
+
+Trade-off: detailed CRS rule IDs and matched data are not available in
+minimal audit records. HTTP status and transaction metadata remain.
+This is a development hardening policy, not a comprehensive redaction
+pipeline. Critical errors and messages outside the server context may
+still contain sensitive data; other application logs are out of scope.
+
+Existing installations must explicitly recreate only the trusted Nginx
+service after updating the repository; `make start` and `make recover`
+preserve existing containers and do not apply new environment settings.
+Validate the generated configuration and run `make health` afterward.
+Never delete Vault/PostgreSQL volumes to apply a logging change.
+
+Regression coverage: `python3 -m unittest discover -s scripts/dev`.
+For live checks, use unique synthetic cookie, authorization, body and
+query markers with successful and blocked requests; report only counts
+and HTTP statuses, not raw logs. Verify SQLi/XSS blocking still works.
+Previously collected logs are not sanitized by this change: restrict
+access, review retention and revoke any exposed live sessions as needed.
+
 ## Socket.IO compatibility
 
 The proxy supports both Socket.IO transports:
