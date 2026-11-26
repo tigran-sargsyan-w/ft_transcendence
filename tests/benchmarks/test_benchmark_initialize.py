@@ -23,37 +23,28 @@ class BenchmarkRecorderTests(unittest.TestCase):
     def feed(self, text, now=1.0):
         self.recorder.feed(text.encode(), self.answers.append, now=now)
 
-    def test_known_prompt_requires_order_and_handles_split_bytes(self):
-        prompt = benchmark.APPROVAL_SEQUENCE[0]
-        self.feed(prompt[:10])
-        self.assertEqual(self.answers, [])
-        self.feed(prompt[10:] + " [y/N]")
-        self.assertEqual(self.answers, [b"y\n"])
-        self.feed("y\r\n")
-        self.assertEqual(len(self.recorder.approvals), 1)
-        self.assertIsNone(self.recorder.rejection)
+    def test_formerly_reviewed_prompt_is_refused_even_when_split(self):
+        self.feed("Download these missing Docker ")
+        self.feed("images? [y/N]")
+        self.assertEqual(self.answers, [b"n\n"])
+        self.assertEqual(self.recorder.unexpected_confirmations, 1)
+        self.assertEqual(self.recorder.approvals, [])
+        self.assertIsNotNone(self.recorder.rejection)
 
     def test_unrecognized_question_is_refused(self):
         self.feed("Delete all Docker volumes? [y/N]")
         self.assertEqual(self.answers, [b"n\n"])
         self.assertIsNotNone(self.recorder.rejection)
-        self.assertEqual(self.recorder.approvals, [])
-
-    def test_out_of_order_question_is_refused(self):
-        self.feed(benchmark.APPROVAL_SEQUENCE[1] + " [y/N]")
-        self.assertEqual(self.answers, [b"n\n"])
-        self.assertEqual(self.recorder.approvals, [])
-
-    def test_repeated_question_is_refused(self):
-        prompt = benchmark.APPROVAL_SEQUENCE[0] + " [y/N]"
-        self.feed(prompt + "\n")
-        self.feed(prompt)
-        self.assertEqual(self.answers, [b"y\n", b"n\n"])
-        self.assertIsNotNone(self.recorder.rejection)
 
     def test_unreviewed_yes_default_prompt_is_refused(self):
         self.feed("Delete sensitive data? [Y/n]")
         self.assertEqual(self.answers, [b"n\n"])
+
+    def test_safe_child_prompt_refusal_marker_fails_benchmark(self):
+        self.feed(benchmark.PROMPT_REFUSED + "\n")
+        self.assertEqual(self.answers, [])
+        self.assertEqual(self.recorder.unexpected_confirmations, 1)
+        self.assertIsNotNone(self.recorder.rejection)
 
     def test_timing_and_marker_are_recorded_without_raw_output(self):
         self.feed("TIMING: stage=vault attempt=1/3 result=FAIL elapsed=0.08s\n", 1.0)
@@ -67,13 +58,14 @@ class BenchmarkRecorderTests(unittest.TestCase):
         self.assertNotIn("raw_output", report)
         self.assertNotIn("started", report["preparations"]["vault"])
 
-    def test_success_requires_exit_marker_all_confirmations_and_no_refusal(self):
+    def test_success_requires_exit_marker_all_stages_and_zero_confirmations(self):
         self.recorder.ready = True
         self.assertFalse(self.recorder.successful(0))
-        self.recorder.approvals = [{"prompt": prompt} for prompt in benchmark.APPROVAL_SEQUENCE]
+        for index, name in enumerate(benchmark.STAGE_NAMES, 1):
+            self.feed(f" => [{index:02d}/21] {name} DONE 1.0s | total {index}.0s\n")
         self.assertTrue(self.recorder.successful(0))
         self.assertFalse(self.recorder.successful(1))
-        self.recorder.rejection = "unexpected"
+        self.feed("Unexpected? [y/N]")
         self.assertFalse(self.recorder.successful(0))
 
 

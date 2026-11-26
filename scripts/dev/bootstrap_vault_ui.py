@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
 """Guarded local Vault Web UI gateway bootstrap."""
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events, bootstrap_cli_progress as cli
+    from .bootstrap_progress import Phase, Status
+else:
+    import bootstrap_plan_events as plan_events
+    import bootstrap_cli_progress as cli
+    from bootstrap_progress import Phase, Status
+
 import argparse
+from contextlib import ExitStack, nullcontext
 import json
 import os
 from pathlib import Path
@@ -27,6 +36,21 @@ CA = (
 TARGET = "/usr/local/etc/haproxy/haproxy.cfg"
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "transcendence/dev"
 ENABLED = STATE / "vault-ui.enabled"
+UI_URL = "https://localhost:8200/ui/"
+
+PRESENTATION = {
+    "enable": ("Enabling Vault UI", (
+        "Acquire startup lock", "Inspect gateway configuration", "Record enabled intent",
+        "Verify Vault readiness", "Prepare gateway", "Verify HTTPS readiness",
+    )),
+    "disable": ("Disabling Vault UI", (
+        "Acquire startup lock", "Inspect gateway configuration", "Stop or keep gateway",
+        "Clear enabled intent", "Verify disabled state",
+    )),
+    "status": ("Checking Vault UI", (
+        "Read operator intent", "Verify actual gateway state",
+    )),
+}
 
 EXPECTED_CONFIG = """global
     maxconn 64
@@ -302,7 +326,7 @@ def desired_enabled():
 def mark_enabled():
     STATE.mkdir(parents=True, mode=0o700, exist_ok=True)
     if desired_enabled():
-        return
+        return False
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     try:
         fd = os.open(ENABLED, flags, 0o600)
@@ -312,6 +336,7 @@ def mark_enabled():
         output.write(b"enabled\n")
         output.flush()
         os.fsync(output.fileno())
+    return True
 
 
 def mark_disabled():
@@ -320,67 +345,110 @@ def mark_disabled():
             ENABLED.unlink()
         except OSError:
             raise GatewayError("Cannot clear Vault UI intent") from None
+        return True
+    return False
 
 
 def check_disabled():
     """Disabled is healthy only when the gateway really cannot serve UI."""
-    compose()
-    item = inspect()
+    with cli.step("Validate Compose configuration"):
+        compose()
+    with cli.step("Inspect gateway"):
+        item = inspect()
     if item is not None:
-        verify_identity(item)
-        verify_network(PRIVATE, "transcendence-vault-dev", True)
-        verify_network(EDGE, PROJECT, False)
-        state = item.get("State") or {}
-        if state.get("Running") is not False or state.get("Status") not in ("exited", "created"):
-            raise GatewayError("Vault UI unexpectedly running or in an unsafe state")
-    print("RESULT: VAULT UI DISABLED (expected, read-only)")
+        with cli.step("Verify gateway identity and network isolation"):
+            verify_identity(item)
+            verify_network(PRIVATE, "transcendence-vault-dev", True)
+            verify_network(EDGE, PROJECT, False)
+        with cli.step("Verify stopped gateway"):
+            state = item.get("State") or {}
+            if state.get("Running") is not False or state.get("Status") not in ("exited", "created"):
+                raise GatewayError("Vault UI unexpectedly running or in an unsafe state")
+    cli.legacy("RESULT: VAULT UI DISABLED (expected, read-only)")
+    return "absent" if item is None else "stopped"
 
 
-def status():
-    if desired_enabled():
-        check()
-        print("STATUS: VAULT UI ENABLED (healthy)")
-    else:
-        check_disabled()
-        print("STATUS: VAULT UI DISABLED (expected)")
+def status(*, present=False):
+    with cli.stage("Read operator intent"):
+        enabled = desired_enabled()
+        if present:
+            cli.notice("Desired state: ENABLED" if enabled else "Desired state: DISABLED")
+    with cli.stage("Verify actual gateway state", Phase.VERIFY):
+        if enabled:
+            check()
+            actual = "running"
+        else:
+            actual = check_disabled()
+        if present:
+            cli.notice("Gateway state: " + actual)
+    if not present:
+        print("STATUS: VAULT UI ENABLED (healthy)" if enabled else
+              "STATUS: VAULT UI DISABLED (expected)")
+    return enabled
 
 
 def enable():
     # Validate the exact Compose model and any existing gateway BEFORE
     # writing operator intent. A failed subsequent start stays enabled/failed.
-    compose()
-    item = inspect()
-    if item is not None:
-        verify_identity(item)
-    mark_enabled()
+    with cli.stage("Inspect gateway configuration"):
+        with cli.step("Validate Compose configuration"):
+            compose()
+        with cli.step("Inspect existing gateway"):
+            item = inspect()
+        if item is not None:
+            with cli.step("Verify gateway identity"):
+                verify_identity(item)
+    with cli.stage("Record enabled intent", Phase.PREPARE) as outcome:
+        if not mark_enabled():
+            outcome.status = Status.CACHED
     apply()
-    print("RESULT: VAULT UI ENABLED")
+    cli.result("VAULT UI ENABLED")
 
 
-def disable():
+def disable(*, present=False):
     # Stop only the known, fully verified gateway, never Vault itself.
-    compose()
-    item = inspect()
-    if item is not None:
-        verify_identity(item)
-        verify_network(PRIVATE, "transcendence-vault-dev", True)
-        verify_network(EDGE, PROJECT, False)
-        state = item.get("State") or {}
-        if state.get("Running") is True and state.get("Status") == "running":
-            old_id = item.get("Id")
-            command(["docker", "stop", "--time", "10", NAME], timeout=35)
-            after = inspect()
-            if after is None or after.get("Id") != old_id:
-                raise GatewayError("Gateway identity changed during stop")
-            verify_identity(after)
-            state = after.get("State") or {}
-        if state.get("Running") is not False or state.get("Status") not in ("created", "exited"):
-            raise GatewayError("Cannot verify that Vault UI is stopped")
+    with cli.stage("Inspect gateway configuration"):
+        with cli.step("Validate Compose configuration"):
+            compose()
+        with cli.step("Inspect existing gateway"):
+            item = inspect()
+        if item is not None:
+            with cli.step("Verify gateway identity and network isolation"):
+                verify_identity(item)
+                verify_network(PRIVATE, "transcendence-vault-dev", True)
+                verify_network(EDGE, PROJECT, False)
+    with cli.stage("Stop or keep gateway", Phase.PREPARE) as outcome:
+        if item is not None:
+            state = item.get("State") or {}
+            if state.get("Running") is True and state.get("Status") == "running":
+                old_id = item.get("Id")
+                with cli.step("Stop existing gateway"):
+                    command(["docker", "stop", "--time", "10", NAME], timeout=35)
+                with cli.step("Verify retained gateway identity"):
+                    after = inspect()
+                    if after is None or after.get("Id") != old_id:
+                        raise GatewayError("Gateway identity changed during stop")
+                    verify_identity(after)
+                    state = after.get("State") or {}
+                action = "STOP: " + NAME
+            else:
+                outcome.status = Status.CACHED
+                action = "KEEP: gateway already stopped"
+            with cli.step("Verify stopped gateway"):
+                if state.get("Running") is not False or state.get("Status") not in ("created", "exited"):
+                    raise GatewayError("Cannot verify that Vault UI is stopped")
+        else:
+            outcome.status = Status.CACHED
+            action = "KEEP: optional gateway absent"
+        if present:
+            cli.notice(action)
     # Clear intent only after stop is verified; failures stay visible to health.
-    mark_disabled()
-    check_disabled()
-    print("RESULT: VAULT UI DISABLED")
-
+    with cli.stage("Clear enabled intent", Phase.PREPARE) as outcome:
+        if not mark_disabled():
+            outcome.status = Status.CACHED
+    with cli.stage("Verify disabled state", Phase.VERIFY):
+        check_disabled()
+    cli.result("VAULT UI DISABLED")
 
 def probe_ui():
     if not CA.is_file() or CA.is_symlink():
@@ -394,7 +462,7 @@ def probe_ui():
 
     try:
         with opener.open(
-            "https://localhost:8200/ui/", timeout=12
+            UI_URL, timeout=12
         ) as response:
             body = response.read(8192)
             if (
@@ -409,73 +477,93 @@ def probe_ui():
 
 
 def check():
-    compose()
+    with cli.step("Validate Compose configuration"):
+        compose()
 
-    item = inspect()
-    if item is None:
-        raise GatewayError("Gateway container missing")
+    with cli.step("Inspect gateway"):
+        item = inspect()
+        if item is None:
+            raise GatewayError("Gateway container missing")
 
-    verify_identity(item)
-    verify_network(PRIVATE, "transcendence-vault-dev", True)
-    verify_network(EDGE, PROJECT, False)
+    with cli.step("Verify gateway identity and network isolation"):
+        verify_identity(item)
+        verify_network(PRIVATE, "transcendence-vault-dev", True)
+        verify_network(EDGE, PROJECT, False)
 
-    state = item.get("State") or {}
-    if state.get("Running") is not True:
-        raise GatewayError("Gateway is not running")
+    with cli.step("Verify running gateway"):
+        state = item.get("State") or {}
+        if state.get("Running") is not True:
+            raise GatewayError("Gateway is not running")
 
-    probe_ui()
-    print("RESULT: VAULT UI GATEWAY READY (read-only)")
+    with cli.step("Probe trusted HTTPS UI"):
+        probe_ui()
+    cli.legacy("RESULT: VAULT UI GATEWAY READY (read-only)")
 
 
 def apply():
-    args, env = compose()
+    with cli.stage("Verify Vault readiness"):
+        with cli.step("Validate Compose configuration"):
+            args, env = compose()
 
-    command([
-        sys.executable,
-        str(ROOT / "scripts/dev/bootstrap_vault.py"),
-        "check",
-    ])
+        with cli.step("Check Vault readiness"):
+            command([
+                sys.executable,
+                str(ROOT / "scripts/dev/bootstrap_vault.py"),
+                "check",
+            ])
 
-    verify_network(PRIVATE, "transcendence-vault-dev", True)
+        with cli.step("Verify private network"):
+            verify_network(PRIVATE, "transcendence-vault-dev", True)
 
-    item = inspect()
-    if item is not None:
-        verify_identity(item)
+    with cli.stage("Prepare gateway", Phase.PREPARE) as outcome:
+        with cli.step("Inspect existing gateway"):
+            item = inspect()
+        if item is not None:
+            with cli.step("Verify gateway identity"):
+                verify_identity(item)
 
-        status = (item.get("State") or {}).get("Status")
+            status = (item.get("State") or {}).get("Status")
 
-        if status == "running":
-            print(f"KEEP: {NAME}", flush=True)
-        elif status in ("created", "exited"):
-            original = item.get("Id")
-            command(["docker", "start", NAME], timeout=90)
+            if status == "running":
+                outcome.status = Status.CACHED
+                cli.notice(f"KEEP: {NAME}")
+            elif status in ("created", "exited"):
+                original = item.get("Id")
+                with cli.step("Start existing gateway"):
+                    command(["docker", "start", NAME], timeout=90)
 
-            updated = inspect()
-            if updated is None or updated.get("Id") != original:
-                raise GatewayError("Gateway identity changed")
-            verify_identity(updated)
-            print(f"START: {NAME}", flush=True)
+                with cli.step("Verify retained gateway identity"):
+                    updated = inspect()
+                    if updated is None or updated.get("Id") != original:
+                        raise GatewayError("Gateway identity changed")
+                    verify_identity(updated)
+                cli.notice(f"START: {NAME}")
+            else:
+                raise GatewayError("Unexpected gateway state")
         else:
-            raise GatewayError("Unexpected gateway state")
-    else:
-        command(
-            args + [
-                "up", "-d", "--no-deps",
-                "--no-recreate", SERVICE,
-            ],
-            timeout=180,
-            env=env,
-        )
-        print(f"CREATED: {NAME}", flush=True)
+            with cli.step("Create optional gateway"):
+                command(
+                    args + [
+                        "up", "-d", "--no-deps",
+                        "--no-recreate", SERVICE,
+                    ],
+                    timeout=180,
+                    env=env,
+                )
+            cli.notice(f"CREATED: {NAME}")
 
-    check()
-    print("RESULT: VAULT UI GATEWAY READY (apply)")
-
+    with cli.stage("Verify HTTPS readiness", Phase.VERIFY):
+        check()
+    cli.legacy("RESULT: VAULT UI GATEWAY READY (apply)")
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("plan", "check", "apply", "enable", "disable", "status"))
+    parser.add_argument("--progress", action="store_true",
+                        help="enable shared presentation for public administrative commands")
     args = parser.parse_args()
+    if args.progress and args.mode not in PRESENTATION:
+        parser.error("--progress is only supported by enable, disable and status")
 
     try:
         if os.geteuid() == 0:
@@ -485,9 +573,11 @@ def main():
             compose()
             item = inspect()
             if item is None:
+                plan_events.container("Vault UI gateway", item, optional=True)
                 print("TODO: Vault UI gateway not created (read-only)")
             else:
                 verify_identity(item)
+                plan_events.container("Vault UI gateway", item, optional=True)
                 print("EXISTS: Vault UI gateway (read-only)")
             return 0
 
@@ -495,20 +585,39 @@ def main():
             if not desired_enabled():
                 raise GatewayError("Vault UI is intentionally disabled")
             check()
-        elif args.mode == "status":
-            status()
-        else:
-            # Shared startup lock prevents a concurrent make start/initialize
-            # from racing the explicit administrative lifecycle transition.
-            import bootstrap_unified as unified
-            try:
-                with unified.exclusive_orchestrator_lock():
-                    if args.mode == "disable":
-                        disable()
-                    else:
-                        enable()  # Legacy `apply` also records enabled intent.
-            except unified.UnifiedStartupError:
-                raise GatewayError("Trusted startup lock unavailable") from None
+            return 0
+
+        # Only the public Makefile targets opt in. Internal bootstrap helpers
+        # retain their original output and never own another renderer.
+        context = nullcontext()
+        if args.progress:
+            header, labels = PRESENTATION[args.mode]
+            context = cli.presentation(labels, header)
+        enabled = False
+        with context:
+            if args.mode == "status":
+                enabled = status(present=args.progress)
+            else:
+                # Shared startup lock prevents a concurrent make start/initialize
+                # from racing the explicit administrative lifecycle transition.
+                import bootstrap_unified as unified
+                try:
+                    with ExitStack() as stack:
+                        with cli.stage("Acquire startup lock"):
+                            stack.enter_context(unified.exclusive_orchestrator_lock())
+                        if args.mode == "disable":
+                            disable(present=args.progress)
+                        else:
+                            enable()  # Legacy `apply` also records enabled intent.
+                            enabled = True
+                except unified.UnifiedStartupError:
+                    raise GatewayError("Trusted startup lock unavailable") from None
+        if args.progress:
+            if args.mode == "status":
+                print("STATUS: VAULT UI ENABLED (healthy)" if enabled else
+                      "STATUS: VAULT UI DISABLED (expected)", flush=True)
+            if enabled:
+                print("Vault UI: " + UI_URL, flush=True)
         return 0
 
     except GatewayError as exc:

@@ -7,7 +7,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import bootstrap_unified as unified
 
@@ -112,37 +112,89 @@ class UnifiedTests(unittest.TestCase):
         preflight.assert_called_once_with()
         lock.assert_not_called()
 
-    def test_initialization_requires_tty(self):
-        with patch.object(unified.sys.stdin, "isatty", return_value=False):
-            with self.assertRaises(unified.UnifiedStartupError):
-                unified.initialize()
+    def fake_prerequisites(self, runner, progress):
+        for index in range(2):
+            progress.begin(index)
+            progress.finish(unified.Status.DONE)
 
-    def test_initialization_all_ready_has_no_apply(self):
-        with patch.object(unified.sys.stdin, "isatty", return_value=True), \
+    def test_ready_prerequisites_are_cached_without_privileged_install(self):
+        runner = MagicMock()
+        runner.run.return_value = 0
+        progress = MagicMock()
+        unified.prepare_prerequisites(runner, progress)
+        self.assertEqual([call.args[0][-1] for call in runner.run.call_args_list],
+                         ["--initialize-check", "--orchestrator-preflight", "preflight", "check"])
+        self.assertEqual(progress.finish.call_args_list,
+                         [call(unified.Status.CACHED), call(unified.Status.CACHED)])
+
+    def test_session_refresh_does_not_continue_to_images(self):
+        runner = MagicMock()
+        runner.run.side_effect = [1, 0, 2]
+        runner.last_diagnostics.session_refresh = True
+        with self.assertRaises(unified.SessionRefreshRequired):
+            unified.prepare_prerequisites(runner, MagicMock())
+        self.assertEqual(runner.run.call_count, 3)
+        self.assertEqual(runner.run.call_args_list[1].args[0], ["sudo", "-v"])
+        self.assertFalse(runner.run.call_args_list[2].kwargs["pause_for_auth"])
+
+    def test_local_prerequisite_guard_failure_does_not_authenticate(self):
+        runner = MagicMock()
+        runner.run.return_value = 3
+        with self.assertRaises(unified.UnifiedStartupError):
+            unified.prepare_prerequisites(runner, MagicMock())
+        runner.run.assert_called_once()
+
+    def test_initialization_all_ready_without_tty_has_no_apply(self):
+        with patch.object(unified.sys.stdin, "isatty", return_value=False), \
+             patch.object(unified, "prepare_prerequisites", side_effect=self.fake_prerequisites), \
              patch.object(unified, "command", return_value=True) as cmd, \
              contextlib.redirect_stdout(io.StringIO()):
-            unified.initialize()
+            unified.initialize(9)
         self.assertEqual([call.args[0] for call in cmd.call_args_list],
                          [stage[1] for stage in unified.STAGES if stage[0] != "vault-ui"])
 
     def test_initialization_prepares_only_missing_stage(self):
         responses = [False] * unified.READ_ONLY_ATTEMPTS + [True, True] + [True] * (len(unified.STAGES) - 1)
-        with patch.object(unified.sys.stdin, "isatty", return_value=True), \
+        with patch.object(unified, "prepare_prerequisites", side_effect=self.fake_prerequisites), \
              patch.object(unified, "command", side_effect=responses) as cmd, \
              patch.object(unified.time, "sleep"), \
              contextlib.redirect_stdout(io.StringIO()):
-            unified.initialize()
+            unified.initialize(9)
         self.assertEqual([call.args[0] for call in cmd.call_args_list][:5],
                          ["--check-host"] * unified.READ_ONLY_ATTEMPTS + ["--prepare-host", "--check-host"])
+        self.assertEqual(cmd.call_args_list[3].kwargs["lock_fd"], 9)
         self.assertNotIn("--prepare-vault", [call.args[0] for call in cmd.call_args_list])
 
-    def test_initialization_halts_on_denied_prepare(self):
-        with patch.object(unified.sys.stdin, "isatty", return_value=True), \
+    def test_initialization_halts_on_failed_prepare(self):
+        with patch.object(unified, "prepare_prerequisites", side_effect=self.fake_prerequisites), \
              patch.object(unified, "command", side_effect=[False] * (unified.READ_ONLY_ATTEMPTS + 1)) as cmd, \
              patch.object(unified.time, "sleep"):
             with self.assertRaises(unified.UnifiedStartupError):
-                unified.initialize()
+                unified.initialize(9)
         self.assertEqual(cmd.call_count, unified.READ_ONLY_ATTEMPTS + 1)
+
+    def test_initialize_dispatch_passes_lock_only_for_prepare(self):
+        runner = MagicMock()
+        runner.run.return_value = 0
+        self.assertTrue(unified.command("--prepare-vault", runner=runner, lock_fd=9))
+        self.assertEqual(runner.run.call_args.args[0],
+                         [str(unified.BOOTSTRAP), "--initialize-stage", "--prepare-vault", "9"])
+        self.assertEqual(runner.run.call_args.kwargs["pass_fds"], (9,))
+        self.assertTrue(runner.run.call_args.kwargs["critical"])
+        self.assertTrue(unified.command("--check-vault", runner=runner))
+        self.assertEqual(runner.run.call_args.kwargs["pass_fds"], ())
+        self.assertFalse(runner.run.call_args.kwargs["critical"])
+        with self.assertRaises(unified.UnifiedStartupError):
+            unified.command("--prepare-host", runner=runner)
+
+    def test_unexpected_prompt_never_triggers_preparation(self):
+        with patch.object(unified, "prepare_prerequisites", side_effect=self.fake_prerequisites), \
+             patch.object(unified, "command", side_effect=unified.UnexpectedApproval) as cmd, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(unified.UnexpectedApproval):
+                unified.initialize(9)
+        self.assertEqual(cmd.call_count, 1)
+        self.assertIn("host FAILED", output.getvalue())
 
     def test_routine_does_not_run_any_prepare_flag(self):
         with patch.object(unified, "checked", return_value=True) as ck, \
@@ -187,15 +239,15 @@ class UnifiedTests(unittest.TestCase):
 
     def test_initialize_never_requires_optional_gateway(self):
         with (
-            patch.object(unified.sys.stdin, "isatty", return_value=True),
+            patch.object(unified, "prepare_prerequisites", side_effect=self.fake_prerequisites),
             patch.object(unified, "checked", side_effect=lambda name, **_: name != "vault-ui") as probe,
             patch.object(unified, "command") as command,
             contextlib.redirect_stdout(io.StringIO()) as output,
         ):
-            unified.initialize()
+            unified.initialize(9)
         command.assert_not_called()
         self.assertNotIn("vault-ui", [call.args[0] for call in probe.call_args_list])
-        self.assertIn("SKIP: optional vault-ui", output.getvalue())
+        self.assertIn("vault-ui SKIPPED", output.getvalue())
 
     def test_health_report_rejects_missing_enabled_gateway(self):
         with (
@@ -282,6 +334,82 @@ class UnifiedTests(unittest.TestCase):
         with patch.dict("sys.modules", {"bootstrap_postgres":pg}):
             with self.assertRaisesRegex(unified.UnifiedStartupError, "already running but unhealthy"):
                 unified.guard_resume("postgres")
+
+    def test_recovery_wait_only_for_running_backend_agent(self):
+        targets = (("agent", "id", lambda _: None, "running"),)
+        error = unified.RunningNotReady("backend-agent", targets)
+        with patch.object(unified, "checked", return_value=False), \
+             patch.object(unified, "guard_resume", side_effect=error), \
+             patch.object(unified, "wait_recovery_backend_agent") as wait, \
+             patch.object(unified, "start_existing_only") as start:
+            with self.assertRaises(unified.RunningNotReady):
+                unified.resume("backend-agent")
+            with self.assertRaises(unified.RunningNotReady):
+                unified.resume("backend", recovery=True)
+            wait.assert_not_called()
+            unified.resume("backend-agent", recovery=True)
+            wait.assert_called_once_with(targets)
+            start.assert_not_called()
+
+    def test_recovery_wait_pins_identity_and_checks_full_readiness(self):
+        agent = types.ModuleType("bootstrap_backend_agent")
+        agent.NAME = "agent"
+        def item(health, identity="retained"):
+            return {"Id": identity, "State": {"Status": "running", "Running": True,
+                                               "Health": {"Status": health}}}
+        agent.inspect_agent = MagicMock(side_effect=[item("unhealthy"), item("starting"),
+                                                     item("healthy"), item("healthy")])
+        verify = MagicMock()
+        with patch.dict("sys.modules", {"bootstrap_backend_agent": agent}), \
+             patch.object(unified.time, "sleep") as sleep, \
+             patch.object(unified, "require") as require, \
+             patch.object(unified.subprocess, "run") as run, \
+             contextlib.redirect_stdout(io.StringIO()):
+            unified.wait_recovery_backend_agent((("agent", "retained", verify, "running"),))
+        self.assertEqual(verify.call_count, 4)
+        self.assertEqual(sleep.call_count, 2)
+        require.assert_called_once_with("backend-agent")
+        run.assert_not_called()
+
+    def test_recovery_wait_refuses_changed_identity_and_unexpected_state(self):
+        agent = types.ModuleType("bootstrap_backend_agent")
+        agent.NAME = "agent"
+        for item in (None, {"Id": "replacement"}, {"Id": "retained", "State": {
+                "Running": False, "Status": "exited"}}, {"Id": "retained", "State": {
+                "Running": True, "Status": "running", "Health": {"Status": "none"}}}):
+            with self.subTest(item=item):
+                agent.inspect_agent = MagicMock(return_value=item)
+                with patch.dict("sys.modules", {"bootstrap_backend_agent": agent}), \
+                     patch.object(unified, "require") as require, \
+                     patch.object(unified.time, "sleep") as sleep:
+                    with self.assertRaises(unified.UnifiedStartupError):
+                        unified.wait_recovery_backend_agent((("agent", "retained", lambda _: None, "running"),))
+                require.assert_not_called()
+                sleep.assert_not_called()
+
+    def test_recovery_wait_expires_and_does_not_retry_security_failure(self):
+        agent = types.ModuleType("bootstrap_backend_agent")
+        agent.NAME = "agent"
+        item = {"Id": "retained", "State": {"Running": True, "Status": "running",
+                                           "Health": {"Status": "unhealthy"}}}
+        agent.inspect_agent = MagicMock(return_value=item)
+        targets = (("agent", "retained", lambda _: None, "running"),)
+        with patch.dict("sys.modules", {"bootstrap_backend_agent": agent}), \
+             patch.object(unified.time, "monotonic", side_effect=[0, 61]), \
+             patch.object(unified.time, "sleep") as sleep, \
+             patch.object(unified, "require") as require:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "wait expired"):
+                unified.wait_recovery_backend_agent(targets)
+            sleep.assert_not_called()
+            require.assert_not_called()
+        item["State"]["Health"]["Status"] = "healthy"
+        with patch.dict("sys.modules", {"bootstrap_backend_agent": agent}), \
+             patch.object(unified, "require", side_effect=unified.UnifiedStartupError("security check failed")) as require, \
+             patch.object(unified.time, "sleep") as sleep:
+            with self.assertRaisesRegex(unified.UnifiedStartupError, "security check failed"):
+                unified.wait_recovery_backend_agent(targets)
+            require.assert_called_once_with("backend-agent")
+            sleep.assert_not_called()
 
     def test_resume_does_not_run_helper_if_guard_fails(self):
         with patch.object(unified, "checked", return_value=False), \
@@ -679,7 +807,7 @@ class UnifiedTests(unittest.TestCase):
         with patch.object(unified, "require", side_effect=lambda name: events.append("require:" + name)), \
              patch.object(unified, "recovery_vault", side_effect=lambda: ("vault", {"sealed": True})), \
              patch.object(unified, "interactive_unseal", side_effect=lambda *_: events.append("unseal")), \
-             patch.object(unified, "start", side_effect=lambda: events.append("start")), \
+             patch.object(unified, "start", side_effect=lambda *, recovery: events.append("start" if recovery else "wrong mode")), \
              contextlib.redirect_stdout(io.StringIO()):
             unified.recover()
         self.assertEqual(events, ["require:host", "require:resources", "unseal", "require:vault", "start"])
@@ -783,7 +911,7 @@ class UnifiedTests(unittest.TestCase):
 
     def test_initialize_does_not_repair_failed_grafana_https(self):
         with (
-            patch.object(unified.sys.stdin, "isatty", return_value=True),
+            patch.object(unified, "prepare_prerequisites", side_effect=self.fake_prerequisites),
             patch.object(
                 unified, "checked",
                 side_effect=lambda name, **_: name != "grafana-https",
@@ -794,7 +922,7 @@ class UnifiedTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 unified.UnifiedStartupError, "grafana-https"
             ):
-                unified.initialize()
+                unified.initialize(9)
 
         command.assert_not_called()
 

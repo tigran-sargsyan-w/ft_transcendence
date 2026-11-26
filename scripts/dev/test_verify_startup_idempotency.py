@@ -129,6 +129,34 @@ class IdempotencyAcceptanceTests(unittest.TestCase):
             self.assertEqual(acceptance.migration_fingerprint(), "c" * 32)
         self.assertEqual(output.getvalue(), "")
 
+    def test_initialize_acceptance_requires_healthy_baseline(self):
+        with patch.object(acceptance, "trusted", side_effect=acceptance.AcceptanceError("bad")), \
+             patch.object(acceptance, "trusted_initialize") as init, \
+             patch.object(acceptance, "snapshot") as snapshot:
+            with self.assertRaises(acceptance.AcceptanceError):
+                acceptance.verify_initialize()
+        init.assert_not_called()
+        snapshot.assert_not_called()
+
+    def test_initialize_acceptance_compares_actual_repeated_initialize(self):
+        with patch.object(acceptance, "trusted") as trusted, \
+             patch.object(acceptance, "trusted_initialize") as init, \
+             patch.object(acceptance, "snapshot", return_value=fixture()) as snapshot:
+            acceptance.verify_initialize(runs=2)
+        self.assertEqual(init.call_count, 2)
+        self.assertEqual(snapshot.call_count, 5)
+        self.assertEqual(trusted.call_args_list, [call("--health-report")] * 3)
+
+    def test_initialize_acceptance_stops_on_resource_drift(self):
+        changed = fixture()
+        changed["containers"][acceptance.CONTAINERS[0]] = ("replaced", "creation", 0, "start")
+        with patch.object(acceptance, "trusted"), \
+             patch.object(acceptance, "trusted_initialize") as init, \
+             patch.object(acceptance, "snapshot", side_effect=[fixture(), changed]):
+            with self.assertRaises(acceptance.AcceptanceError):
+                acceptance.verify_initialize(runs=2)
+        init.assert_called_once()
+
     def test_trusted_allowlist(self):
         with self.assertRaisesRegex(acceptance.AcceptanceError, "Disallowed"):
             acceptance.trusted("--initialize")
@@ -195,9 +223,12 @@ class IdempotencyAcceptanceTests(unittest.TestCase):
         networks = [{"Name": name} for name in acceptance.NETWORKS]
         with patch.object(acceptance, "docker_json", side_effect=lambda *args: {
             "container": containers, "volume": volumes, "network": networks
-        }[args[0]]), patch.object(acceptance, "names_for", return_value=()), \
-             patch.object(acceptance, "migration_fingerprint", return_value="a" * 32):
-            with self.assertRaisesRegex(acceptance.AcceptanceError, "not running"):
+        }[args[0]]), \
+             patch.object(acceptance, "names_for", side_effect=lambda kind: fixture()[kind + "_inventory"]), \
+             patch.object(acceptance, "migration_fingerprint", return_value="a" * 32), \
+             patch.object(acceptance, "vault_ui_inventory", return_value=(False, None, False)):
+            with self.assertRaisesRegex(acceptance.AcceptanceError,
+                                       "Container not running: " + acceptance.CONTAINERS[2]):
                 acceptance.snapshot()
 
     def test_names_for_rejects_unrelated_host_resources(self):

@@ -12,7 +12,7 @@ BOOTSTRAP := ./scripts/bootstrap.sh
 up start:
 	$(BOOTSTRAP) --start
 
-# First-time operator-approved provisioning (interactive; not for routine use).
+# First-time guarded development provisioning (no approval prompts).
 initialize:
 	$(BOOTSTRAP) --initialize
 
@@ -36,13 +36,13 @@ acceptance:
 
 # Administrative Vault UI only. Never modifies Vault, DB or app containers.
 vault-ui-enable:
-	$(PYTHON) scripts/dev/bootstrap_vault_ui.py enable
+	$(PYTHON) scripts/dev/bootstrap_vault_ui.py enable --progress
 
 vault-ui-disable:
-	$(PYTHON) scripts/dev/bootstrap_vault_ui.py disable
+	$(PYTHON) scripts/dev/bootstrap_vault_ui.py disable --progress
 
 vault-ui-status:
-	$(PYTHON) scripts/dev/bootstrap_vault_ui.py status
+	$(PYTHON) scripts/dev/bootstrap_vault_ui.py status --progress
 
 # Legacy host-only helpers (not a substitute for --initialize).
 setup:
@@ -52,9 +52,7 @@ setup:
 
 # Host-only checks. Use `make health` to validate the whole application.
 check:
-	$(PYTHON) -m scripts.dev.domains check
-	$(PYTHON) -m scripts.dev.certificates check
-	$(PYTHON) -m scripts.dev.ca_trust check
+	$(PYTHON) -m scripts.dev.bootstrap_host_check
 
 # Legacy raw-Compose maintenance operations: NOT part of trusted recovery.
 # These may leave an initialized runtime unable to resume via --start.

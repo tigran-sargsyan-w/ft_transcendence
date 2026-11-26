@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import signal
 import stat
 import tempfile
 import unittest
@@ -168,6 +169,25 @@ class BootstrapVaultTests(unittest.TestCase):
                 self.assertNotIn("secret-token-for-test", stream.getvalue())
                 self.assertNotIn("share1", stream.getvalue())
                 self.assertNotIn("share2", stream.getvalue())
+
+    def test_interrupt_after_init_persists_material_and_never_unseals(self):
+        with tempfile.TemporaryDirectory() as t:
+            state = Path(t) / "state"
+            path = state / "private/vault-init.json"
+            payload = {"root_token": "test-token", "unseal_keys_b64": ["a", "b", "c"]}
+
+            def initialize(*args, **kwargs):
+                self.assertTrue(kwargs["isolated"])
+                os.kill(os.getpid(), signal.SIGINT)
+                return json.dumps(payload).encode()
+
+            with patch.object(v, "STATE", state), patch.object(v, "RECOVERY", path), \
+                 patch.object(v, "call", side_effect=initialize) as run:
+                with self.assertRaises(v.DeferredInterrupt):
+                    v.initialize_vault()
+                self.assertEqual(json.loads(path.read_text()), payload)
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                run.assert_called_once()
 
 
 if __name__ == "__main__":

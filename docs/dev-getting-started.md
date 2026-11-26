@@ -17,22 +17,23 @@ The Vault Web UI is an [optional, on-demand administrative gateway](dev-vault-ui
 1. Check out the project on the dedicated Ubuntu VM, including the intended reviewed commit. Keep local work and sensitive materials outside Git.
 2. Ensure the repository has been cloned and Git and GNU Make are
    available. `make initialize` installs missing OS/Docker prerequisites
-   and downloads required container images with confirmation. There is
+   and downloads required container images without approval prompts. There is
    no mandatory separate `install-deps.sh`, `make setup` or manual
    `docker pull` step. Existing local image tags are preserved.
 
    If Docker group membership changes, log out and back in before
    rerunning initialization. This is an operator-approved, resumable
-   first-install flow, not a silent privilege escalation.
+   first-install flow. Docker group membership grants root-equivalent access;
+   initialization authorizes automatic enrollment only for the verified local daemon.
 
-3. Run the single first-time entry point **in an interactive terminal**:
+3. Run the single first-time entry point (a terminal is recommended for sudo authentication):
 
    ```sh
    make initialize
    # Equivalent: ./scripts/bootstrap.sh --initialize
    ```
 
-   The operator must review and individually approve the necessary preparation stages (host TLS/CA, Docker resources, Vault, KV/ACL/AppRoles, initial DB secrets, PostgreSQL, roles, Prisma migrations, runtime Agent, backend, support services, frontend, Nginx, Prometheus, Grafana credentials, Grafana Vault Agent and Grafana). The helper never silently replaces a detected existing initialized Vault or PostgreSQL cluster. **Do not use initialization to recover from a reboot or a failed check.**
+   Invoking the command authorizes the fixed development provisioning stages; no additional approval prompts are required. This automatic path supports native Ubuntu Linux only, not Windows/WSL trust installation or a remote Docker daemon. Existing valid resources are retained and conflicting state is refused. Unknown untrusted browser CAs require explicit review. A sudo password request, if needed, is ordinary OS authentication, not a bootstrap confirmation. See [initialization progress and cancellation](dev-initialize-reliability.md#issue-160-initialization-progress-and-cancellation). **Do not use initialization to recover from a reboot or as a blind repair for an unhealthy stack.**
 
 4. Secure the generated Vault recovery material according to the local procedure and retain **two distinct Shamir shares in approved secure storage outside the VM**. The protected local `vault-init.json` contains root-level recovery material: never print it, commit it or paste it into an issue. Maintain an independent backup of persistent application data.
 5. Validate readiness:
@@ -87,7 +88,155 @@ make health
 make check-all
 ```
 
-`make check` checks **only** the host domain, Nginx certificate and OS CA trust (legacy helper); use `make health` for the full runtime. `make acceptance` is an **opt-in** validation that repeatedly calls safe `--start` on an already healthy VM and compares container, persistent volume, network and Prisma migration-history metadata. It is not needed on every login.
+`make check` checks **only** the host domain, Nginx certificate and OS CA trust; use `make health` for the full runtime. `make acceptance` is an **opt-in** validation that repeatedly calls safe `--start` on an already healthy VM and compares container, persistent volume, network and Prisma migration-history metadata. It is not needed on every login.
+
+### Shared bootstrap progress (Issue #165)
+
+`make up` / `make start`, `make recover`, `make health`, `make check-all`
+and the host-only `make check` reuse the V3 inline progress renderer from
+#160. Their stages describe real operations and use actual elapsed time.
+The startup fast path still uses the existing transitive Nginx and
+monitoring checks; it does not run extra per-service probes just to
+populate the display. If necessary, the existing-container resume path
+appears as a separate stage with nested checks and operations.
+
+CACHED means an existing check established readiness without a change.
+DONE means the represented operation completed; SKIPPED is an unneeded
+operation, not a readiness assertion. NOT READY is a nonfatal intermediate
+stage result only in routine startup/recovery when the existing optional
+UI or fast-path policy permits continuing. The overall RESULT marker and
+exit code remain authoritative. Health/check commands still fail closed.
+The progress count measures completed stages, not the number of healthy
+services.
+
+Redirected output, CI, NO_COLOR, verbose and timing modes use plain logs.
+For example:
+
+```sh
+FT_DEV_BOOTSTRAP_VERBOSE=1 make health
+FT_DEV_STAGE_TIMING=1 make up
+NO_COLOR=1 make check-all
+```
+
+Verbose mode includes reviewed orchestration events, retry attempts and
+safe existing lifecycle messages. It does not forward raw subprocess
+output. If a host-only check fails, run the named `python3 -m
+scripts.dev.<module> check` helper locally for detailed diagnostics. For
+runtime failures use the indicated `./scripts/bootstrap.sh --check-*`
+entry point. Do not share unreviewed output or recovery material.
+
+The renderer pauses for manual Shamir unseal; Vault CLI retains the real
+controlling terminal and hidden prompts. The timer thread is presentation
+only and is joined at exit. The original V3 visual limitation during
+terminal resize remains; keep terminal dimensions stable. Plan and acceptance presentation are the separate #166 follow-up described
+below. Issue #167 extends the same V3 renderer to the public Vault UI
+commands and removes the unused Compact profile.
+
+#### Plan and acceptance progress (Issue #166)
+
+`make plan` enters the same unified Python dispatcher after the existing
+shell/platform/TLS guards, then runs the dedicated read-only
+`scripts/dev/bootstrap_plan.py` workflow. It retains the original one
+dependency check and inspection sequence. The host and preliminary Docker
+inventory probes have Python equivalents of the former shell plan; the
+shell's host preparation/check functions remain unchanged for other
+commands. Each existing specialized helper still runs in its own process,
+in plan mode only. Explicit, reviewed observations travel through a
+dedicated structured pipe; ordinary child stdout/stderr are not displayed.
+
+The shared V3 renderer distinguishes plan outcomes from runtime readiness:
+
+- EXISTS: the inspected resource exists; specialized plan helpers also
+  verify the identity required by their existing plan branch. Preliminary
+  inventory confirms presence only.
+- MISSING: absence was confirmed by the existing inspection.
+- UNVERIFIED: readiness or authenticated inspection was not performed,
+  or preliminary inventory could not establish the result.
+- OPTIONAL: the optional component was not present; its enabled intent
+  or HTTPS readiness is not established by this plan.
+- READY: the specific represented check actually passed (for example,
+  a role/grant metadata check); it is not a whole-stack assertion.
+- NOT READY: a reviewed, incomplete planning outcome.
+- FAILED: the inspection refused unsafe state or failed; later stages stop.
+
+Only plan accepts these nonfatal planning outcomes as completed stages.
+There are 21 stages, and a completed plan is not a healthy stack.
+No additional readiness probe, installation, resource creation, migration,
+credential read or lifecycle repair is added for presentation.
+
+```sh
+make plan
+FT_DEV_BOOTSTRAP_VERBOSE=1 make plan
+NO_COLOR=1 make plan
+FT_DEV_STAGE_TIMING=1 make plan
+```
+
+Interactive output keeps the V3 active-stage preview and compact final
+rows. Plain/redirected output preserves reviewed inventory details;
+verbose output also shows nested results. For a failed specialized
+helper, use its named standalone **plan** entry on the same trusted
+development host, with the existing TLS state path, for local diagnostics:
+
+```sh
+FT_DEV_TLS_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/transcendence/dev/tls" \
+  python3 scripts/dev/bootstrap_nginx.py plan
+```
+
+Never share raw Docker inspect data, recovery material or credentials.
+The overall success marker remains
+`RESULT: BOOTSTRAP PLAN COMPLETE (read-only)`; a failed operation returns
+nonzero and does not print it.
+
+`make acceptance` uses the same V3 renderer with the healthy baseline
+and one stage per guarded startup attempt (four stages for three runs).
+It compares the existing inventory both before and after the health
+check. Child startup/health/initialize output remains suppressed, so the
+acceptance parent alone owns the terminal. See
+[the acceptance guide](dev-startup-idempotency.md) for the modes,
+boundaries and validation procedure.
+
+#### Issue #165 acceptance (2026-11-24)
+
+Tested implementation: `28a4342d3fffb368eb15fa6dc903aa7fe4de0e8e`,
+on an existing Ubuntu 26.04 LTS amd64 VirtualBox development VM.
+No clean installation was required for this presentation follow-up.
+
+| Check | Observed result |
+| --- | --- |
+| Offline regression | 897 tests: 891 passed, 6 skipped, 0 failures |
+| Renderer / CLI presentation / unified targeted suites | 21/21, 20/20, 90/90 passed (included above) |
+| Host-only check | 3/3 stages, 0.3 s |
+| Check-all | 8/8 stages, 26.1 s |
+| Health | 8/8 stages, 24.1 s |
+| Up / start on healthy stack | 8/8 stages, 24.6 s / 24.3 s |
+| Recover on unsealed healthy stack | 13/13 stages, 26.2 s |
+| Redirected health output | Exit 0, 20 lines, zero ANSI escapes or carriage returns, 23.0 s |
+| CI-mode up / NO_COLOR check-all / verbose health | Ready, 23.8 s / 23.0 s / 24.1 s |
+| Ctrl+C during health Application HTTPS | CANCELLED, 3/8 completed, exit 130, 2.3 s; subsequent health ready in 21.9 s |
+| Startup idempotency | 3/3 passed; no container recreation, restart or migration-history drift reported |
+| Interactive recovery after reboot | Renderer pause/resume and hidden Shamir prompts passed; first recovery stopped on known #155; second recovery succeeded |
+| Container identity after recovery | 14/14 IDs preserved; optional Vault UI remained disabled |
+| Post-recovery health | 8/8 stages, 21.0 s |
+
+The first post-reboot recovery completed 12/13 stages and stopped after
+167.2 s (including 49.1 s for the operator-assisted unseal), with
+`nginx is already running but unhealthy; manual review required`.
+A second recovery completed 13/13 stages in 27.6 s, without another
+unseal or manual resource repair. The final health check passed.
+This reproduces the pre-existing #155; it is **not** a first-attempt
+recovery pass. The underlying failing Nginx/transitive readiness
+condition has not been identified. The recovery guard remains unchanged
+and its failure is correctly displayed. See the [recovery guide](dev-reboot-recovery.md).
+
+Stable-size interactive output was visually inspected in the VM. The
+known V3 resize limitation was retained; no new resize test was required.
+The timing observations are individual runs, not a controlled performance
+comparison against main. Live initialization on this revision was not
+repeated; offline initialization regression coverage passed and the
+default renderer contract is retained. Live cancellation was exercised
+on the read-only health path; other cancellation and failure boundaries
+have offline coverage. Full remote GitHub Actions CI and team review
+remain required before merge.
 
 ## After a VM restart: operator-assisted recovery
 

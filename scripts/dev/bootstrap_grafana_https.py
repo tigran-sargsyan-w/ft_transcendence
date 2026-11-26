@@ -5,9 +5,15 @@ Read-only verification. Never starts or recreates containers, changes
 configuration, installs certificates or retrieves authentication secrets.
 """
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import json
 import sys
+import time
 
 import bootstrap_backend_agent as agent
 import bootstrap_nginx as nginx
@@ -19,6 +25,15 @@ EXPECTED_VERSION = "13.3.1"
 
 class GrafanaHTTPSBootstrapError(Exception):
     """Public errors exclude HTTP response data and credentials."""
+
+
+class GrafanaHTTPSReadinessError(GrafanaHTTPSBootstrapError):
+    """Only explicit temporary HTTP gateway responses are retriable."""
+
+
+def require_ready_status(status):
+    if status in (502, 503, 504):
+        raise GrafanaHTTPSReadinessError("Grafana HTTPS upstream temporarily unavailable.")
 
 
 def require(condition, message):
@@ -134,6 +149,7 @@ def request(path, *, query=None):
 
 def verify_routes():
     status, _, redirect = request("/grafana")
+    require_ready_status(status)
 
     require(
         status == 308 and redirect == BASE + "/grafana/",
@@ -141,6 +157,7 @@ def verify_routes():
     )
 
     status, body, _ = request("/grafana/login")
+    require_ready_status(status)
 
     require(
         status == 200
@@ -153,6 +170,7 @@ def verify_routes():
     print("PASS: Grafana HTTPS login and canonical redirect.", flush=True)
 
     status, body, _ = request("/grafana/api/health")
+    require_ready_status(status)
 
     require(status == 200, "Grafana HTTPS health unavailable.")
 
@@ -200,20 +218,37 @@ def check():
     verify_routes()
 
 
+def check_ready():
+    for attempt in range(3):
+        try:
+            check()
+            if attempt:
+                print("PASS: Grafana HTTPS readiness retry", flush=True)
+            return
+        except GrafanaHTTPSReadinessError:
+            if attempt == 2:
+                raise
+            print("RETRY: Grafana HTTPS upstream readiness", flush=True)
+            time.sleep(3)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("plan", "check"))
+    parser.add_argument("mode", choices=("plan", "check", "check-ready"))
     args = parser.parse_args(argv)
 
     try:
         if args.mode == "plan":
+            plan_events.report("Nginx gateway and WAF policy check planned", "UNVERIFIED")
             print("PLAN: Verify existing Nginx gateway and WAF policy.")
+            plan_events.report("Grafana HTTPS routing and health check planned", "UNVERIFIED")
             print("PLAN: Verify Grafana HTTPS routing and health.")
+            plan_events.report("Anonymous access rejection and WAF blocking check planned", "UNVERIFIED")
             print("PLAN: Verify anonymous access rejection and WAF blocking.")
             print("RESULT: GRAFANA HTTPS PLAN COMPLETE (read-only)")
             return 0
 
-        check()
+        (check_ready if args.mode == "check-ready" else check)()
 
         print("RESULT: GRAFANA HTTPS READY (read-only)", flush=True)
         return 0

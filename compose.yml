@@ -241,6 +241,9 @@ services:
       SSL_CERT_FILE: /etc/nginx/certs/cert.pem
       SSL_CERT_KEY_FILE: /etc/nginx/certs/key.pem
       MODSEC_RULE_ENGINE: "On"
+      # Minimize audit records without disabling WAF inspection.
+      MODSEC_AUDIT_LOG_FORMAT: "Native"
+      MODSEC_AUDIT_LOG_PARTS: "AZ"
       BLOCKING_PARANOIA: "1"
       ALLOWED_METHODS: "GET HEAD POST OPTIONS PUT PATCH DELETE"
     volumes:

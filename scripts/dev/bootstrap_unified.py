@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Phase 6A: trusted, sequential development bootstrap orchestration.
 
-initialize: explicit interactive first-time provisioning using established stages.
+initialize: confirmation-free guarded development provisioning.
 start: resume ONLY existing, verified containers after Vault is unsealed.
 check: read-only validation of the entire already-running stack.
+plan: read-only inventory without extra readiness probes or provisioning.
 recover: resume a known Vault container, prompt for manual Shamir shares,
          then resume existing application containers without provisioning.
 
@@ -13,14 +14,25 @@ No root tokens, DSNs, SecretIDs, or unseal keys are handled by this module.
 """
 
 import argparse
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import fcntl
 import os
 from pathlib import Path
 import stat
+import signal
+import re
 import subprocess
 import sys
 import time
+
+if __package__:
+    from . import bootstrap_cli_progress as cli
+    from .bootstrap_progress import Phase, Progress, Status, emit_result
+    from .bootstrap_process import Cancellation, ChildRunner, InitializationCancelled, UnexpectedApproval
+else:
+    import bootstrap_cli_progress as cli
+    from bootstrap_progress import Phase, Progress, Status, emit_result
+    from bootstrap_process import Cancellation, ChildRunner, InitializationCancelled, UnexpectedApproval
 
 ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP = ROOT / "scripts/bootstrap.sh"
@@ -56,6 +68,10 @@ RESUMABLE = (
 )
 READ_ONLY_ATTEMPTS = 3
 READ_ONLY_RETRY_DELAY = 1
+RECOVERY_AGENT_WAIT = 60
+RECOVERY_AGENT_POLL = 2
+RECOVERY_NGINX_WAIT = 60
+RECOVERY_NGINX_POLL = 2
 
 
 
@@ -103,11 +119,23 @@ def preflight_once():
         )
 
 
+class SessionRefreshRequired(Exception):
+    """Docker group enrollment succeeded; a fresh login is required."""
+
+
 class UnifiedStartupError(Exception):
     """Public diagnostic intentionally contains no subprocess output or secrets."""
 
 
-def command(flag, *, quiet=False):
+class RunningNotReady(UnifiedStartupError):
+    """Identity was verified, but the routine readiness probe failed."""
+
+    def __init__(self, name, targets):
+        super().__init__(f"{name} is already running but unhealthy; manual review required")
+        self.targets = targets
+
+
+def command(flag, *, quiet=False, runner=None, lock_fd=None):
     """Invoke only fixed, reviewed bootstrap flags; no user-controlled argv."""
     if flag is None or flag not in {
         item
@@ -121,7 +149,8 @@ def command(flag, *, quiet=False):
         kwargs.update(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if flag in DIRECT_READ_ONLY_CHECKS:
         script = ROOT / "scripts/dev" / DIRECT_READ_ONLY_CHECKS[flag]
-        argv = [sys.executable, str(script), "check"]
+        argv = [sys.executable, str(script),
+                "check-ready" if runner is not None and flag == "--check-grafana-https" else "check"]
         tls = Path(os.environ.get(
             "XDG_STATE_HOME", str(Path.home() / ".local/state")
         )) / "transcendence/dev/tls"
@@ -131,6 +160,24 @@ def command(flag, *, quiet=False):
         }
     else:
         argv = [str(BOOTSTRAP), flag]
+    if runner is not None:
+        preparing = flag.startswith("--prepare-")
+        if preparing:
+            if lock_fd is None:
+                raise UnifiedStartupError("Initialization stage requires the orchestrator lock")
+            argv = [str(BOOTSTRAP), "--initialize-stage", flag, str(lock_fd)]
+        try:
+            return runner.run(argv, cwd=ROOT, env=kwargs.get("env"),
+                              pass_fds=(lock_fd,) if preparing else (),
+                              foreground=flag == "--prepare-host",
+                              critical=flag == "--prepare-vault",
+                              probe=not preparing,
+                              operation=("Prepare " if preparing else "Check ") +
+                              flag.removeprefix("--prepare-" if preparing else "--check-")) == 0
+        except OSError:
+            raise UnifiedStartupError("Cannot execute trusted bootstrap operation") from None
+    if lock_fd is not None:
+        raise UnifiedStartupError("Unexpected initialization lock")
     try:
         result = subprocess.run(argv, **kwargs)
     except OSError:
@@ -193,7 +240,7 @@ def definitely_missing_container(name):
     return all(item not in existing for item in expected)
 
 
-def checked(name, *, first_run=False):
+def checked(name, *, first_run=False, runner=None):
     """Retry read-only probes; optionally trace safe stage names and durations.
 
     FT_DEV_STAGE_TIMING=1 is diagnostic-only: it changes neither the number of
@@ -203,7 +250,18 @@ def checked(name, *, first_run=False):
     trace = os.environ.get("FT_DEV_STAGE_TIMING") == "1"
     for attempt in range(READ_ONLY_ATTEMPTS):
         started = time.monotonic() if trace else None
-        result = command(STAGE_BY_NAME[name][0], quiet=True)
+        if runner is None:
+            # Nested retry events are based on the actual existing attempt;
+            # this never changes the number of probes or their return values.
+            if attempt:
+                with cli.step(f"Retry {name} {attempt + 1}/{READ_ONLY_ATTEMPTS}") as outcome:
+                    result = command(STAGE_BY_NAME[name][0], quiet=True)
+                    if not result:
+                        outcome.status = Status.NOT_READY
+            else:
+                result = command(STAGE_BY_NAME[name][0], quiet=True)
+        else:
+            result = command(STAGE_BY_NAME[name][0], quiet=True, runner=runner)
         if trace:
             elapsed = max(0.0, time.monotonic() - started)
             outcome = "PASS" if result else "FAIL"
@@ -211,6 +269,9 @@ def checked(name, *, first_run=False):
                   f"result={outcome} elapsed={elapsed:.2f}s", flush=True)
         if result:
             return True
+        if runner is not None and name == "grafana-https":
+            # The typed check-ready entry point owns its bounded retry budget.
+            return False
         if first_run and attempt == 0 and definitely_missing_container(name):
             return False
         if attempt + 1 < READ_ONLY_ATTEMPTS:
@@ -218,12 +279,22 @@ def checked(name, *, first_run=False):
     return False
 
 
+def observed_check(name):
+    # Same checked() implementation and retry budget as before. The status
+    # represents the actual boolean result, never a parsed child message.
+    with cli.step("Check " + name) as outcome:
+        ready = checked(name)
+        if not ready:
+            outcome.status = Status.NOT_READY
+        return ready
+
+
 def require(name):
-    if not checked(name):
+    if not observed_check(name):
         raise UnifiedStartupError(
             f"{name} not ready; inspect its --check-* output before proceeding"
         )
-    print(f"PASS: {name}", flush=True)
+    cli.legacy(f"PASS: {name}")
 
 
 def verify_stopped_container(item, verify, label):
@@ -305,7 +376,7 @@ def guard_resume(name):
             raise UnifiedStartupError(f"Missing trusted Docker ID: {container_name}")
         verified.append((container_name, item["Id"], verify, state))
     if all(state == "running" for _, _, _, state in verified):
-        raise UnifiedStartupError(f"{name} is already running but unhealthy; manual review required")
+        raise RunningNotReady(name, tuple(verified))
     return tuple(verified)
 
 
@@ -337,8 +408,10 @@ def start_existing_only(name, targets):
 
             for container_name, container_id, verify, state in targets:
                 if state == "running":
-                    print(f"KEEP: {container_name}", flush=True)
+                    cli.legacy(f"KEEP: {container_name}")
+                    cli.substep("Keep " + container_name, Status.CACHED)
                     continue
+                cli.substep("Start " + container_name, Status.RUNNING)
                 try:
                     result = subprocess.run(
                         ["docker", "start", container_name], cwd=ROOT,
@@ -359,25 +432,177 @@ def start_existing_only(name, targets):
                 verify_stopped_container(after, verify, container_name)
                 if (after.get("State") or {}).get("Running") is not True:
                     raise UnifiedStartupError(f"Container did not start: {container_name}")
-                print(f"START: {container_name}", flush=True)
+                cli.legacy(f"START: {container_name}")
+                cli.substep("Start " + container_name, Status.DONE)
     except pg.PostgresBootstrapError:
         raise UnifiedStartupError(f"Docker inspection failed during {name} recovery") from None
     except OSError:
         raise UnifiedStartupError(f"Cannot acquire startup/migration lock for {name}") from None
 
 
-def resume(name):
-    if checked(name):
-        print(f"KEEP: {name} ready", flush=True)
+def wait_recovery_backend_agent(targets):
+    """Only explicit reboot recovery may wait for an already-running agent.
+
+    Do not restart, replace, provision, rotate or accept a failed security
+    check. Pin the verified container ID throughout the bounded read-only
+    wait, and require the full existing readiness check before continuing.
+    """
+    import bootstrap_backend_agent as agent
+
+    if len(targets) != 1:
+        raise UnifiedStartupError("Unexpected backend-agent recovery inventory")
+    name, expected_id, verify, state = targets[0]
+    if name != agent.NAME or state != "running":
+        raise UnifiedStartupError("Unexpected backend-agent recovery target")
+
+    def inspect_health():
+        try:
+            item = agent.inspect_agent()
+            if item is None or item.get("Id") != expected_id:
+                raise UnifiedStartupError("Backend-agent identity changed during recovery")
+            if verify_stopped_container(item, verify, name) != "running":
+                raise UnifiedStartupError("Backend-agent stopped during recovery")
+            health = ((item.get("State") or {}).get("Health") or {}).get("Status")
+            if health not in ("starting", "unhealthy", "healthy"):
+                raise UnifiedStartupError("Unexpected backend-agent health state")
+            return health
+        except UnifiedStartupError:
+            raise
+        except Exception:
+            raise UnifiedStartupError("Backend-agent recovery inspection failed; manual review required") from None
+
+    deadline = time.monotonic() + RECOVERY_AGENT_WAIT
+    # Bound polling even if a clock is mocked or a check returns immediately.
+    attempts = RECOVERY_AGENT_WAIT // RECOVERY_AGENT_POLL + 1
+    for attempt in range(attempts):
+        if attempt and time.monotonic() >= deadline:
+            break
+        health = inspect_health()
+        if health == "healthy":
+            if time.monotonic() > deadline:
+                break
+            require("backend-agent")
+            if inspect_health() != "healthy":
+                raise UnifiedStartupError("Backend-agent readiness changed during recovery")
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or attempt + 1 == attempts:
+            break
+        if attempt == 0:
+            cli.notice("WAIT: trusted backend-agent health after Vault unseal (up to 60s polling)")
+        time.sleep(min(RECOVERY_AGENT_POLL, remaining))
+    raise UnifiedStartupError("Backend-agent health wait expired; inspect --check-backend-agent; no restart attempted")
+
+
+def recovery_nginx_probe(expected_id, timeout):
+    """Bound the complete read-only child probe, including dependency checks.
+
+    Isolate the process group so timeout or Ctrl+C can stop the local probe
+    and its subprocesses. Never capture or forward child output.
+    """
+    tls = Path(os.environ.get(
+        "XDG_STATE_HOME", str(Path.home() / ".local/state")
+    )) / "transcendence/dev/tls"
+    argv = [sys.executable, str(ROOT / "scripts/dev/bootstrap_nginx.py"),
+            "check-recovery", "--expected-id", expected_id]
+    try:
+        child = subprocess.Popen(
+            argv, cwd=ROOT, env={**os.environ, "FT_DEV_TLS_DIR": str(tls)},
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, start_new_session=True,
+        )
+    except OSError:
+        raise UnifiedStartupError("Cannot execute trusted Nginx recovery probe") from None
+    try:
+        return child.wait(timeout=timeout)
+    except (subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        child.wait()
+        if isinstance(exc, KeyboardInterrupt):
+            raise
+        raise UnifiedStartupError(
+            "Nginx recovery readiness budget expired; inspect --check-nginx; no restart attempted"
+        ) from None
+
+
+def wait_recovery_nginx(targets):
+    """Extra bounded checks only for a verified running gateway in recovery."""
+    import bootstrap_nginx as nginx
+
+    if len(targets) != 1:
+        raise UnifiedStartupError("Unexpected Nginx recovery inventory")
+    name, expected_id, _, state = targets[0]
+    if (name != nginx.NAME or state != "running"
+            or not isinstance(expected_id, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", expected_id)):
+        raise UnifiedStartupError("Unexpected Nginx recovery target")
+
+    deadline = time.monotonic() + RECOVERY_NGINX_WAIT
+    routes = {code: path for path, code in nginx.RECOVERY_502.items()}
+    attempts = RECOVERY_NGINX_WAIT // RECOVERY_NGINX_POLL + 1
+    for attempt in range(attempts):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        with cli.step(f"Recovery Nginx HTTPS probe {attempt + 1}") as outcome:
+            code = recovery_nginx_probe(expected_id, remaining)
+            if time.monotonic() >= deadline:
+                raise UnifiedStartupError(
+                    "Nginx recovery readiness budget expired; inspect --check-nginx; no restart attempted"
+                )
+            if code == 0:
+                return
+            if code not in routes:
+                raise UnifiedStartupError(
+                    "Nginx recovery check failed outside retryable HTTP 502; "
+                    "inspect --check-nginx; no restart attempted"
+                )
+            outcome.status = Status.NOT_READY
+        # Only the fixed status/route contract is observable, never child text.
+        cli.notice(f"WAIT: Nginx HTTPS {routes[code]} returned HTTP 502 "
+                   "(bounded recovery readiness)")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or attempt + 1 == attempts:
+            break
+        time.sleep(min(RECOVERY_NGINX_POLL, remaining))
+    raise UnifiedStartupError(
+        "Nginx recovery readiness budget expired; inspect --check-nginx; no restart attempted"
+    )
+
+
+def resume(name, *, recovery=False):
+    if observed_check(name):
+        cli.legacy(f"KEEP: {name} ready")
         return
+    cli.substep("Inspect trusted " + name + " containers", Status.RUNNING)
     try:
         targets = guard_resume(name)
+    except RunningNotReady as exc:
+        cli.substep("Inspect trusted " + name + " containers", Status.DONE)
+        if not recovery:
+            raise
+        if name == "backend-agent":
+            with cli.step("Wait for trusted backend-agent health"):
+                wait_recovery_backend_agent(exc.targets)
+        elif name == "nginx":
+            with cli.step("Wait for trusted Nginx HTTPS readiness"):
+                wait_recovery_nginx(exc.targets)
+        else:
+            raise
+        return
     except UnifiedStartupError:
+        cli.substep("Inspect trusted " + name + " containers", Status.FAILED)
         raise
     except Exception:
+        cli.substep("Inspect trusted " + name + " containers", Status.FAILED)
         raise UnifiedStartupError(f"Cannot inspect trusted {name} containers") from None
-    print(f"RESUME: {name} (existing containers only)", flush=True)
-    start_existing_only(name, targets)
+    cli.substep("Inspect trusted " + name + " containers", Status.DONE)
+    cli.legacy(f"RESUME: {name} (existing containers only)")
+    with cli.step("Resume existing " + name):
+        start_existing_only(name, targets)
     # The full transitive readiness/identity check still runs after every
     # start, with the existing bounded retry budget for read-only probes.
     require(name)
@@ -419,7 +644,8 @@ def recovery_vault():
             raise UnifiedStartupError("Unexpected Vault host privileges/ports")
         state = before.get("State") or {}
         if state.get("Running") is True and state.get("Status") == "running":
-            print("KEEP: trusted Vault container running", flush=True)
+            cli.legacy("KEEP: trusted Vault container running")
+            cli.substep("Keep trusted Vault container", Status.CACHED)
         elif state.get("Running") is False and state.get("Status") in ("created", "exited"):
             # This only starts the existing container; no Compose up, no init.
             try:
@@ -438,7 +664,8 @@ def recovery_vault():
             vault.verify_identity(after)
             if (after.get("State") or {}).get("Running") is not True:
                 raise UnifiedStartupError("Vault did not start successfully")
-            print("START: existing trusted Vault container", flush=True)
+            cli.legacy("START: existing trusted Vault container")
+            cli.substep("Start existing trusted Vault container", Status.DONE)
         else:
             raise UnifiedStartupError("Unexpected Vault container state; manual review required")
         seal = vault.status(tries=30)
@@ -501,181 +728,246 @@ def interactive_unseal(vault, state):
 
 def recover():
     """After reboot: only resume known resources and require manual Vault unseal."""
-    print("=== Trusted reboot recovery (manual Shamir unseal) ===", flush=True)
-    require("host")
-    require("resources")
-    vault, seal = recovery_vault()
-    interactive_unseal(vault, seal)
-    require("vault")
-    # Reuse Phase 6A's guarded, non-provisioning application recovery path.
-    start()
-    print("RESULT: REBOOT RECOVERY READY", flush=True)
-
-
-def initialize():
-    if not sys.stdin.isatty():
-        raise UnifiedStartupError("--initialize requires an interactive terminal")
-    print("=== Trusted first-time bootstrap (individual confirmations required) ===", flush=True)
-    for name, check, prepare in STAGES:
-        if name == "vault-ui":
-            # The administrative UI never gates core initialization.
-            # Its separate read-only status and make health remain strict.
-            print("SKIP: optional vault-ui; use make vault-ui-enable", flush=True)
-            continue
-        if checked(name, first_run=True):
-            print(f"KEEP: {name} ready", flush=True)
-            continue
-        if prepare is None:
-            raise UnifiedStartupError(
-                f"{name} verification failed; manual review required"
-            )
-        if name == "vault":
-            vault_seal_guard()
-        print(f"PREPARE: {name}", flush=True)
-        if not command(prepare):
-            raise UnifiedStartupError(f"{name} preparation failed or was declined; stopped safely")
-        require(name)
-    print("RESULT: UNIFIED INITIALIZATION READY", flush=True)
-
-
-def start():
-    print("=== Vault-backed routine startup (no provisioning or migrations) ===", flush=True)
-    require("host")
-    require("resources")
-    vault_seal_guard()
-    # Report optional gateway drift without preventing core recovery after a
-    # reboot: HAProxy has restart: no and its enabled marker may persist.
-    # Full health remains fail-closed for unexpected UI lifecycle state.
-    if not checked("vault-ui"):
-        print("WARN: optional Vault UI state unhealthy; run make vault-ui-status", flush=True)
-    # Nginx's check walks the full trusted dependency chain down to Vault and
-    # PostgreSQL. Rechecking each dependency separately is expensive and can
-    # saturate a small VM with redundant nested Docker/psql invocations.
-    if (
-        checked("nginx")
-        and checked("prometheus")
-        and checked("grafana")
-        and checked("grafana-https")
-    ):
-        print("KEEP: complete Vault-backed stack ready", flush=True)
-        print("RESULT: UNIFIED STARTUP READY", flush=True)
-        return
-    # Recover only existing trusted stopped containers, in dependency order.
-    # A running but persistently unhealthy container still fails closed.
-    for name, _, _ in STAGES[2:]:
-        if name == "vault-ui":
-            # Never provision, start or require the administrative gateway.
-            # A warning above and strict make health report any UI failure.
-            print("SKIP: optional vault-ui lifecycle", flush=True)
-            continue
-        if name == "vault":
-            require(name)
-        elif name in RESUMABLE:
-            resume(name)
+    cli.legacy("=== Trusted reboot recovery (manual Shamir unseal) ===")
+    with cli.stage("Recovery host"):
+        require("host")
+    with cli.stage("Recovery resources"):
+        require("resources")
+    with cli.stage("Existing Vault", Phase.VERIFY):
+        vault, seal = recovery_vault()
+    with cli.stage("Manual Shamir unseal", Phase.VERIFY) as outcome:
+        if seal["sealed"]:
+            with cli.interactive("Manual Shamir unseal on the controlling terminal"):
+                interactive_unseal(vault, seal)
         else:
-            require(name)
-    print("RESULT: UNIFIED STARTUP READY", flush=True)
+            interactive_unseal(vault, seal)
+            outcome.status = Status.SKIPPED
+    with cli.stage("Vault readiness"):
+        require("vault")
+    # Reuse the guarded, non-provisioning application recovery path.
+    start(recovery=True)
+    cli.result("REBOOT RECOVERY READY")
+
+def prepare_prerequisites(runner, progress):
+    """System authentication may still be required; never feed sudo credentials."""
+    installer = str(ROOT / "scripts/install-deps.sh")
+    images = str(ROOT / "scripts/dev/bootstrap_images.py")
+    progress.begin(0, Phase.CHECK)
+    check_code = runner.run([installer, "--initialize-check"], cwd=ROOT, probe=True,
+                            probe_guard_codes=(3,), operation="Check local prerequisites")
+    cached = check_code == 0
+    if check_code not in (0, 1):
+        runner.report_failure()
+        raise UnifiedStartupError("Local prerequisite guard refused; inspect ./scripts/install-deps.sh --initialize-check")
+    if not cached:
+        progress.phase(Phase.PREPARE)
+        # Authenticate on the real controlling TTY; the installer then uses
+        # sudo -n, so it can stream progress without touching password input.
+        if runner.run(["sudo", "-v"], cwd=ROOT, foreground=True,
+                      operation="Authenticate sudo"):
+            raise UnifiedStartupError("Sudo authentication failed; no dependency installation started")
+        code = runner.run([installer, "--initialize-dev"], cwd=ROOT, foreground=True,
+                          pause_for_auth=False, operation="Install missing prerequisites")
+        if code == 2 and runner.last_diagnostics.session_refresh:
+            raise SessionRefreshRequired()
+        if code:
+            raise UnifiedStartupError("System prerequisites failed; inspect ./scripts/install-deps.sh --check")
+    progress.phase(Phase.VERIFY)
+    for argv, label in (([str(BOOTSTRAP), "--orchestrator-preflight"], "Verify platform and prerequisites"),
+                        ([sys.executable, "-m", "scripts.dev.bootstrap_linux_ca", "preflight"], "Verify existing CA provenance")):
+        if runner.run(argv, cwd=ROOT, operation=label):
+            raise UnifiedStartupError("System prerequisite verification failed; inspect local host state")
+    progress.finish(Status.CACHED if cached else Status.DONE)
+
+    progress.begin(1, Phase.CHECK)
+    cached = runner.run([sys.executable, images, "check"], cwd=ROOT, probe=True, operation="Check local image inventory") == 0
+    if not cached:
+        progress.phase(Phase.PREPARE)
+        if runner.run([sys.executable, images, "initialize"], cwd=ROOT, operation="Prepare missing images"):
+            raise UnifiedStartupError("Docker image preparation failed; inspect bootstrap_images.py check")
+    progress.finish(Status.CACHED if cached else Status.DONE)
+
+
+def initialize(lock_fd, *, cancellation=None):
+    """Single fixed, sequential provisioning flow; no approval prompts."""
+    cancellation = cancellation or Cancellation()
+    progress = Progress(("System dependencies", "Docker images") + tuple(
+        name for name, _, _ in STAGES))
+    runner = ChildRunner(progress, cancellation)
+    try:
+        prepare_prerequisites(runner, progress)
+        for index, (name, check, prepare) in enumerate(STAGES, 2):
+            cancellation.check()
+            progress.begin(index, None if name == "vault-ui" else Phase.CHECK)
+            if name == "vault-ui":
+                progress.finish(Status.SKIPPED)
+                continue
+            if checked(name, first_run=True, runner=runner):
+                progress.finish(Status.CACHED)
+                continue
+            if prepare is None:
+                runner.report_failure()
+                raise UnifiedStartupError(f"{name} verification failed; inspect ./scripts/bootstrap.sh {check}")
+            if name == "vault":
+                vault_seal_guard()
+            cancellation.check()
+            progress.phase(Phase.PREPARE)
+            if os.environ.get("FT_DEV_STAGE_TIMING") == "1":
+                print(f"PREPARE: {name}", flush=True)
+            if not command(prepare, runner=runner, lock_fd=lock_fd):
+                raise UnifiedStartupError(
+                    f"{name} preparation failed (exit {runner.last_returncode}); "
+                    f"inspect ./scripts/bootstrap.sh {check}"
+                )
+            progress.phase(Phase.VERIFY)
+            if not checked(name, runner=runner):
+                runner.report_failure()
+                raise UnifiedStartupError(
+                    f"{name} verification failed (exit {runner.last_returncode}); "
+                    f"inspect ./scripts/bootstrap.sh {check}"
+                )
+            progress.finish(Status.DONE)
+        cancellation.check()
+    except SessionRefreshRequired:
+        progress.finish(Status.ACTION_REQUIRED)
+        progress.summary()
+        raise
+    except InitializationCancelled:
+        if progress.active is not None:
+            progress.finish(Status.CANCELLED)
+            progress.summary()
+        raise
+    except (UnifiedStartupError, OSError, UnexpectedApproval):
+        if progress.active is not None:
+            progress.finish(Status.FAILED)
+            progress.summary()
+        raise
+    progress.summary()
+    emit_result("UNIFIED INITIALIZATION READY", Status.DONE)
+
+
+def start(*, recovery=False):
+    cli.legacy("=== Vault-backed routine startup (no provisioning or migrations) ===")
+    with cli.stage("Host configuration", success=Status.CACHED):
+        require("host")
+    with cli.stage("Docker resources", success=Status.CACHED):
+        require("resources")
+    with cli.stage("Vault seal guard"):
+        vault_seal_guard()
+    # Report optional gateway drift without preventing core recovery after a reboot.
+    with cli.stage("Optional Vault UI") as outcome:
+        if not observed_check("vault-ui"):
+            outcome.status = Status.NOT_READY
+            cli.notice("WARN: optional Vault UI state unhealthy; run make vault-ui-status")
+    # Preserve short-circuit order and the existing transitive fast path.
+    with cli.stage("Application readiness") as outcome:
+        ready = (
+            observed_check("nginx")
+            and observed_check("prometheus")
+            and observed_check("grafana")
+            and observed_check("grafana-https")
+        )
+        outcome.status = Status.CACHED if ready else Status.NOT_READY
+    with cli.stage("Resume existing services", Phase.VERIFY) as outcome:
+        if ready:
+            outcome.status = Status.SKIPPED
+            cli.legacy("KEEP: complete Vault-backed stack ready")
+        else:
+            # Recover only existing trusted stopped containers in dependency order.
+            for name, _, _ in STAGES[2:]:
+                if name == "vault-ui":
+                    cli.legacy("SKIP: optional vault-ui lifecycle")
+                    cli.substep("Optional Vault UI lifecycle", Status.SKIPPED)
+                    continue
+                if name == "vault":
+                    require(name)
+                elif name in RESUMABLE:
+                    if recovery and name in ("backend-agent", "nginx"):
+                        resume(name, recovery=True)
+                    else:
+                        resume(name)
+                else:
+                    require(name)
+    cli.result("UNIFIED STARTUP READY")
 
 
 def check():
-    print("=== Unified read-only readiness check ===", flush=True)
-    require("host")
-    require("resources")
-    # The administrative gateway may be explicitly disabled.
-    require("vault-ui")
-    # Nginx's read-only check covers the entire transitive service chain.
-    require("nginx")
-    require("prometheus")
-    # Grafana check includes Vault credentials, Agent delivery,
-    # provisioning and authentication.
-    require("grafana")
-    require("grafana-https")
-    print("RESULT: UNIFIED STACK READY (read-only)", flush=True)
-
+    cli.legacy("=== Unified read-only readiness check ===")
+    with cli.stage("Host configuration"):
+        require("host")
+    with cli.stage("Docker resources"):
+        require("resources")
+    # Optional gateway intent and the original transitive checks are unchanged.
+    with cli.stage("Vault UI lifecycle"):
+        require("vault-ui")
+    with cli.stage("Application HTTPS"):
+        require("nginx")
+    with cli.stage("Prometheus readiness"):
+        require("prometheus")
+    with cli.stage("Grafana readiness"):
+        require("grafana")
+    with cli.stage("Grafana HTTPS"):
+        require("grafana-https")
+    cli.result("UNIFIED STACK READY (read-only)")
 
 
 def health_report():
-    """Safe, read-only full-stack readiness with failure localization.
+    """Read-only fast path and existing fail-closed failure localization."""
+    cli.legacy("=== Vault-backed development health report (read-only) ===")
+    for name, label in (("host", "Host configuration"), ("resources", "Docker resources")):
+        with cli.stage(label):
+            if not observed_check(name):
+                cli.notice(f"FAIL: {name}; inspect {STAGE_BY_NAME[name][0]}")
+                raise UnifiedStartupError(f"Health report failed at {name}")
+            cli.legacy(f"PASS: {name}")
 
-    Fast path executes the existing transitive Nginx readiness probe once,
-    just like --check-all. On failure, a separate diagnostic pass checks the
-    trusted stages in dependency order, stopping at the first failing stage.
-    The per-stage helpers retain their identity/ACL/HTTP checks; stdout and
-    stderr remain suppressed to avoid accidentally displaying secrets.
-
-    This command deliberately never starts, repairs, unseals, or provisions.
-    """
-    print("=== Vault-backed development health report (read-only) ===", flush=True)
-    for name in ("host", "resources"):
-        if not checked(name):
-            print(f"FAIL: {name}; inspect {STAGE_BY_NAME[name][0]}", flush=True)
-            raise UnifiedStartupError(f"Health report failed at {name}")
-        print(f"PASS: {name}", flush=True)
-
-    # The Nginx check verifies TLS, HTTPS routes, Vite and API, and traverses
-    # the backend, support services, Vault Agent, migrations, PG roles, and
-    # Vault configuration. Do not repeat this expensive chain on success.
-    if checked("nginx"):
-        print("PASS: end-to-end Nginx HTTPS, application and trusted dependencies", flush=True)
-        if not checked("vault-ui"):
-            print("FAIL: vault-ui; inspect --check-vault-ui-optional", flush=True)
-            raise UnifiedStartupError("Health report failed at vault-ui")
-        print("PASS: Vault UI expected lifecycle state and Docker isolation", flush=True)
-        if not checked("prometheus"):
-            print("FAIL: prometheus; inspect --check-prometheus", flush=True)
-            raise UnifiedStartupError("Health report failed at prometheus")
-
-        print("PASS: Prometheus readiness and trusted identity", flush=True)
-
-        if not checked("grafana"):
-            # Locate a failed Grafana dependency without provisioning.
-            for dependency in ("grafana-secrets", "grafana-agent"):
-                if not checked(dependency):
-                    print(
-                        f"FAIL: {dependency}; inspect "
-                        f"{STAGE_BY_NAME[dependency][0]}",
-                        flush=True,
-                    )
+    with cli.stage("Application HTTPS"):
+        if not observed_check("nginx"):
+            cli.notice("WARN: end-to-end check failed; locating the first failing dependency")
+            for name, _, _ in STAGES[2:]:
+                if not observed_check(name):
+                    cli.notice(f"FAIL: {name}; inspect {STAGE_BY_NAME[name][0]}")
                     raise UnifiedStartupError(
-                        f"Health report failed at {dependency}"
+                        f"Health report failed at {name} (or one of its checked dependencies)"
                     )
+                cli.legacy(f"PASS: {name}")
+            # An independently passing second pass does not establish health.
+            raise UnifiedStartupError(
+                "Intermittent readiness failure: initial HTTPS check failed; "
+                "all individual read-only checks later passed"
+            )
+        cli.legacy("PASS: end-to-end Nginx HTTPS, application and trusted dependencies")
 
-            print("FAIL: grafana; inspect --check-grafana", flush=True)
+    with cli.stage("Vault UI lifecycle"):
+        if not observed_check("vault-ui"):
+            cli.notice("FAIL: vault-ui; inspect --check-vault-ui-optional")
+            raise UnifiedStartupError("Health report failed at vault-ui")
+        cli.legacy("PASS: Vault UI expected lifecycle state and Docker isolation")
+
+    with cli.stage("Prometheus readiness"):
+        if not observed_check("prometheus"):
+            cli.notice("FAIL: prometheus; inspect --check-prometheus")
+            raise UnifiedStartupError("Health report failed at prometheus")
+        cli.legacy("PASS: Prometheus readiness and trusted identity")
+
+    with cli.stage("Grafana readiness"):
+        if not observed_check("grafana"):
+            for dependency in ("grafana-secrets", "grafana-agent"):
+                if not observed_check(dependency):
+                    cli.notice(f"FAIL: {dependency}; inspect {STAGE_BY_NAME[dependency][0]}")
+                    raise UnifiedStartupError(f"Health report failed at {dependency}")
+            cli.notice("FAIL: grafana; inspect --check-grafana")
             raise UnifiedStartupError(
                 "Health report failed at grafana or its checked dependencies"
             )
+        cli.legacy("PASS: Grafana authentication and provisioning")
 
-        print("PASS: Grafana authentication and provisioning", flush=True)
-
-        if not checked("grafana-https"):
-            print(
-                "FAIL: grafana-https; inspect --check-grafana-https",
-                flush=True,
-            )
-            raise UnifiedStartupError(
-                "Health report failed at grafana-https"
-            )
-
-        print("PASS: Grafana HTTPS and WAF protection", flush=True)
-        print("RESULT: DEVELOPMENT HEALTHY (read-only)", flush=True)
-        return
-
-    print("WARN: end-to-end check failed; locating the first failing dependency", flush=True)
-    for name, _, _ in STAGES[2:]:
-        if not checked(name):
-            print(f"FAIL: {name}; inspect {STAGE_BY_NAME[name][0]}", flush=True)
-            raise UnifiedStartupError(
-                f"Health report failed at {name} (or one of its checked dependencies)"
-            )
-        print(f"PASS: {name}", flush=True)
-
-    # All independently repeated probes passed after initial end-to-end
-    # failure. Do not call this healthy: that could hide intermittent faults.
-    raise UnifiedStartupError(
-        "Intermittent readiness failure: initial HTTPS check failed; "
-        "all individual read-only checks later passed"
-    )
-
+    with cli.stage("Grafana HTTPS"):
+        if not observed_check("grafana-https"):
+            cli.notice("FAIL: grafana-https; inspect --check-grafana-https")
+            raise UnifiedStartupError("Health report failed at grafana-https")
+        cli.legacy("PASS: Grafana HTTPS and WAF protection")
+    cli.result("DEVELOPMENT HEALTHY (read-only)")
 
 @contextmanager
 def exclusive_orchestrator_lock():
@@ -698,38 +990,135 @@ def exclusive_orchestrator_lock():
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise UnifiedStartupError("Another unified bootstrap is already running") from None
-        yield
+        yield fd
     finally:
         os.close(fd)
 
 
-def main(argv=None):
+# Fixed stage labels reflect the existing command branches, not extra probes.
+START_LABELS = (
+    "Host configuration", "Docker resources", "Vault seal guard",
+    "Optional Vault UI", "Application readiness", "Resume existing services",
+)
+RECOVERY_LABELS = (
+    "Recovery host", "Recovery resources", "Existing Vault",
+    "Manual Shamir unseal", "Vault readiness",
+) + START_LABELS
+CHECK_LABELS = (
+    "Host configuration", "Docker resources", "Vault UI lifecycle",
+    "Application HTTPS", "Prometheus readiness", "Grafana readiness", "Grafana HTTPS",
+)
+HEALTH_LABELS = (
+    "Host configuration", "Docker resources", "Application HTTPS",
+    "Vault UI lifecycle", "Prometheus readiness", "Grafana readiness", "Grafana HTTPS",
+)
+ROUTINE_PRESENTATION = {
+    "start": ("Starting ft_transcendence", ("Startup lock",) + START_LABELS),
+    "recover": ("Recovering ft_transcendence", ("Startup lock",) + RECOVERY_LABELS),
+    "check": ("Checking ft_transcendence readiness", CHECK_LABELS),
+    "health-report": ("Checking ft_transcendence health", HEALTH_LABELS),
+}
+
+
+def routine(mode, *, shell_entry=False):
+    with cli.stage("System prerequisites"):
+        # The public shell entry used to run this check before Python, then
+        # preflight_once ran the shell guard again. Keep both, in that order.
+        if shell_entry:
+            with cli.step("Check installed system prerequisites"):
+                completed = subprocess.run(
+                    [str(ROOT / "scripts/install-deps.sh"), "--check"], cwd=ROOT,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+                )
+                if completed.returncode:
+                    raise UnifiedStartupError(
+                        "Dependencies not ready; inspect ./scripts/install-deps.sh --check; "
+                        "use make initialize on a fresh VM"
+                    )
+        with cli.step("Verify trusted shell preflight"):
+            preflight_once()
+    if mode == "check":
+        check()
+    elif mode == "health-report":
+        health_report()
+    else:
+        # Acquire the same lock, at the same point, and hold it throughout.
+        with ExitStack() as stack:
+            with cli.stage("Startup lock"):
+                stack.enter_context(exclusive_orchestrator_lock())
+            if mode == "recover":
+                recover()
+            else:
+                start()
+
+
+def main(argv=None, *, render=False):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("initialize", "start", "check", "recover", "health-report"))
+    parser.add_argument("mode", choices=("initialize", "start", "check", "recover", "health-report", "plan"))
+    parser.add_argument("--shell-entry", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.shell_entry and args.mode == "initialize":
+        parser.error("shell-entry is only for routine commands")
     try:
         if os.geteuid() == 0:
             raise UnifiedStartupError("Run as an ordinary user, not with sudo")
-        preflight_once()
-        if args.mode == "check":
-            check()
-        elif args.mode == "health-report":
-            health_report()
+        if args.mode == "plan":
+            if not args.shell_entry:
+                # Direct Python invocation still enters the standard shell guards.
+                code = subprocess.run([str(BOOTSTRAP), "--plan"], cwd=ROOT, check=False).returncode
+                return code if code >= 0 else 128 - code
+            if __package__:
+                from . import bootstrap_plan
+            else:
+                import bootstrap_plan
+            return bootstrap_plan.main(render=render)
+        if args.mode == "initialize":
+            # Do not mutate Windows trust or a remote Docker daemon.
+            import platform
+            if platform.system() != "Linux" or "microsoft" in platform.release().lower():
+                raise UnifiedStartupError("Initialization requires native Ubuntu Linux")
+            if os.environ.get("DEV_DOMAIN", "transcendence.test") != "transcendence.test":
+                raise UnifiedStartupError("Initialization requires the default development domain")
+            with exclusive_orchestrator_lock() as lock_fd, Cancellation().handling() as cancellation:
+                initialize(lock_fd, cancellation=cancellation)
+            return 0
+        if render:
+            header, labels = ROUTINE_PRESENTATION[args.mode]
+            with cli.presentation(("System prerequisites",) + labels, header,
+                                  allow_not_ready=args.mode in ("start", "recover")):
+                routine(args.mode, shell_entry=args.shell_entry)
         else:
-            with exclusive_orchestrator_lock():
-                if args.mode == "initialize":
-                    initialize()
-                elif args.mode == "recover":
-                    recover()
-                else:
-                    start()
+            routine(args.mode, shell_entry=args.shell_entry)
         return 0
+    except SessionRefreshRequired:
+        emit_result("INITIALIZATION PAUSED (sign out and back in; rerun make initialize)",
+                    Status.ACTION_REQUIRED, stream=sys.stderr)
+        return 2
+    except InitializationCancelled as exc:
+        emit_result("INITIALIZATION CANCELLED (no automatic rollback; inspect existing state)",
+                    Status.CANCELLED, stream=sys.stderr)
+        return 128 + exc.signum
+    except UnexpectedApproval:
+        emit_result("UNIFIED BOOTSTRAP STOPPED (unexpected approval; no automatic rollback)",
+                    Status.FAILED, stream=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        if args.mode == "initialize":
+            raise
+        emit_result("UNIFIED BOOTSTRAP STOPPED (interrupted; no automatic rollback)",
+                    Status.CANCELLED, stream=sys.stderr)
+        return 130
+    except OSError:
+        print("ERROR: Local bootstrap operation failed; inspect the active stage", file=sys.stderr)
+        return 1
     except UnifiedStartupError as exc:
         print(f"ERROR: {exc}", file=sys.stderr, flush=True)
-        print("RESULT: UNIFIED BOOTSTRAP STOPPED (no resources removed)",
-              file=sys.stderr, flush=True)
+        if args.mode == "initialize" or render:
+            emit_result("UNIFIED BOOTSTRAP STOPPED (no resources removed)", Status.FAILED, stream=sys.stderr)
+        else:
+            print("RESULT: UNIFIED BOOTSTRAP STOPPED (no resources removed)", file=sys.stderr, flush=True)
         return 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(render=True))

@@ -39,6 +39,10 @@ class MakefileStartupContractTests(unittest.TestCase):
         self.assertEqual(self.dry_run("check-all"), "./scripts/bootstrap.sh --check-all")
         self.assertEqual(self.dry_run("plan"), "./scripts/bootstrap.sh --plan")
 
+    def test_host_check_uses_shared_read_only_presentation(self):
+        self.assertEqual(self.dry_run("check"),
+                         "python3 -m scripts.dev.bootstrap_host_check")
+
     def test_acceptance_is_opt_in(self):
         self.assertEqual(
             self.dry_run("acceptance"),
@@ -50,7 +54,7 @@ class MakefileStartupContractTests(unittest.TestCase):
                              ("vault-ui-disable", "disable"),
                              ("vault-ui-status", "status")):
             self.assertEqual(self.dry_run(target),
-                             f"python3 scripts/dev/bootstrap_vault_ui.py {mode}")
+                             f"python3 scripts/dev/bootstrap_vault_ui.py {mode} --progress")
 
     def test_documented_links_and_commands(self):
         readme = (ROOT / "README.md").read_text()

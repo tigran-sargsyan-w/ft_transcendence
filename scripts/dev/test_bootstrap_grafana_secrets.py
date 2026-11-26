@@ -242,6 +242,17 @@ class DriverTests(unittest.TestCase):
             with self.assertRaisesRegex(driver.GrafanaSecretsError, "missing"):
                 driver.run_helper("check", "fake")
 
+    def test_provisioning_probe_distinguishes_missing_from_failure(self):
+        with patch.object(driver.config, "main", return_value=0), \
+             patch.object(driver.config, "recovery_token", return_value="fake"), \
+             patch.object(driver, "run_helper", side_effect=driver.GrafanaSecretsMissing("missing")):
+            self.assertEqual(driver.main(["check-missing"]), 2)
+            self.assertEqual(driver.main(["check"]), 1)
+        with patch.object(driver.config, "main", return_value=0), \
+             patch.object(driver.config, "recovery_token", return_value="fake"), \
+             patch.object(driver, "run_helper", side_effect=driver.GrafanaSecretsError("invalid")):
+            self.assertEqual(driver.main(["check-missing"]), 1)
+
     def test_raw_helper_errors_are_never_disclosed(self):
         result = SimpleNamespace(
             returncode=1,

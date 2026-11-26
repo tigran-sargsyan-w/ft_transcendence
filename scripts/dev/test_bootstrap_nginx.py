@@ -233,6 +233,88 @@ class NginxTests(unittest.TestCase):
         with patch.object(nginx, "run", side_effect=samples):
             with self.assertRaises(nginx.NginxBootstrapError): nginx.verify_routes()
 
+    def test_only_expected_route_http_502_is_retryable(self):
+        for path in nginx.RECOVERY_502:
+            with self.subTest(path=path), \
+                 patch.object(nginx, "run", return_value=b"SECRET-CANARY\n502"):
+                with self.assertRaises(nginx.NginxReadinessError) as error:
+                    nginx.curl_bytes("https://transcendence.test:8443", port=8443, path=path)
+                self.assertEqual(error.exception.path, path)
+                self.assertNotIn("SECRET-CANARY", str(error.exception))
+        for path, status in (("/", b"403"), ("/", b"503"), ("/", b"504"),
+                             ("/", b"000"), ("/unexpected", b"502")):
+            with self.subTest(path=path, status=status), \
+                 patch.object(nginx, "run", return_value=b"SECRET-CANARY\n" + status):
+                with self.assertRaises(nginx.NginxBootstrapError) as error:
+                    nginx.curl_bytes("https://transcendence.test:8443", port=8443, path=path)
+                self.assertNotIsInstance(error.exception, nginx.NginxReadinessError)
+
+    def test_recovery_probe_runs_full_checks_and_pins_identity(self):
+        item = fixture()
+        item["Id"] = "a" * 64
+        order = []
+        with patch.object(nginx, "container", side_effect=lambda: (order.append("identity") or item)), \
+             patch.object(nginx, "require_prerequisites", side_effect=lambda: order.append("prerequisites")), \
+             patch.object(nginx, "verify_routes", side_effect=lambda: order.append("routes")), \
+             patch.object(nginx, "start_or_keep") as start:
+            self.assertEqual(nginx.main(["check-recovery", "--expected-id", item["Id"]]), 0)
+        self.assertEqual(order, ["identity", "prerequisites", "identity", "routes", "identity"])
+        start.assert_not_called()
+
+    def test_recovery_probe_returns_only_fixed_retry_codes(self):
+        item = fixture()
+        item["Id"] = "a" * 64
+        for path, code in nginx.RECOVERY_502.items():
+            with self.subTest(path=path), \
+                 patch.object(nginx, "container", return_value=item) as inspect, \
+                 patch.object(nginx, "require_prerequisites"), \
+                 patch.object(nginx, "verify_routes", side_effect=nginx.NginxReadinessError(path)), \
+                 contextlib.redirect_stderr(io.StringIO()) as errors:
+                self.assertEqual(nginx.main(["check-recovery", "--expected-id", item["Id"]]), code)
+                self.assertIn("HTTP 502 on " + path, errors.getvalue())
+                self.assertEqual(inspect.call_count, 3)
+
+    def test_recovery_probe_refuses_changed_identity_even_after_502_or_success(self):
+        item = fixture()
+        item["Id"] = "a" * 64
+        for outcome in (None, nginx.NginxReadinessError("/")):
+            for changed in (None, {**item, "Id": "b" * 64},
+                            {**item, "State": {"Running": False, "Status": "exited"}},
+                            {**item, "HostConfig": {**item["HostConfig"], "Privileged": True}}):
+                with self.subTest(outcome=outcome, changed=changed is None), \
+                     patch.object(nginx, "container", side_effect=[item, item, changed]), \
+                     patch.object(nginx, "require_prerequisites"), \
+                     patch.object(nginx, "verify_routes", side_effect=[outcome]), \
+                     contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(nginx.main(["check-recovery", "--expected-id", item["Id"]]), 1)
+
+    def test_recovery_probe_prerequisite_failure_is_not_retryable(self):
+        item = fixture()
+        item["Id"] = "a" * 64
+        with patch.object(nginx, "container", return_value=item), \
+             patch.object(nginx, "require_prerequisites", side_effect=nginx.NginxBootstrapError("TLS not trusted")), \
+             patch.object(nginx, "verify_routes") as routes, \
+             contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(nginx.main(["check-recovery", "--expected-id", item["Id"]]), 1)
+        routes.assert_not_called()
+
+    def test_normal_check_still_returns_one_for_502(self):
+        with patch.object(nginx, "require_prerequisites"), \
+             patch.object(nginx, "container", return_value=fixture()), \
+             patch.object(nginx, "verify_routes", side_effect=nginx.NginxReadinessError("/")), \
+             contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(nginx.main(["check"]), 1)
+
+    def test_recovery_probe_requires_valid_full_id(self):
+        for args in (["check-recovery"], ["check-recovery", "--expected-id", "short"],
+                     ["check", "--expected-id", "a" * 64]):
+            with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()), \
+                 patch.object(nginx, "container") as inspect:
+                with self.assertRaises(SystemExit) as error:
+                    nginx.main(args)
+                self.assertEqual(error.exception.code, 2)
+                inspect.assert_not_called()
+
     def test_rejects_missing_status_code(self):
         samples = responses(); samples[1] = b"no status code"
         with patch.object(nginx, "run", side_effect=samples):

@@ -7,6 +7,11 @@ container. Performs real Vite HTML/module and backend-proxy HTTP probes.
 No Nginx, Vault, PostgreSQL, secrets or other services are modified.
 """
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import fcntl
 import sys
@@ -173,9 +178,11 @@ def main(argv=None):
         if args.mode == "plan":
             item = container()
             if item is None:
+                plan_events.container("React frontend", item)
                 print("TODO: React frontend not created (read-only)")
             else:
                 verify_identity(item)
+                plan_events.container("React frontend", item)
                 print(f"EXISTS: React frontend ({(item.get('State') or {}).get('Status')})")
             print("RESULT: REACT FRONTEND PLAN COMPLETE (read-only)")
             return 0

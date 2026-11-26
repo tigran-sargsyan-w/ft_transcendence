@@ -73,7 +73,7 @@ Usage: ./scripts/bootstrap.sh [--initialize|--start|--recover|--check-all|--heal
   --upgrade-waf            One-time confirmed upgrade of ONLY legacy Nginx to WAF.
   --help          Show this message.
 
-Phase 6A: --initialize is the confirmed first-time entry point; --start
+--initialize authorizes guarded development provisioning without prompts; --start
 never creates new Vault, database, credentials, or applies new migrations.
 After reboot use --recover in a terminal; shares are entered at hidden Vault
 CLI prompts, never as command arguments or Compose environment variables.
@@ -82,6 +82,26 @@ HELP
 }
 
 MODE="${1:---plan}"
+INITIALIZE_STAGE=0
+if [[ "$MODE" == --initialize-stage ]]; then
+  # Internal fixed operations, with the orchestrator's held lock descriptor.
+  (( $# == 3 )) || exit 2
+  case "$2" in
+    --prepare-host|--prepare-resources|--prepare-vault|--prepare-vault-config|--prepare-vault-secrets|--prepare-postgres|--prepare-postgres-roles|--prepare-migrations|--prepare-backend-agent|--prepare-backend|--prepare-support-services|--prepare-frontend|--prepare-nginx|--prepare-prometheus|--prepare-grafana-secrets|--prepare-grafana-agent|--prepare-grafana) ;;
+    *) echo "ERROR: Invalid initialization stage" >&2; exit 2 ;;
+  esac
+  [[ "$3" =~ ^[0-9]+$ && "$3" -ge 3 ]] || exit 2
+  lock_path="${XDG_STATE_HOME:-$HOME/.local/state}/transcendence/dev/unified-startup.lock"
+  [[ -f "$lock_path" && ! -L "$lock_path" && "/proc/self/fd/$3" -ef "$lock_path" ]] \
+    || { echo "ERROR: Initialization requires the orchestrator lock descriptor" >&2; exit 2; }
+  if flock -n "$lock_path" true || ! flock -n "$3"; then
+    echo "ERROR: Initialization requires an active orchestrator lock" >&2
+    exit 2
+  fi
+  INITIALIZE_STAGE=1
+  MODE="$2"
+  set -- "$MODE"
+fi
 case "$MODE" in
   --orchestrator-preflight|--initialize|--start|--recover|--check-all|--health-report|--plan|--prepare-host|--check-host|--prepare-resources|--check-resources|--prepare-vault|--check-vault|--prepare-vault-ui|--check-vault-ui|--check-vault-ui-optional|--prepare-vault-config|--check-vault-config|--prepare-vault-secrets|--check-vault-secrets|--prepare-postgres|--check-postgres|--prepare-postgres-roles|--check-postgres-roles|--prepare-migrations|--check-migrations|--prepare-backend-agent|--check-backend-agent|--prepare-backend|--check-backend|--prepare-support-services|--check-support-services|--prepare-frontend|--check-frontend|--prepare-nginx|--check-nginx|--prepare-prometheus|--check-prometheus|--prepare-grafana-secrets|--check-grafana-secrets|--prepare-grafana-agent|--check-grafana-agent|--prepare-grafana|--check-grafana|--check-grafana-https|--plan-waf-upgrade|--upgrade-waf) ;;
   --help|-h) usage; exit 0 ;;
@@ -97,6 +117,11 @@ confirm() {
   printf '%s [y/N] ' "$1"
   IFS= read -r answer || return 1
   [[ "$answer" == 'y' || "$answer" == 'Y' || "$answer" == 'yes' || "$answer" == 'YES' ]]
+}
+
+stage_confirm() {
+  if (( INITIALIZE_STAGE )); then return 0; fi
+  confirm "$1"
 }
 
 [[ $(id -u) != 0 ]] || fail "Run as a regular user, not with sudo"
@@ -178,52 +203,43 @@ host_check() {
   (( missing == 0 ))
 }
 
-inventory_docker() {
-  say "=== Existing Docker resources (read-only) ==="
-  local found=0 label item
-  for item in \
-    transcendence-vault-dev_vault_data \
-    transcendence-vault-dev_backend_agent_auth \
-    transcendence-vault-dev_backend_rendered \
-    transcendence-app-dev_postgres_data \
-    transcendence-app-dev_prometheus_data \
-    transcendence-app-dev_grafana_data \
-    transcendence-app-dev_grafana_vault_auth \
-    transcendence-app-dev_grafana_vault_rendered \
-    transcendence-app-dev_migrator_vault_auth \
-    transcendence-app-dev_migrator_vault_rendered \
-    transcendence-app-dev_postgres_provisioner_vault_auth \
-    transcendence-app-dev_postgres_provisioner_rendered; do
-    if docker volume inspect "$item" >/dev/null 2>&1; then
-      say "EXISTS: volume $item"
-      found=1
-    fi
-  done
-  for item in \
-    transcendence-vault-dev_vault_private \
-    transcendence-app-dev_default \
-    transcendence-app-dev_collector_control; do
-    if docker network inspect "$item" >/dev/null 2>&1; then
-      say "EXISTS: network $item"
-      found=1
-    fi
-  done
-  # Never print environment variables, mounts or secret content.
-  for label in transcendence-app-dev transcendence-vault-dev; do
-    if [[ -n $(docker ps -aq --filter "label=com.docker.compose.project=$label") ]]; then
-      say "EXISTS: containers owned by $label"
-      found=1
-    fi
-  done
-  if (( found == 0 )); then
-    say "PASS: No previously managed runtime resources found"
-  else
-    say "INFO: Existing runtime resources detected; later provisioning must inspect them before changes"
+# Initialize owns the complete lifecycle (including packages and images).
+# exec keeps the orchestrator as the direct child of make.
+if [[ "$MODE" == --initialize ]]; then
+  exec python3 scripts/dev/bootstrap_unified.py initialize
+fi
+
+# Plan uses the same Python orchestration entry after the existing shell guards.
+# Keep the original single prerequisite check inside the plan presentation.
+if [[ "$MODE" == --plan ]]; then
+  if ! command -v python3 >/dev/null 2>&1; then
+    ./scripts/install-deps.sh --check || fail "Dependencies not ready; use make initialize on a fresh VM"
+    echo "ERROR: Python 3 unavailable" >&2
+    exit 127
   fi
-}
+  exec python3 scripts/dev/bootstrap_unified.py plan --shell-entry
+fi
+
+# The existing read-only dependency check is presented by the routine CLI
+# together with its original second preflight. The shell guards above remain.
+case "$MODE" in
+  --start)         routine_mode=start ;;
+  --recover)       routine_mode=recover ;;
+  --check-all)     routine_mode=check ;;
+  --health-report) routine_mode=health-report ;;
+  *)               routine_mode="" ;;
+esac
+if [[ -n "$routine_mode" ]]; then
+  # Preserve the existing prerequisite failure on a host without Python.
+  if ! command -v python3 >/dev/null 2>&1; then
+    ./scripts/install-deps.sh --check || fail "Dependencies not ready; use make initialize on a fresh VM"
+    fail "Python 3 unavailable; inspect the prerequisite report"
+  fi
+  exec python3 scripts/dev/bootstrap_unified.py "$routine_mode" --shell-entry
+fi
 
 say "=== Fresh Ubuntu bootstrap: host + Docker resources ==="
-if [[ "$MODE" == --initialize || "$MODE" == --upgrade-waf ]]; then
+if [[ "$MODE" == --upgrade-waf ]]; then
   # Only explicitly approved initialization/maintenance installs packages.
   ./scripts/install-deps.sh || fail "Dependency installation stopped; inspect the installer and rerun"
   ./scripts/install-deps.sh --check || fail "Docker dependencies or access still unavailable"
@@ -249,49 +265,6 @@ case "$MODE" in
     # Internal read-only entry: all standard shell guards above still run.
     say "RESULT: ORCHESTRATOR PREFLIGHT READY (read-only)"
     ;;
-  --initialize)
-    python3 scripts/dev/bootstrap_images.py apply || fail "Required images unavailable"
-    python3 scripts/dev/bootstrap_unified.py initialize
-    ;;
-  --start)
-    python3 scripts/dev/bootstrap_unified.py start
-    ;;
-  --recover)
-    python3 scripts/dev/bootstrap_unified.py recover
-    ;;
-  --check-all)
-    python3 scripts/dev/bootstrap_unified.py check
-    ;;
-  --health-report)
-    python3 scripts/dev/bootstrap_unified.py health-report
-    ;;
-  --plan)
-    if host_check; then
-      say "RESULT: HOST PREPARATION ALREADY READY"
-    else
-      say "RESULT: HOST PREPARATION NEEDED"
-    fi
-    inventory_docker
-    python3 scripts/dev/bootstrap_resources.py plan
-    python3 scripts/dev/bootstrap_vault.py plan
-    python3 scripts/dev/bootstrap_vault_ui.py plan
-    say "INFO: Vault config read-only check is available via --check-vault-config"
-    python3 scripts/dev/bootstrap_vault_secrets.py plan
-    python3 scripts/dev/bootstrap_postgres.py plan
-    python3 scripts/dev/bootstrap_postgres_roles.py plan
-    python3 scripts/dev/bootstrap_migrations.py plan
-    python3 scripts/dev/bootstrap_backend_agent.py plan
-    python3 scripts/dev/bootstrap_backend.py plan
-    python3 scripts/dev/bootstrap_support_services.py plan
-    python3 scripts/dev/bootstrap_frontend.py plan
-    python3 scripts/dev/bootstrap_nginx.py plan
-    python3 scripts/dev/bootstrap_prometheus.py plan
-    python3 scripts/dev/bootstrap_grafana_secrets.py plan
-    python3 scripts/dev/bootstrap_grafana_agent.py plan
-    python3 scripts/dev/bootstrap_grafana.py plan
-    python3 scripts/dev/bootstrap_grafana_https.py plan
-    say "RESULT: BOOTSTRAP PLAN COMPLETE (read-only)"
-    ;;
   --check-host)
     if host_check; then
       say "RESULT: HOST PREPARATION READY (read-only)"
@@ -310,7 +283,7 @@ case "$MODE" in
     say "This stage creates only missing Docker networks and named volumes."
     say "Existing resources will be checked and retained, never removed."
     say "No containers, Vault initialization, database or secrets are created."
-    confirm "Create missing Docker networks and volumes on this VM?" || fail "Cancelled; no resources created"
+    stage_confirm "Create missing Docker networks and volumes on this VM?" || fail "Cancelled; no resources created"
     python3 scripts/dev/bootstrap_resources.py apply
     ;;
   --check-vault)
@@ -326,8 +299,8 @@ case "$MODE" in
     say "Root token and all unseal shares will be saved in a local protected DEV file."
     say "This file is sensitive: export it to secure storage OUTSIDE the VM and Git."
     say "PostgreSQL and application containers will NOT be started."
-    confirm "Initialize or resume local development Vault on this VM?" || fail "Cancelled"
-    python3 scripts/dev/bootstrap_vault.py apply
+    stage_confirm "Initialize or resume local development Vault on this VM?" || fail "Cancelled"
+    exec python3 scripts/dev/bootstrap_vault.py apply
     ;;
   --check-vault-ui)
     python3 scripts/dev/bootstrap_vault_ui.py check
@@ -376,14 +349,15 @@ case "$MODE" in
     python3 scripts/dev/bootstrap_vault_config.py check || fail "Vault configuration incomplete"
     python3 scripts/dev/bootstrap_grafana_secrets.py plan
 
-    if python3 scripts/dev/bootstrap_grafana_secrets.py check; then
+    if python3 scripts/dev/bootstrap_grafana_secrets.py check-missing; then
       say "KEEP: Existing Grafana Vault credentials verified"
     else
+      [[ $? -eq 2 ]] || fail "Grafana credential check failed; refusing provisioning"
       say ""
       say "This stage creates only initial Grafana credentials in Vault."
       say "Existing Grafana credentials will never be rotated or replaced."
       say "An existing Grafana instance or nonempty data volume prevents new credential generation."
-      confirm "Prepare initial Grafana credentials in Vault?" || fail "Cancelled"
+      stage_confirm "Prepare initial Grafana credentials in Vault?" || fail "Cancelled"
 
       # Refuse new credentials for an existing installation.
       existing_grafana="$(docker ps -aq \
@@ -425,7 +399,7 @@ case "$MODE" in
     say "This stage prepares only Grafana AppRole credentials if missing."
     say "It starts only the dedicated Grafana Vault Agent."
     say "Existing credentials and containers will be retained."
-    confirm "Prepare Grafana Vault Agent on this VM?" || fail "Cancelled"
+    stage_confirm "Prepare Grafana Vault Agent on this VM?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_grafana_agent.py apply
     ;;
   --check-grafana)
@@ -435,14 +409,14 @@ case "$MODE" in
     host_check || fail "Host preparation incomplete"
     python3 scripts/dev/bootstrap_resources.py check || fail "Docker resources incomplete"
     python3 scripts/dev/bootstrap_grafana_agent.py check || fail "Grafana Vault Agent incomplete"
-    python3 scripts/dev/bootstrap_prometheus.py check || fail "Prometheus incomplete"
+    python3 scripts/dev/bootstrap_prometheus.py check-ready || fail "Prometheus incomplete"
     python3 scripts/dev/bootstrap_grafana.py plan
     say ""
     say "This stage starts only the trusted Grafana Compose service."
     say "Grafana reads credentials from the Vault-rendered read-only volume."
     say "Existing containers and persistent data will be retained."
     say "No additional host ports are published."
-    confirm "Create/start Grafana on this VM?" || fail "Cancelled"
+    stage_confirm "Create/start Grafana on this VM?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_grafana.py apply
     ;;
   --check-grafana-https)
@@ -457,7 +431,7 @@ case "$MODE" in
     say "This stage starts ONLY the trusted Prometheus Compose service."
     say "No host ports or Docker socket are exposed."
     say "Existing containers are preserved and never recreated."
-    confirm "Create/start Prometheus on this VM?" || fail "Cancelled"
+    stage_confirm "Create/start Prometheus on this VM?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_prometheus.py apply
     ;;
   --prepare-nginx)
@@ -470,7 +444,7 @@ case "$MODE" in
     say "It verifies the existing mkcert TLS chain without generating/replacing keys."
     say "Existing trusted containers are preserved and NEVER recreated."
     say "No Vault, PostgreSQL, migrations or application services are changed."
-    confirm "Start local HTTPS Nginx gateway on this VM?" || fail "Cancelled"
+    stage_confirm "Start local HTTPS Nginx gateway on this VM?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_nginx.py apply
     ;;
   --check-frontend)
@@ -486,7 +460,7 @@ case "$MODE" in
     say "Frontend has no published host ports or Vault/DB credentials."
     say "Existing containers are preserved, never recreated by the bootstrap."
     say "Nginx and any other not-yet-created application services are NOT started."
-    confirm "Build/start React/Vite frontend on this VM?" || fail "Cancelled"
+    stage_confirm "Build/start React/Vite frontend on this VM?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_frontend.py apply
     ;;
   --check-support-services)
@@ -502,7 +476,7 @@ case "$MODE" in
     say "Existing trusted containers are preserved; no Vault or PostgreSQL changes."
     say "The Docker socket stays read-only and isolated on collector_control."
     say "Frontend, Nginx and other application services are NOT started."
-    confirm "Prepare Docker Proxy, Collector and Graph Engine on this VM?" || fail "Cancelled"
+    stage_confirm "Prepare Docker Proxy, Collector and Graph Engine on this VM?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_support_services.py apply
     ;;
   --check-backend)
@@ -518,7 +492,7 @@ case "$MODE" in
     say "Backend reads DATABASE_URL_FILE from Vault-rendered, read-only volume."
     say "Existing containers are preserved; no Vault credentials or DB passwords rotate."
     say "Collector, Graph Engine, frontend, Nginx and other services are NOT started."
-    confirm "Build/start Vault-backed NestJS backend on this VM?" || fail "Cancelled"
+    stage_confirm "Build/start Vault-backed NestJS backend on this VM?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_backend.py apply
     ;;
   --check-backend-agent)
@@ -534,7 +508,7 @@ case "$MODE" in
     say "It starts only the Vault backend Agent and verifies healthy secret delivery."
     say "Existing credentials and Agent containers will not be recreated or rotated."
     say "Backend, frontend, Nginx and other application services will NOT be started."
-    confirm "Prepare backend Vault Agent on this VM?" || fail "Cancelled"
+    stage_confirm "Prepare backend Vault Agent on this VM?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_backend_agent.py apply
     ;;
   --prepare-migrations)
@@ -549,7 +523,7 @@ case "$MODE" in
     say "Existing Vault DSNs and PostgreSQL passwords are never rotated."
     say "No application, frontend or Nginx containers are started."
     say "Unknown migration history or altered migration checksums are REFUSED."
-    confirm "Apply Prisma migrations and reconcile PostgreSQL grants?" || fail "Cancelled"
+    stage_confirm "Apply Prisma migrations and reconcile PostgreSQL grants?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_migrations.py apply
     ;;
   --prepare-postgres-roles)
@@ -563,7 +537,7 @@ case "$MODE" in
     say "It may create initial AppRole credentials in the dedicated Docker volume."
     say "Existing database role passwords are verified, NEVER changed or rotated."
     say "Prisma migrations and table grants are NOT applied in this stage."
-    confirm "Provision PostgreSQL roles using Vault credentials on this VM?" || fail "Cancelled"
+    stage_confirm "Provision PostgreSQL roles using Vault credentials on this VM?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_postgres_roles.py apply
     ;;
   --prepare-postgres)
@@ -577,7 +551,7 @@ case "$MODE" in
     say "The final PostgreSQL administrator has NO network password."
     say "Existing and partially initialized volumes are NEVER wiped or reinitialized."
     say "App credentials, grants and Prisma migrations are separate later steps."
-    confirm "Initialize or resume PostgreSQL on this VM?" || fail "Cancelled"
+    stage_confirm "Initialize or resume PostgreSQL on this VM?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_postgres.py apply
     ;;
   --check-vault-secrets)
@@ -593,7 +567,7 @@ case "$MODE" in
     say "Credentials are generated inside a temporary private-network helper container."
     say "Existing valid database secrets will never be rotated or replaced."
     say "No PostgreSQL or application containers are started."
-    confirm "Create missing PostgreSQL secrets in Vault on this VM?" || fail "Cancelled"
+    stage_confirm "Create missing PostgreSQL secrets in Vault on this VM?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_vault_secrets.py apply
     ;;
   --check-vault-config)
@@ -607,18 +581,23 @@ case "$MODE" in
     say "This stage configures only KV v2, ACL policies and four Vault AppRoles."
     say "No database secrets, PostgreSQL services or application containers are created."
     say "Existing policies or roles with unexpected settings will be preserved and rejected."
-    confirm "Configure Vault policies and AppRoles on this VM?" || fail "Cancelled"
+    stage_confirm "Configure Vault policies and AppRoles on this VM?" || fail "Cancelled"
     python3 scripts/dev/bootstrap_vault_config.py apply
     ;;
   --prepare-host)
     say ""
     say "This stage can modify /etc/hosts, local CA trust and local TLS files."
     say "It does not create/start Docker containers, networks or volumes."
-    confirm "Prepare local domain and TLS on this VM?" || fail "Cancelled; no preparation started"
-    python3 -m scripts.dev.domains setup
-    python3 -m scripts.dev.certificates setup
-    python3 -m scripts.dev.nginx_tls_access apply
-    python3 -m scripts.dev.ca_trust setup
+    stage_confirm "Prepare local domain and TLS on this VM?" || fail "Cancelled; no preparation started"
+    if (( INITIALIZE_STAGE )); then
+      python3 -m scripts.dev.bootstrap_linux_ca
+      python3 -m scripts.dev.nginx_tls_access apply
+    else
+      python3 -m scripts.dev.domains setup
+      python3 -m scripts.dev.certificates setup
+      python3 -m scripts.dev.nginx_tls_access apply
+      python3 -m scripts.dev.ca_trust setup
+    fi
     if vault_tls_status; then
       say "KEEP: Existing valid Vault TLS material"
     else

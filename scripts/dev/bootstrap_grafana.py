@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Trusted Grafana startup without recreation or credential rotation."""
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import fcntl
 import json
@@ -208,6 +213,7 @@ PROMETHEUS_CHECK_DELAY = 2
 
 
 def require_prerequisites():
+    print("STEP: Verify Grafana prerequisites", flush=True)
     resources.validate_compose_contract()
 
     if not all(resources.scan(batch=True).values()):
@@ -229,6 +235,7 @@ def require_prerequisites():
             time.sleep(PROMETHEUS_CHECK_DELAY)
         else:
             break
+    print("PASS: Grafana prerequisites verified", flush=True)
 
 
 def request_json(command):
@@ -247,6 +254,7 @@ def request_json(command):
 
 
 def probe_health():
+    print("STEP: Verify Grafana HTTP health", flush=True)
     result = request_json([
         "docker", "exec", NAME,
         "curl", "-q", "--fail", "--silent", "--show-error",
@@ -259,6 +267,7 @@ def probe_health():
         or result.get("version") != "13.3.1"
     ):
         raise GrafanaBootstrapError("Grafana database or version not ready")
+    print("PASS: Grafana HTTP health", flush=True)
 
 
 def authenticated_api(path):
@@ -278,6 +287,7 @@ def authenticated_api(path):
 
 
 def verify_provisioning():
+    print("STEP: Verify Grafana authentication and provisioning", flush=True)
     user = authenticated_api("/api/user")
 
     if user.get("login") != "admin":
@@ -402,7 +412,9 @@ def wait_ready(attempts=60, delay=2):
 
 
 def check():
+    print("STEP: Verify Grafana container identity", flush=True)
     item = verify_identity(container())
+    print("PASS: Grafana container identity and privileges", flush=True)
     require_prerequisites()
 
     if not running(item):
@@ -441,9 +453,11 @@ def main(argv=None):
             item = container()
 
             if item is None:
+                plan_events.container("Grafana", item)
                 print("TODO: Grafana not created (read-only)")
             else:
                 verify_identity(item)
+                plan_events.container("Grafana", item)
                 print("EXISTS: Trusted Grafana container")
 
             return 0

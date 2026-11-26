@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Trusted Grafana secret provisioning with create-once semantics."""
 
+if __package__:
+    from . import bootstrap_plan_events as plan_events
+else:
+    import bootstrap_plan_events as plan_events
+
 import argparse
 import os
 import subprocess
@@ -20,6 +25,10 @@ MARKER = "FT_GRAFANA_SECRETS_RESULT="
 
 class GrafanaSecretsError(Exception):
     """Safe diagnostics without credential values."""
+
+
+class GrafanaSecretsMissing(GrafanaSecretsError):
+    """Only the validated helper missing-state permits initial provisioning."""
 
 
 def helper_command(mode):
@@ -108,7 +117,7 @@ def run_helper(mode, token):
         if mode != "check" or state != "missing":
             raise GrafanaSecretsError("Unexpected helper exit status")
 
-        raise GrafanaSecretsError("Required Grafana secrets are missing")
+        raise GrafanaSecretsMissing("Required Grafana secrets are missing")
 
     if state == "missing":
         raise GrafanaSecretsError("Helper reported success with missing secrets")
@@ -121,11 +130,12 @@ def run_helper(mode, token):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("plan", "check", "apply"))
+    parser.add_argument("mode", choices=("plan", "check", "check-missing", "apply"))
     args = parser.parse_args(argv)
 
     try:
         if args.mode == "plan":
+            plan_events.report("Grafana secrets use create-once KV v2 provisioning", "UNVERIFIED")
             print("INFO: Grafana secrets use create-once KV v2 provisioning")
             print("RESULT: GRAFANA SECRET PLAN COMPLETE (read-only)")
             return 0
@@ -135,7 +145,7 @@ def main(argv=None):
 
         token = config.recovery_token()
 
-        run_helper(args.mode, token)
+        run_helper("check" if args.mode == "check-missing" else args.mode, token)
 
         if args.mode == "apply":
             run_helper("check", token)
@@ -143,6 +153,13 @@ def main(argv=None):
         print(f"RESULT: GRAFANA VAULT SECRETS READY ({args.mode})")
         return 0
 
+    except GrafanaSecretsMissing as exc:
+        if args.mode == "check-missing":
+            print("MISSING: Initial Grafana Vault credentials", flush=True)
+            return 2
+        print(f"ERROR: {exc}", file=sys.stderr)
+        print("RESULT: GRAFANA SECRET PROVISIONING STOPPED", file=sys.stderr)
+        return 1
     except (
         GrafanaSecretsError,
         config.ConfigError,
