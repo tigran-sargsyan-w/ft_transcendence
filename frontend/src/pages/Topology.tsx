@@ -41,7 +41,7 @@ export default function Topology() {
   return (
     <section className="flex flex-col gap-4 w-screen p-4">
       <SectionBanner title="Topology" />
-      <div className="flex gap-4">
+      <div className="flex flex-col md:flex-row gap-4">
         <StatCard title="Services" value={totalServices} description="" />
         <StatCard
           title="Healthy"
@@ -63,7 +63,7 @@ export default function Topology() {
         />
         <StatCard title="Last Scan" value={5} description="" />
       </div>
-      <div className="flex gap-4">
+      <div className="flex flex-col md:flex-row gap-4">
         <TopologyCard
           topology={serviceGraph}
           selectedId={selectedService?.id}

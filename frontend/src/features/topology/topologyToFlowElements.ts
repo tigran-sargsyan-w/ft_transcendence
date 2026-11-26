@@ -5,6 +5,9 @@ import type { TopologySnapshot } from "./types";
 
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 50;
+const ISOLATED_GAP = 24;
+const ISOLATED_COLUMNS = 4;
+const ISOLATED_TOP_MARGIN = 60;
 
 function layout(topology: TopologySnapshot) {
   const graph = new dagre.graphlib.Graph();
@@ -25,18 +28,45 @@ export function topologyToFlowElements(topology: TopologySnapshot): {
   nodes: Node<ServiceNodeData, "service">[];
   edges: Edge[];
 } {
-  const graph = layout(topology);
+  const linked = new Set(
+    topology.edges.flatMap((edge) => [edge.source, edge.target]),
+  );
+  const connected = topology.nodes.filter((node) => linked.has(node.id));
+  const isolated = topology.nodes.filter((node) => !linked.has(node.id));
+
+  const graph = layout({ ...topology, nodes: connected });
+  const graphWidth = connected.length > 0 ? (graph.graph().width ?? 0) : 0;
+  const isolatedTop =
+    connected.length > 0
+      ? (graph.graph().height ?? 0) + ISOLATED_TOP_MARGIN
+      : 0;
+
+  const columns = Math.min(isolated.length, ISOLATED_COLUMNS);
+  const rowWidth = columns * NODE_WIDTH + (columns - 1) * ISOLATED_GAP;
+  const isolatedLeft = Math.max(0, (graphWidth - rowWidth) / 2);
+
+  const positionOf = (id: string) => {
+    if (linked.has(id)) {
+      const { x, y } = graph.node(id);
+      return { x: x - NODE_WIDTH / 2, y: y - NODE_HEIGHT / 2 };
+    }
+    const index = isolated.findIndex((node) => node.id === id);
+    return {
+      x:
+        isolatedLeft +
+        (index % ISOLATED_COLUMNS) * (NODE_WIDTH + ISOLATED_GAP),
+      y:
+        isolatedTop +
+        Math.floor(index / ISOLATED_COLUMNS) * (NODE_HEIGHT + ISOLATED_GAP),
+    };
+  };
 
   const nodes: Node<ServiceNodeData, "service">[] = topology.nodes.map(
     (node) => {
-      const { x, y } = graph.node(node.id);
       return {
         id: node.id,
         type: "service",
-        position: {
-          x: x - NODE_WIDTH / 2,
-          y: y - NODE_HEIGHT / 2,
-        },
+        position: positionOf(node.id),
         data: {
           label: node.label,
           kind: node.kind,

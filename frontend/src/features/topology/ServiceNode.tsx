@@ -34,13 +34,23 @@ function ServiceNodeComponent({ data, selected }: NodeProps<ServiceFlowNode>) {
         selected && "ring-2 ring-primary",
       )}
     >
-      <Handle type="target" position={Position.Top} />
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="opacity-0!"
+        isConnectable={false}
+      />
       <div className="flex items-center gap-2 font-semibold">
         <span className={cn("size-2 shrink-0 rounded-full", styles.dot)} />
         {data.label}
       </div>
       <div className="mt-0.5 text-muted-foreground">{data.status}</div>
-      <Handle type="source" position={Position.Bottom} />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="opacity-0!"
+        isConnectable={false}
+      />
     </div>
   );
 }

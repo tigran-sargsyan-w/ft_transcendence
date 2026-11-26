@@ -57,6 +57,7 @@ export function TopologyCanvas({
         fitView
         fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
         nodesConnectable={false}
+        nodesDraggable={false}
         onNodeClick={(_event, node) => onNodeClick?.(node.id)}
         onPaneClick={() => onPaneClick?.()}
       >

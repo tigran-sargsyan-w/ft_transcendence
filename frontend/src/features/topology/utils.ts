@@ -39,7 +39,7 @@ export function countByStatus(nodes: GraphNode[]): Record<NodeStatus, number> {
 
 export function getHealthyServices(topology: TopologySnapshot): GraphNode[] {
   const healthyServices = topology.nodes.filter(
-    (service) => service.status === "healthy",
+    (service) => service.kind === "service" && service.status === "healthy",
   );
 
   return healthyServices;
