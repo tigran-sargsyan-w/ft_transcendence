@@ -1,4 +1,5 @@
 import type { IncidentSummary, IncidentSeverity } from "./type";
+import type { TopologySnapshot } from "../topology/types";
 
 export function formatElapsedSince(
   start: string | Date,
@@ -32,3 +33,13 @@ export const severityBannerClasses: Record<IncidentSeverity, string> = {
   sev3: "bg-severity-sev3/15 text-severity-sev3 ring-severity-sev3/30",
   sev4: "bg-severity-sev4/15 text-severity-sev4 ring-severity-sev4/30",
 };
+
+export function getServicesLabel(
+  topology: TopologySnapshot,
+  servicesId: string[],
+): string[] {
+  const servicesLabel = topology.nodes
+    .filter((service) => servicesId.includes(service.id))
+    .map((service) => service.label);
+  return servicesLabel;
+}

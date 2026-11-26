@@ -9,7 +9,7 @@ import {
 import { Link } from "react-router";
 
 interface MainCardProps {
-  title: string;
+  title?: string;
   linkLabel?: string;
   linkTarget?: string;
   className?: string;
@@ -26,7 +26,7 @@ export const MainCard = ({
   return (
     <Card className={className}>
       <CardHeader>
-        <CardTitle>{title}</CardTitle>
+        {title && <CardTitle>{title}</CardTitle>}
         {linkTarget && (
           <CardAction>
             <Link to={linkTarget}>{linkLabel}</Link>
