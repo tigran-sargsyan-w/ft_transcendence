@@ -12,6 +12,10 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.dev import configuration
+
+PUBLIC = configuration.load()
 NAME = "transcendence-app-dev-backend-1"
 NODE_CHECK = r"""
 (async () => {
@@ -30,9 +34,9 @@ CASES = (
     ("https-nginx", [
         "curl", "-q", "--silent", "--show-error", "--noproxy", "*",
         "--connect-timeout", "3", "--max-time", "8",
-        "--resolve", "transcendence.test:8443:127.0.0.1",
+        "--resolve", f"{PUBLIC.domain}:{PUBLIC.https_port}:127.0.0.1",
         "--output", "/dev/null", "--write-out", "%{http_code}",
-        "https://transcendence.test:8443/api/v1/health",
+        PUBLIC.health_url,
     ]),
     ("docker-exec-node", ["docker", "exec", NAME, "node", "-e", "process.exit(0)"]),
     ("docker-exec-health", ["docker", "exec", NAME, "node", "-e", NODE_CHECK]),

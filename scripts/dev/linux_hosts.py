@@ -11,6 +11,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from scripts.dev import configuration
+
 from scripts.dev.hosts_editor import (
     HostsConflictError,
     ensure_mapping,
@@ -18,7 +20,7 @@ from scripts.dev.hosts_editor import (
 )
 
 HOSTS_FILE = Path("/etc/hosts")
-DEFAULT_DOMAIN = "transcendence.test"
+DEFAULT_DOMAIN = configuration.load().domain
 
 
 def validate_domain(domain: str) -> str:
@@ -298,7 +300,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--domain",
-        default=os.environ.get("DEV_DOMAIN", DEFAULT_DOMAIN),
+        default=DEFAULT_DOMAIN,
     )
 
     args = parser.parse_args()

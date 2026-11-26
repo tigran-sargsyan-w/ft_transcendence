@@ -3,7 +3,8 @@ param(
     [ValidateSet("check", "plan", "setup", "cleanup", "_apply", "_remove")]
     [string]$Action = "check",
 
-    [string]$Domain = "transcendence.test",
+    [Parameter(Mandatory = $true)]
+    [string]$Domain,
 
     [switch]$Apply
 )

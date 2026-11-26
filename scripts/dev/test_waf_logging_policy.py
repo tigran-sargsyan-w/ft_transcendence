@@ -40,7 +40,7 @@ class WafLoggingPolicyTests(unittest.TestCase):
             with self.subTest(listener=listener):
                 match = re.search(
                     r"^server \{\s+listen " + re.escape(listener)
-                    + r";([^{}]+)", self.nginx, re.MULTILINE,
+                    + r";((?:\$\{[A-Z_]+\}|[^{}])+)", self.nginx, re.MULTILINE,
                 )
                 self.assertIsNotNone(match)
                 self.assertIn("access_log /var/log/nginx/access.log safe_main;",

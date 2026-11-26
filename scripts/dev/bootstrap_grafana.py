@@ -65,7 +65,10 @@ EXPECTED_MOUNTS = {
     ),
 }
 
+GRAFANA_PUBLIC = pg.configuration.load()
 GRAFANA_ENV = {
+    "GF_SERVER_DOMAIN": GRAFANA_PUBLIC.domain,
+    "GF_SERVER_ROOT_URL": GRAFANA_PUBLIC.grafana_root_url,
     "GF_PATHS_CONFIG": "/etc/grafana/grafana.ini",
     "GF_PATHS_DATA": "/var/lib/grafana",
     "GF_PATHS_HOME": "/usr/share/grafana",

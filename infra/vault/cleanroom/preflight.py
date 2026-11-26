@@ -4,6 +4,7 @@
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -128,7 +129,7 @@ def main():
     ])
 
     app = compose_config([
-        "docker", "compose",
+        sys.executable, str(ROOT / "scripts/dev/configuration.py"), "compose",
         "-p", app_project,
         "-f", str(ROOT / "compose.yml"),
         "-f", str(app_override),

@@ -1,6 +1,7 @@
 """Shared Docker Compose configuration for PostgreSQL tooling."""
 
 import os
+import sys
 from pathlib import Path
 
 
@@ -8,7 +9,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 
 
 def compose_command() -> list[str]:
-    command = ["docker", "compose"]
+    command = [sys.executable, str(ROOT_DIR / "scripts/dev/configuration.py"), "compose"]
 
     project = os.environ.get("FT_APP_COMPOSE_PROJECT")
 

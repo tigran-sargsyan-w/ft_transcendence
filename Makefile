@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := up
 
 PYTHON ?= python3
-COMPOSE := docker compose -f compose.yml
+COMPOSE := $(PYTHON) -m scripts.dev.configuration compose -f compose.yml
 BOOTSTRAP := ./scripts/bootstrap.sh
 
 .PHONY: up start initialize recover health check-all plan acceptance \

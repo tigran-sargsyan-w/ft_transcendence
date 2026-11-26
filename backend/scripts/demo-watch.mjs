@@ -5,12 +5,18 @@
  * Does not create incidents or change the monitored infrastructure.
  */
 import { io } from 'socket.io-client';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { LAB_PREFIX as PREFIX, formatAnalysisSummary, formatLabDependencyChange } from './demo-watch-format.mjs';
-const DEFAULT_URL = 'https://transcendence.test:8443';
+function defaultUrl() {
+  return execFileSync('python3', [
+    fileURLToPath(new URL('../../scripts/dev/configuration.py', import.meta.url)), 'origin',
+  ], { encoding: 'utf8' }).trim();
+}
 
 function options(argv) {
-  const parsed = { url: DEFAULT_URL, email: null, analyze: false, all: false, verbose: false };
+  const parsed = { url: null, email: null, analyze: false, all: false, verbose: false };
   for (let i = 0; i < argv.length; i += 1) {
     switch (argv[i]) {
       case '--url':
@@ -32,7 +38,7 @@ function options(argv) {
         break;
       case '-h':
       case '--help':
-        console.log(`Usage: node backend/scripts/demo-watch.mjs [--url ${DEFAULT_URL}] [--email user@example.com] [--analyze] [--all] [--verbose]\n\n` +
+        console.log(`Usage: node backend/scripts/demo-watch.mjs [--url HTTPS_ORIGIN] [--email user@example.com] [--analyze] [--all] [--verbose]\n\n` +
           'Logs in over HTTPS, then listens to authenticated Nest topology Socket.IO events.\n' +
           '--analyze requests real blast_radius + critical_nodes for degraded/down demo nodes.\n' +
           '--all displays updates of every topology node (default: lab nodes only).\n' +
@@ -45,7 +51,7 @@ function options(argv) {
   if (parsed.verbose && !parsed.analyze) {
     throw new Error('--verbose requires --analyze');
   }
-  const target = new URL(parsed.url);
+  const target = new URL(parsed.url ?? defaultUrl());
   if (target.protocol !== 'https:') {
     throw new Error('Only HTTPS is accepted for account login; do not disable TLS checks.');
   }

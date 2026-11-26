@@ -8,6 +8,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+# Direct execution starts in infra/vault/scripts, not the repository root.
+sys.path.insert(0, str(ROOT))
+from scripts.dev import configuration
+
 APP_PROJECT = "transcendence-app-dev"
 VAULT_PROJECT = "transcendence-vault-dev"
 APP_SERVICES = (
@@ -275,6 +279,10 @@ class Preflight:
         env = {k: v for k, v in os.environ.items() if k in allowed}
         env.update({"FT_DEV_TLS_DIR": str(self.tls),
                     "POSTGRES_USER": "transcendence", "POSTGRES_DB": "transcendence"})
+        try:
+            env.update(configuration.load().public_environment())
+        except configuration.ConfigurationError as exc:
+            raise PreflightError(str(exc)) from None
         command = ["docker", "compose", "--env-file", "/dev/null", "-p", project]
         for item in files:
             command += ["-f", str(item)]

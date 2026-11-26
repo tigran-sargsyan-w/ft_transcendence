@@ -37,7 +37,7 @@ LABEL = "ft.monitoring.datasource-test"
 ISOLATED_CONFIG = """
 server {
     listen 8080;
-    server_name transcendence.test;
+    server_name __FT_DEV_DOMAIN__;
 
     location ^~ /grafana/ {
         proxy_pass http://127.0.0.1:18081;
@@ -56,7 +56,7 @@ server {
         return 200 '{"synthetic":true}';
     }
 }
-"""
+""".replace("__FT_DEV_DOMAIN__", nginx.DOMAIN)
 
 
 class VerificationError(Exception):
@@ -408,7 +408,7 @@ def isolated():
             "--silent", "--show-error",
             "--noproxy", "*",
             "--max-time", "10",
-            "--header", "Host: transcendence.test:8443",
+            "--header", f"Host: {nginx.DOMAIN}:{nginx.HTTPS_PORT}",
             "--header", f"Origin: {BASE}",
             "--header", "Content-Type: application/json",
             "--request", "POST",
@@ -531,7 +531,7 @@ def live():
                 "--noproxy", "*",
                 "--connect-timeout", "5",
                 "--max-time", "20",
-                "--resolve", f"{nginx.DOMAIN}:8443:127.0.0.1",
+                "--resolve", f"{nginx.DOMAIN}:{nginx.HTTPS_PORT}:127.0.0.1",
                 "--header", f"Origin: {BASE}",
                 "--header", "Content-Type: application/json",
                 "--request", "POST",

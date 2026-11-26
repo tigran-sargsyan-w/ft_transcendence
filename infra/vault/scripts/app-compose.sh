@@ -11,7 +11,8 @@ FT_APP_COMPOSE_PROJECT="${FT_APP_COMPOSE_PROJECT:-transcendence-app-dev}"
 FT_DEV_TLS_DIR="${FT_DEV_TLS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/transcendence/dev/tls}"
 export FT_DEV_TLS_DIR
 
-COMPOSE=(docker compose -p "$FT_APP_COMPOSE_PROJECT" -f "$ROOT_DIR/compose.yml")
+COMPOSE=(python3 "$ROOT_DIR/scripts/dev/configuration.py" compose
+  -p "$FT_APP_COMPOSE_PROJECT" -f "$ROOT_DIR/compose.yml")
 
 if [[ -n "${FT_APP_COMPOSE_OVERRIDE:-}" ]]; then
   if [[ "$FT_APP_COMPOSE_PROJECT" != ft-cr-* ]]; then

@@ -26,11 +26,12 @@ import sys
 import time
 
 if __package__:
-    from . import bootstrap_cli_progress as cli
+    from . import bootstrap_cli_progress as cli, configuration
     from .bootstrap_progress import Phase, Progress, Status, emit_result
     from .bootstrap_process import Cancellation, ChildRunner, InitializationCancelled, UnexpectedApproval
 else:
     import bootstrap_cli_progress as cli
+    import configuration
     from bootstrap_progress import Phase, Progress, Status, emit_result
     from bootstrap_process import Cancellation, ChildRunner, InitializationCancelled, UnexpectedApproval
 
@@ -1077,7 +1078,8 @@ def main(argv=None, *, render=False):
             import platform
             if platform.system() != "Linux" or "microsoft" in platform.release().lower():
                 raise UnifiedStartupError("Initialization requires native Ubuntu Linux")
-            if os.environ.get("DEV_DOMAIN", "transcendence.test") != "transcendence.test":
+            public = configuration.load()
+            if os.environ.get("DEV_DOMAIN", public.domain) != public.domain:
                 raise UnifiedStartupError("Initialization requires the default development domain")
             with exclusive_orchestrator_lock() as lock_fd, Cancellation().handling() as cancellation:
                 initialize(lock_fd, cancellation=cancellation)
@@ -1111,7 +1113,7 @@ def main(argv=None, *, render=False):
     except OSError:
         print("ERROR: Local bootstrap operation failed; inspect the active stage", file=sys.stderr)
         return 1
-    except UnifiedStartupError as exc:
+    except (UnifiedStartupError, configuration.ConfigurationError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr, flush=True)
         if args.mode == "initialize" or render:
             emit_result("UNIFIED BOOTSTRAP STOPPED (no resources removed)", Status.FAILED, stream=sys.stderr)

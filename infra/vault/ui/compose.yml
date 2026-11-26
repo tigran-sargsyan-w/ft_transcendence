@@ -6,7 +6,7 @@ services:
     user: "99:99"
 
     ports:
-      - "127.0.0.1:8200:8200"
+      - "127.0.0.1:${DEV_VAULT_UI_PORT:?Validated Vault UI port required}:8200"
 
     volumes:
       - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro

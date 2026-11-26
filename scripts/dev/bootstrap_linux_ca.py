@@ -122,7 +122,8 @@ def guard_existing():
     native_linux()
     root = ca_root()
     previous = inspect_ca(root)
-    linux_hosts.append_text(linux_hosts.read_hosts(), domains.DEFAULT_DOMAIN)
+    if domains.DEFAULT_DOMAIN != "localhost":
+        linux_hosts.append_text(linux_hosts.read_hosts(), domains.DEFAULT_DOMAIN)
     for path in (nginx_tls_access.PROJECT_ROOT / 'infra',
                  nginx_tls_access.PROJECT_ROOT / 'infra/nginx',
                  certificates.CERT_DIR, certificates.CERT_FILE, certificates.KEY_FILE):
@@ -155,7 +156,8 @@ def prepare():
             raise LinuxCAError("Linux CA trust installation failed")
         if fingerprint(root) != value:
             raise LinuxCAError("CA identity changed during trust installation")
-    if linux_hosts.setup(domains.DEFAULT_DOMAIN, initializing=True) != 0:
+    if (domains.DEFAULT_DOMAIN != "localhost"
+            and linux_hosts.setup(domains.DEFAULT_DOMAIN, initializing=True) != 0):
         raise LinuxCAError("Linux hosts preparation failed")
     return 0
 

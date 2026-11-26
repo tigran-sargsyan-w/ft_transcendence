@@ -7,11 +7,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts.dev import configuration
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-DEFAULT_DOMAIN = "transcendence.test"
+DEFAULT_DOMAIN = configuration.load().domain
 
 
 def is_wsl() -> bool:
@@ -178,10 +180,7 @@ def main() -> int:
 
     parser.add_argument(
         "--domain",
-        default=os.environ.get(
-            "DEV_DOMAIN",
-            DEFAULT_DOMAIN,
-        ),
+        default=DEFAULT_DOMAIN,
     )
 
     parser.add_argument(

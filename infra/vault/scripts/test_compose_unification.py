@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -26,7 +27,7 @@ CA_AGENTS = {
 }
 
 
-def compose_model(path):
+def compose_model(path, public=None):
     if not shutil.which("docker"):
         raise unittest.SkipTest("Docker Compose CLI is not installed")
     env = {
@@ -38,9 +39,13 @@ def compose_model(path):
         "POSTGRES_USER": "transcendence",
         "POSTGRES_DB": "transcendence",
     })
+    if public is None:
+        command = [sys.executable, str(ROOT / "scripts/dev/configuration.py"), "compose"]
+    else:
+        env.update(public)
+        command = ["docker", "compose", "--env-file", "/dev/null"]
     result = subprocess.run(
-        ["docker", "compose", "--env-file", "/dev/null",
-         "-f", str(path), "--profile", "*", "config", "--format", "json"],
+        [*command, "-f", str(path), "--profile", "*", "config", "--format", "json"],
         capture_output=True, text=True, check=False, env=env, timeout=30,
     )
     if result.returncode:
@@ -67,6 +72,29 @@ class UnifiedComposeTests(unittest.TestCase):
             ROOT / "infra/vault/runtime/vault.override.yml",
         ):
             self.assertFalse(path.exists(), str(path))
+
+    def test_custom_public_endpoints(self):
+        public = {
+            "DEV_DOMAIN": "example.test", "DEV_HTTP_PORT": "9080",
+            "DEV_HTTPS_PORT": "9443", "DEV_VAULT_UI_PORT": "9200",
+            "APP_ORIGIN": "https://example.test:9443",
+            "GRAFANA_ROOT_URL": "https://example.test:9443/grafana/",
+            "SESSION_TTL_HOURS": "24", "COOKIE_SECURE": "true",
+        }
+        services = compose_model(APP, public)["services"]
+        self.assertEqual(services["backend"]["environment"]["APP_ORIGIN"], public["APP_ORIGIN"])
+        self.assertEqual(str(services["backend"]["environment"]["SESSION_TTL_HOURS"]), "24")
+        self.assertEqual(services["backend"]["environment"]["COOKIE_SECURE"], "true")
+        self.assertEqual(services["frontend"]["environment"]["DEV_DOMAIN"], "example.test")
+        self.assertEqual(services["grafana"]["environment"]["GF_SERVER_ROOT_URL"], public["GRAFANA_ROOT_URL"])
+        nginx = services["nginx"]
+        self.assertEqual(nginx["environment"]["DEV_DOMAIN"], "example.test")
+        self.assertEqual(str(nginx["environment"]["DEV_HTTPS_PORT"]), "9443")
+        self.assertEqual({(str(p["target"]), str(p["published"]), p["host_ip"]) for p in nginx["ports"]},
+                         {("8080", "9080", "127.0.0.1"), ("8443", "9443", "127.0.0.1")})
+        gateway = compose_model(ROOT / "infra/vault/ui/compose.yml", public)["services"]["gateway"]
+        self.assertEqual({(str(p["target"]), str(p["published"]), p["host_ip"]) for p in gateway["ports"]},
+                         {("8200", "9200", "127.0.0.1")})
 
     def test_application_invariants(self):
         model = compose_model(APP)

@@ -60,10 +60,32 @@ class DevelopmentConfigurationTests(unittest.TestCase):
         self.assertNotIn("POSTGRES_PASSWORD", public)
         self.assertEqual(set(public), cfg.KEYS | {"APP_ORIGIN", "GRAFANA_ROOT_URL"})
 
+    def test_compose_adapter_uses_validated_public_environment(self):
+        config = self.load(self.sample.replace("transcendence.test", "example.test"))
+        with patch.dict(os.environ, {"APP_ORIGIN": "https://wrong.test", "COOKIE_SECURE": "false",
+                                    "FT_DEV_TLS_DIR": "/tmp/test-tls"}, clear=True), \
+                patch.object(cfg, "load", return_value=config), \
+                patch.object(cfg.os, "execvpe") as execute:
+            cfg.compose_command(["-f", "compose.yml", "config"])
+        command, args, env = execute.call_args.args
+        self.assertEqual(command, "docker")
+        self.assertEqual(args, ["docker", "compose", "--env-file", "/dev/null",
+                                "-f", "compose.yml", "config"])
+        self.assertEqual(env["APP_ORIGIN"], "https://example.test:8443")
+        self.assertEqual(env["COOKIE_SECURE"], "true")
+        self.assertEqual(env["FT_DEV_TLS_DIR"], "/tmp/test-tls")
+
+    def test_compose_adapter_invalid_config_never_executes(self):
+        with patch.object(cfg, "load", side_effect=cfg.ConfigurationError("Invalid configuration")), \
+                patch.object(cfg.os, "execvpe") as execute:
+            with self.assertRaises(cfg.ConfigurationError):
+                cfg.compose_command(["config"])
+            execute.assert_not_called()
+
     def test_invalid_domains(self):
         for value in ("", "https://localhost", "localhost:8443", "*.test", "a..test",
                       "-a.test", "a-.test", "a.test/path", "a.test;", "a.test\nfoo=bar",
-                      "127.0.0.1", "LOCALHOST", "a.test.", "a test", "$HOME", "é.test"):
+                      "127.0.0.1", "example.com", "LOCALHOST", "a.test.", "a test", "$HOME", "é.test"):
             with self.subTest(value=value), self.assertRaises(cfg.ConfigurationError):
                 self.load(self.sample.replace("transcendence.test", value))
 

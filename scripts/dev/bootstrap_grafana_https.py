@@ -18,7 +18,7 @@ import time
 import bootstrap_backend_agent as agent
 import bootstrap_nginx as nginx
 
-BASE = f"https://{nginx.DOMAIN}:8443"
+BASE = nginx.PUBLIC.app_origin
 RUNTIME_CONFIG = "/etc/nginx/conf.d/default.conf"
 EXPECTED_VERSION = "13.3.1"
 
@@ -67,7 +67,7 @@ def verify_gateway():
     )
 
     require(
-        runtime == nginx.CONFIG.read_bytes(),
+        runtime == nginx.rendered_config(),
         "Nginx runtime configuration differs from template.",
     )
 
@@ -116,7 +116,7 @@ def request(path, *, query=None):
         "--noproxy", "*",
         "--connect-timeout", "3",
         "--max-time", "12",
-        "--resolve", f"{nginx.DOMAIN}:8443:127.0.0.1",
+        "--resolve", f"{nginx.DOMAIN}:{nginx.HTTPS_PORT}:127.0.0.1",
         "--write-out", "\n%{http_code}\n%{redirect_url}",
     ]
 

@@ -158,9 +158,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate configuration (do not start containers)
-        run: docker compose -f compose.yml config --quiet
+        run: python3 -m scripts.dev.configuration compose -f compose.yml config --quiet
       - name: Ensure graph-engine service is present
-        run: docker compose -f compose.yml config --services | grep -qx graph-engine
+        run: python3 -m scripts.dev.configuration compose -f compose.yml config --services | grep -qx graph-engine
 
   vault-infrastructure:
     name: Vault infrastructure / static validation
@@ -221,7 +221,7 @@ jobs:
         run: bash tests/integration/test_incident_acl.sh
 
       - name: Validate Vault application Compose
-        run: docker compose --profile "*" -f compose.yml config --quiet
+        run: python3 -m scripts.dev.configuration compose --profile "*" -f compose.yml config --quiet
 
       - name: Validate Vault server Compose
         run: docker compose --profile "*" -f infra/vault/server/compose.yml config --quiet

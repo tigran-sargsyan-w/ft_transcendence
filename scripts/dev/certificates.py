@@ -11,6 +11,8 @@ import tempfile
 
 from pathlib import Path
 
+from scripts.dev import configuration
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CERT_DIR = PROJECT_ROOT / "infra" / "nginx" / "certs"
@@ -18,7 +20,7 @@ CERT_DIR = PROJECT_ROOT / "infra" / "nginx" / "certs"
 CERT_FILE = CERT_DIR / "cert.pem"
 KEY_FILE = CERT_DIR / "key.pem"
 
-DEFAULT_DOMAIN = "transcendence.test"
+DEFAULT_DOMAIN = configuration.load().domain
 
 
 def get_ca_root() -> Path | None:
@@ -251,9 +253,7 @@ def setup() -> int:
                     mkcert,
                     "-cert-file", str(staged_cert),
                     "-key-file", str(staged_key),
-                    DEFAULT_DOMAIN,
-                    "localhost",
-                    "127.0.0.1",
+                    *dict.fromkeys((DEFAULT_DOMAIN, "localhost", "127.0.0.1")),
                 ],
                 capture_output=True,
                 text=True,

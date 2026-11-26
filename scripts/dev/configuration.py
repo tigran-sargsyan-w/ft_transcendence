@@ -6,6 +6,7 @@ explicit schema is accepted; values never come from ambient environment variable
 
 from dataclasses import dataclass
 from pathlib import Path
+import os
 import re
 import sys
 
@@ -44,9 +45,9 @@ def domain(value: str) -> str:
     labels = value.split(".")
     if value == "localhost":
         return value
-    if (len(value) > 253 or len(labels) < 2 or not any(c.isalpha() for c in labels[-1])
+    if (len(value) > 253 or len(labels) < 2 or labels[-1] != "test"
             or not all(LABEL.fullmatch(label) for label in labels)):
-        raise ConfigurationError("DEV_DOMAIN must be localhost or a lowercase DNS hostname")
+        raise ConfigurationError("DEV_DOMAIN must be localhost or a lowercase .test hostname")
     return value
 
 
@@ -120,11 +121,34 @@ def load(path: Path = CONFIG_FILE) -> DevelopmentConfiguration:
     )
 
 
+def compose_command(arguments: list[str]) -> None:
+    """Run Compose with validated public values, without implicit .env loading.
+
+    Non-public inputs remain the caller's responsibility. Guarded workflows
+    continue to pass their existing allowlisted environment to this adapter.
+    """
+    env = os.environ.copy()
+    env.update(load().public_environment())
+    os.execvpe("docker", ["docker", "compose", "--env-file", "/dev/null", *arguments], env)
+
+
 def main() -> int:
     try:
+        if sys.argv[1:2] == ["compose"]:
+            compose_command(sys.argv[2:])
+            return 0
+        if sys.argv[1:] == ["origin"]:
+            print(load().app_origin)
+            return 0
+        if len(sys.argv) != 1:
+            print("Usage: configuration.py [origin | compose ARGS...]", file=sys.stderr)
+            return 2
         config = load()
     except ConfigurationError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    except OSError:
+        print("ERROR: Docker Compose unavailable", file=sys.stderr)
         return 1
     print("[OK] Public development configuration validated")
     for key, value in config.public_environment().items():

@@ -55,6 +55,19 @@ def responses():
     ]
 
 
+class PublicEndpointRenderingTests(unittest.TestCase):
+    def test_render_preserves_native_nginx_variables(self):
+        with patch.object(nginx, "DOMAIN", "example.test"), \
+             patch.object(nginx, "HTTPS_PORT", 9443):
+            config = nginx.rendered_config().decode("ascii")
+        self.assertIn("server_name example.test;", config)
+        self.assertIn("return 308 https://example.test:9443$request_uri;", config)
+        self.assertIn("proxy_set_header X-Forwarded-Port 9443;", config)
+        self.assertIn("proxy_set_header Host $host;", config)
+        self.assertIn("$http_upgrade", config)
+        self.assertNotIn("${DEV_", config)
+
+
 class NginxTests(unittest.TestCase):
     def test_valid_container(self):
         nginx.verify_identity(fixture())

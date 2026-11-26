@@ -12,8 +12,10 @@ Existing clusters are never reinitialized, and ambiguous data is refused.
 
 if __package__:
     from . import bootstrap_plan_events as plan_events
+    from . import configuration
 else:
     import bootstrap_plan_events as plan_events
+    import configuration
 
 import argparse
 import fcntl
@@ -248,6 +250,10 @@ def compose_env():
         "POSTGRES_USER": "transcendence",
         "POSTGRES_DB": "transcendence",
     })
+    try:
+        safe.update(configuration.load().public_environment())
+    except configuration.ConfigurationError as exc:
+        raise PostgresBootstrapError(str(exc)) from None
     return safe
 
 

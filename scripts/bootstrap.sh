@@ -58,7 +58,7 @@ Usage: ./scripts/bootstrap.sh [--initialize|--start|--recover|--check-all|--heal
   --check-support-services    Check their networks, mounts and HTTP readiness.
   --prepare-frontend       Build/start ONLY React/Vite frontend, without Nginx.
   --check-frontend         Verify frontend Compose identity and local HTTP/API proxy.
-  --prepare-nginx          Start only trusted Nginx on loopback 8080/8443 (HTTPS).
+  --prepare-nginx          Start only trusted Nginx on configured loopback ports.
   --check-nginx            Verify Nginx identity, TLS, redirect and HTTPS routes.
   --prepare-prometheus     Explicitly create/start only trusted Prometheus.
   --check-prometheus       Read-only Prometheus identity and readiness verification.
@@ -176,9 +176,9 @@ host_check() {
   local missing=0
   say "=== Local host setup ==="
   if python3 -m scripts.dev.domains check >/dev/null 2>&1; then
-    say "PASS: Local transcendence.test domain"
+    say "PASS: Local development domain"
   else
-    say "TODO: Local transcendence.test domain"
+    say "TODO: Local development domain"
     missing=1
   fi
   if python3 -m scripts.dev.certificates check >/dev/null 2>&1; then
@@ -440,7 +440,7 @@ case "$MODE" in
     python3 scripts/dev/bootstrap_frontend.py check || fail "Frontend is not ready"
     python3 scripts/dev/bootstrap_nginx.py plan
     say ""
-    say "This stage starts ONLY Nginx on 127.0.0.1:8080/8443."
+    say "This stage starts ONLY Nginx on configured loopback ports."
     say "It verifies the existing mkcert TLS chain without generating/replacing keys."
     say "Existing trusted containers are preserved and NEVER recreated."
     say "No Vault, PostgreSQL, migrations or application services are changed."

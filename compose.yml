@@ -70,6 +70,8 @@ services:
 
     environment:
       GF_PATHS_LOGS: /var/lib/grafana/log
+      GF_SERVER_DOMAIN: ${DEV_DOMAIN:?Validated development domain required}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:?Validated Grafana URL required}
 
     volumes:
       - ./infra/monitoring/grafana/grafana.ini:/etc/grafana/grafana.ini:ro
@@ -131,7 +133,10 @@ services:
     environment:
       GRAPH_ENGINE_URL: http://graph-engine:8000
       COLLECTOR_URL: http://collector:3001
-      APP_ORIGIN: ${APP_ORIGIN:-https://transcendence.test:8443}
+      APP_ORIGIN: ${APP_ORIGIN:?Validated development origin required}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:?Validated session lifetime required}
+      # HTTPS-only deployment: never accept an insecure cookie override here.
+      COOKIE_SECURE: "true"
       DATABASE_URL_FILE: /run/secrets/backend/database_url
 
     volumes:
@@ -205,6 +210,7 @@ services:
       context: ./frontend
     environment:
       BACKEND_URL: http://backend:3000
+      DEV_DOMAIN: ${DEV_DOMAIN:?Validated development domain required}
     depends_on:
       - backend
     develop:
@@ -233,11 +239,13 @@ services:
     group_add:
       - "43043"
     ports:
-      - "127.0.0.1:8080:8080"
-      - "127.0.0.1:8443:8443"
+      - "127.0.0.1:${DEV_HTTP_PORT:?Validated HTTP port required}:8080"
+      - "127.0.0.1:${DEV_HTTPS_PORT:?Validated HTTPS port required}:8443"
     environment:
       PORT: "8080"
       SSL_PORT: "8443"
+      DEV_DOMAIN: ${DEV_DOMAIN:?Validated development domain required}
+      DEV_HTTPS_PORT: ${DEV_HTTPS_PORT:?Validated HTTPS port required}
       SSL_CERT_FILE: /etc/nginx/certs/cert.pem
       SSL_CERT_KEY_FILE: /etc/nginx/certs/key.pem
       MODSEC_RULE_ENGINE: "On"
