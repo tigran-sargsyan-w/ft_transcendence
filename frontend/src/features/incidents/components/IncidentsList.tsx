@@ -26,6 +26,12 @@ type Filter = (typeof FILTERS)[number];
 export const IncidentsList = ({ incidents }: IncidentsListProps) => {
   const [selectedFilter, setSelectedFilter] = useState<Filter>("All");
 
+  const visibleIncidents = incidents.filter((incident) => {
+    if (selectedFilter === "All") return true;
+    if (selectedFilter === "Resolved") return incident.status === "resolved";
+    return incident.status !== "resolved"; // "Active"
+  });
+
   return (
     <Card>
       <CardHeader className="flex justify-between">
@@ -41,7 +47,7 @@ export const IncidentsList = ({ incidents }: IncidentsListProps) => {
             </Button>
           ))}
         </div>
-        <div>titre</div>
+        <div>SEARCH</div>
       </CardHeader>
       <CardContent>
         <Table>
@@ -57,7 +63,7 @@ export const IncidentsList = ({ incidents }: IncidentsListProps) => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {incidents.map((incident) => (
+            {visibleIncidents.map((incident) => (
               <TableRow key={incident.id} className="cursor-pointer">
                 <TableCell>
                   <Badge variant={incident.severity} className="uppercase">
