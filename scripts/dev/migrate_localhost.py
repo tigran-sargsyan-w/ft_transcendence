@@ -166,7 +166,7 @@ def preflight(current, target):
         raise MigrationError("Existing application TLS certificate does not cover localhost")
     tls = Path(pg.compose_env()["FT_DEV_TLS_DIR"])
     run(["openssl", "verify", "-CAfile", str(tls / "ca.crt"), "-purpose", "sslserver",
-         "-verify_ip", "127.0.0.1", str(tls / "vault.crt")])
+         "-verify_hostname", "localhost", str(tls / "vault.crt")])
     print("PASS: Existing application and Vault certificates cover target addresses", flush=True)
     health()
     for module in MODULES:

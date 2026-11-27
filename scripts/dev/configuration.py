@@ -87,9 +87,8 @@ class DevelopmentConfiguration:
 
     @property
     def vault_ui_url(self) -> str:
-        # Keep the operator endpoint on a different cookie host from the app.
-        # This is the canonical URL, not a restriction on alternate TLS aliases.
-        return f"https://127.0.0.1:{self.vault_ui_port}/ui/"
+        # Vault TLS covers localhost independently of the configurable app domain.
+        return f"https://localhost:{self.vault_ui_port}/ui/"
 
     def public_environment(self) -> dict[str, str]:
         """Explicit allowlist for future guarded Compose/template consumers."""

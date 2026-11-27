@@ -7,10 +7,11 @@ ordinary development user from the project root. Do not run concurrently
 with other maintenance or Compose commands.
 
 The canonical application origin becomes `https://localhost:8443` with the
-standard ports. Grafana remains under `/grafana/`. Vault UI uses the separate
-cookie host `https://127.0.0.1:8200/ui/`; its lifecycle remains on-demand. Do
-not use the Vault UI's `localhost` alias because browser cookies are not
-isolated by port. The canonical URL does not prohibit alternate TLS aliases.
+standard ports. Grafana remains under `/grafana/`. The canonical Vault UI URL
+is `https://localhost:8200/ui/`; its lifecycle remains on-demand and its host
+port is bound only to `127.0.0.1`. Vault uses independent authentication.
+Browser cookies are not isolated by port: the shared localhost hostname may
+send application cookies to the operator interface.
 
 First validate the existing state without changing containers or configuration:
 

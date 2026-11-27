@@ -79,7 +79,7 @@ class DevelopmentConfigurationTests(unittest.TestCase):
         config = self.load()
         self.assertEqual(config.app_origin, "https://transcendence.test:8443")
         self.assertEqual(config.http_origin, "http://transcendence.test:8080")
-        self.assertEqual(config.vault_ui_url, "https://127.0.0.1:8200/ui/")
+        self.assertEqual(config.vault_ui_url, "https://localhost:8200/ui/")
         self.assertEqual(config.session_ttl_hours, 168)
 
     def test_localhost_and_changed_ports(self):
@@ -90,11 +90,11 @@ class DevelopmentConfigurationTests(unittest.TestCase):
         self.assertEqual(config.http_origin, "http://localhost:9080")
         self.assertEqual(config.health_url, "https://localhost:9443/api/v1/health")
         self.assertEqual(config.grafana_root_url, "https://localhost:9443/grafana/")
-        self.assertEqual(config.vault_ui_url, "https://127.0.0.1:9200/ui/")
+        self.assertEqual(config.vault_ui_url, "https://localhost:9200/ui/")
 
-    def test_vault_host_independent(self):
+    def test_vault_localhost_independent_of_app_domain(self):
         config = self.load(self.sample.replace("transcendence.test", "example.test"))
-        self.assertEqual(config.vault_ui_url, "https://127.0.0.1:8200/ui/")
+        self.assertEqual(config.vault_ui_url, "https://localhost:8200/ui/")
 
     def test_environment_does_not_override(self):
         with patch.dict(os.environ, {"DEV_DOMAIN": "evil.test", "APP_ORIGIN": "https://evil.test",

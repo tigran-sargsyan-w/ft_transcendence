@@ -5,16 +5,16 @@ are independent of the browser-facing HAProxy TCP gateway. By default the gatewa
 is **disabled**. The operator explicitly enables it only when administering Vault.
 The HAProxy configuration continues to use TLS passthrough to Vault and publishes
 `127.0.0.1:8200` only (published port configured in `config/development.env`).
-Use the IP address shown by the lifecycle command, not the `localhost` alias.
-Browser cookies are scoped by hostname, not port: the canonical IP URL avoids
-sending host-only `localhost` application cookies to Vault UI. The existing
-Vault certificate also covers `localhost`, so this convention is not a network
-or TLS-level prohibition on alternate aliases.
+Use the localhost URL printed by the lifecycle command. The canonical URL
+does not change the loopback-only port binding or Vault authentication.
+Browser cookies are scoped by hostname, not port, so application cookies may
+also be sent to Vault UI when both use localhost. Enable the UI only for
+operator sessions and disable it when finished.
 
 ```sh
 make vault-ui-status   # read-only; shows ENABLED or DISABLED
 make vault-ui-enable   # verifies trusted Vault, creates/resumes only HAProxy
-# Open https://127.0.0.1:8200/ui/ using the trusted development CA
+# Open https://localhost:8200/ui/ using the trusted Vault development CA
 make vault-ui-disable  # stops only the trusted HAProxy gateway
 make health            # accepts DISABLED as expected, never ignores drift
 ```
