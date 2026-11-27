@@ -87,11 +87,10 @@ def verify_unrelated(before, after, volumes_before, volumes_after):
 
 def read_config():
     path = configuration.CONFIG_FILE
-    info = path.lstat()
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
-        raise MigrationError("Unsafe public configuration file")
-    text = path.read_text(encoding="utf-8")
-    current = configuration.load(path)
+    text, info = configuration.read_source(path)
+    if info.st_uid != os.getuid():
+        raise MigrationError("Public configuration must be owned by the operator")
+    current = configuration.from_text(text)
     if current.domain != OLD_DOMAIN:
         raise MigrationError("This one-time migration requires the original development hostname")
     return text, info, current
@@ -108,15 +107,21 @@ def target_text(text):
 
 def save_config(text, original, info):
     path = configuration.CONFIG_FILE
-    if path.is_symlink() or path.stat().st_ino != info.st_ino or path.read_text(encoding="utf-8") != original:
+    current, actual = configuration.read_source(path)
+    if (actual.st_dev, actual.st_ino, actual.st_uid, actual.st_gid, actual.st_mode, current) != (
+            info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode, original):
         raise MigrationError("Public configuration changed during cutover")
     fd, name = tempfile.mkstemp(prefix=".development-", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             stream.write(text)
             stream.flush()
+            # A setgid parent can assign the temporary file a different group.
+            # Do not make it group-writable unless the original group is retained.
+            if info.st_mode & 0o020 and os.fstat(stream.fileno()).st_gid != info.st_gid:
+                raise MigrationError("Cannot preserve the public configuration group")
+            os.fchmod(stream.fileno(), stat.S_IMODE(info.st_mode))
             os.fsync(stream.fileno())
-        os.chmod(name, stat.S_IMODE(info.st_mode))
         os.replace(name, path)
     finally:
         if os.path.exists(name):

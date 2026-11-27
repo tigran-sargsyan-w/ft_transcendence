@@ -83,6 +83,8 @@ python3 -m scripts.dev.configuration
 
 The tracked `config/development.env` is the single source for the public development domain, published ports and session policy. No `.env` creation is needed for the guarded deployment. Database credentials are provisioned through the protected bootstrap and Vault. The root `.env.example` was retired; do not delete existing private files blindly. Standalone component runs and CI use their own explicit environment (see [backend E2E tests](backend-e2e.md)).
 
+On POSIX hosts, the public configuration must be a regular file (not a symlink), with no other-user write permission. Standard `644` and Ubuntu `664` checkouts are accepted; group-write permission requires a user-private primary group as reported by the local account database. The loader does not change permissions. The optional cutover helper additionally requires operator ownership before writing. This is a file-mode check, not an audit of checkout ownership, directory permissions or extended ACLs. Keep the checkout trusted. Private keys and Vault secrets retain their separate, stricter permission requirements.
+
 ### 3.3 Start the project
 
 On a new supported native Ubuntu VM, use `make initialize`. On an already initialized VM, use `make up`, or `make recover` if Vault is sealed. See the [team quick start](../dev-team-quickstart.md) for prerequisites and recovery instructions. Do not use raw Compose to recreate the guarded runtime.

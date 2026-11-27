@@ -1,6 +1,7 @@
 """Offline cutover contract tests: no Docker or host writes."""
 from dataclasses import replace
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -109,6 +110,33 @@ class LocalhostMigrationTests(unittest.TestCase):
         with patch.object(migration, "compose", side_effect=[json.dumps(old), json.dumps(new)]):
             with self.assertRaises(migration.MigrationError):
                 migration.verify_target_model(self.current, self.target)
+
+    def test_private_group_writable_config_read_and_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "development.env"
+            original = (self.original + "\nDEV_HTTP_PORT=8080\nDEV_HTTPS_PORT=8443\n"
+                        "DEV_VAULT_UI_PORT=8200\nSESSION_TTL_HOURS=168\n")
+            path.write_text(original, encoding="utf-8")
+            path.chmod(0o664)
+            with patch.object(migration.configuration, "CONFIG_FILE", path), \
+                    patch.object(migration.configuration, "private_primary_group", return_value=True):
+                text, info, config = migration.read_config()
+                self.assertEqual(config, self.current)
+                migration.save_config(migration.target_text(text), text, info)
+                self.assertEqual(path.stat().st_mode & 0o777, 0o664)
+            self.assertEqual(os.stat(path).st_uid, os.getuid())
+
+    def test_cutover_refuses_permissions_changed_after_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "development.env"
+            path.write_text(self.original, encoding="utf-8")
+            path.chmod(0o644)
+            info = path.stat()
+            path.chmod(0o600)
+            with patch.object(migration.configuration, "CONFIG_FILE", path):
+                with self.assertRaisesRegex(migration.MigrationError, "changed during cutover"):
+                    migration.save_config("new", self.original, info)
+            self.assertEqual(path.read_text(), self.original)
 
     def test_atomic_update_detects_file_drift(self):
         with tempfile.TemporaryDirectory() as directory:

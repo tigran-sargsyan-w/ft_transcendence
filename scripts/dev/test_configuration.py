@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -25,6 +26,51 @@ class DevelopmentConfigurationTests(unittest.TestCase):
     def load(self, text=None):
         self.path.write_text(self.sample if text is None else text, encoding="utf-8")
         return cfg.load(self.path)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file modes")
+    def test_public_file_modes(self):
+        self.path.write_text(self.sample, encoding="utf-8")
+        for mode in (0o600, 0o644, 0o664):
+            with self.subTest(mode=oct(mode)), patch.object(cfg, "private_primary_group", return_value=True):
+                self.path.chmod(mode)
+                self.assertEqual(cfg.load(self.path).domain, "transcendence.test")
+                self.assertEqual(self.path.stat().st_mode & 0o777, mode)
+        for mode, private in ((0o664, False), (0o666, True), (0o646, True)):
+            with self.subTest(mode=oct(mode)), patch.object(cfg, "private_primary_group", return_value=private):
+                self.path.chmod(mode)
+                with self.assertRaisesRegex(cfg.ConfigurationError, "permissions"):
+                    cfg.load(self.path)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX user/group database")
+    def test_private_primary_group(self):
+        owner = SimpleNamespace(pw_uid=1000, pw_gid=1000, pw_name="ubuntu")
+        other = SimpleNamespace(pw_uid=1001, pw_gid=1001, pw_name="other")
+        with patch("pwd.getpwuid", return_value=owner), \
+                patch("grp.getgrgid", return_value=SimpleNamespace(gr_mem=[])) as group, \
+                patch("pwd.getpwall", return_value=[owner, other]) as users:
+            self.assertTrue(cfg.private_primary_group(1000, 1000))
+            self.assertFalse(cfg.private_primary_group(1000, 1001))
+            group.return_value.gr_mem = ["other"]
+            self.assertFalse(cfg.private_primary_group(1000, 1000))
+            group.return_value.gr_mem = ["ubuntu"]
+            other.pw_gid = 1000
+            self.assertFalse(cfg.private_primary_group(1000, 1000))
+            other.pw_gid = 1001
+            self.assertTrue(cfg.private_primary_group(1000, 1000))
+            users.side_effect = OSError("unavailable")
+            self.assertFalse(cfg.private_primary_group(1000, 1000))
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file types")
+    def test_refuses_symlink_and_fifo(self):
+        target = self.path.with_suffix(".real")
+        target.write_text(self.sample, encoding="utf-8")
+        self.path.symlink_to(target)
+        with self.assertRaisesRegex(cfg.ConfigurationError, "file type"):
+            cfg.load(self.path)
+        self.path.unlink()
+        os.mkfifo(self.path)
+        with self.assertRaisesRegex(cfg.ConfigurationError, "file type"):
+            cfg.load(self.path)
 
     def test_repository_config_valid(self):
         self.assertIsInstance(cfg.load(), cfg.DevelopmentConfiguration)

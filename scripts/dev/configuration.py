@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import os
 import re
+import stat
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -104,11 +105,52 @@ class DevelopmentConfiguration:
         }
 
 
-def load(path: Path = CONFIG_FILE) -> DevelopmentConfiguration:
+def private_primary_group(uid: int, gid: int) -> bool:
+    """Recognize a local user-private primary group (the Ubuntu umask 002 case)."""
     try:
-        values = parse(path.read_text(encoding="utf-8"))
+        import grp
+        import pwd
+        owner = pwd.getpwuid(uid)
+        group = grp.getgrgid(gid)
+        return (owner.pw_gid == gid
+                and not (set(group.gr_mem) - {owner.pw_name})
+                and not any(user.pw_uid != uid and user.pw_gid == gid
+                            for user in pwd.getpwall()))
+    except (ImportError, KeyError, OSError):
+        return False
+
+
+def read_source(path: Path) -> tuple[str, os.stat_result]:
+    """Read the public file without following symlinks or unsafe POSIX mode bits.
+
+    Read-only consumers may read another user's checkout. A writer must also
+    verify ownership. This is a file-mode check, not a full checkout/ACL audit.
+    """
+    try:
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode):
+            raise ConfigurationError("Unsafe public configuration file type")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        with os.fdopen(os.open(path, flags), encoding="utf-8") as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode)
+                    or (info.st_dev, info.st_ino) != (before.st_dev, before.st_ino)):
+                raise ConfigurationError("Unsafe public configuration file type")
+            if os.name == "posix" and (info.st_mode & 0o002 or (
+                    info.st_mode & 0o020 and not private_primary_group(info.st_uid, info.st_gid))):
+                raise ConfigurationError("Unsafe public configuration permissions")
+            return stream.read(), info
     except (OSError, UnicodeError):
         raise ConfigurationError("Cannot read public development configuration") from None
+
+
+def load(path: Path = CONFIG_FILE) -> DevelopmentConfiguration:
+    text, _ = read_source(path)
+    return from_text(text)
+
+
+def from_text(text: str) -> DevelopmentConfiguration:
+    values = parse(text)
     ports = [integer(values[key], key, 1024, 65535) for key in (
         "DEV_HTTP_PORT", "DEV_HTTPS_PORT", "DEV_VAULT_UI_PORT",
     )]
