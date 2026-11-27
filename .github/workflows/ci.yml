@@ -243,6 +243,14 @@ jobs:
           bash -n scripts/bootstrap.sh
           bash -n scripts/install-deps.sh
 
+      - name: Install NSS trust test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libnss3-tools openssl
+          test "$(id -u)" -ne 0
+          command -v certutil
+          command -v openssl
+
       - name: Test development bootstrap and monitoring offline
         run: |
           python3 -m unittest discover -s scripts/dev -p 'test_*.py' -v

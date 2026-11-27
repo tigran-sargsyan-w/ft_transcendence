@@ -24,11 +24,12 @@ The local setup is intended for development only. It is not a production deploym
 | Platform | Current status |
 |---|---|
 | WSL2 (Linux + Windows browser) | Implemented and end-to-end tested |
-| Native Linux | Implemented; full end-to-end validation pending |
+| Native Ubuntu 26.04 (amd64) | Guarded bootstrap and Chromium HTTPS acceptance verified |
+| Other native Linux releases (including Ubuntu 24.04) | Not independently validated for the new guarded workflow |
 | Native Windows | Platform helpers implemented; full end-to-end validation pending |
 | macOS | Not yet supported by the domain and CA trust helpers |
 
-WSL2 is the validated development environment.
+Native Ubuntu 26.04 is the validated environment for the new guarded bootstrap and shared NSS trust workflow. Historical WSL2 validation applies to the legacy workflow, not to the new native Linux adapter.
 
 On WSL2, the setup manages both Linux and Windows hosts mappings and CA trust. This is necessary because Windows browsers use Windows name resolution and certificate trust rather than automatically inheriting those settings from WSL.
 
@@ -45,7 +46,7 @@ Install these dependencies before running the project:
 
 For Windows or WSL2 integration, Windows PowerShell must also be accessible. WSL2 requires `wslpath` and Windows interoperability.
 
-The scripts do not automatically install external dependencies.
+On supported native Ubuntu, `make initialize` installs missing system prerequisites (including `libnss3-tools` for `certutil`). System package installation, Docker setup and creation of the dedicated Nginx TLS group may require sudo. Do not run the bootstrap itself as root. CA generation, authorization and NSS import do not require sudo. The legacy host-only helpers do not replace dependency installation.
 
 Verify the required tools:
 
@@ -155,8 +156,10 @@ The reverse proxy also forwards appropriate HTTP headers, including `Host`, `X-F
 
 | Command | Description |
 |---|---|
-| `make` / `make up` | Prepare the environment, build and start services |
-| `make setup` | Configure domain, TLS certificates and CA trust |
+| `make initialize` | Guarded initial provisioning or restoration of authorized CA trust |
+| `make` / `make up` / `make start` | Start existing guarded services without provisioning or CA import |
+| `make recover` | Recover existing services after reboot; manual Vault unseal if required |
+| `make setup` | Legacy host-only domain, TLS and application CA setup |
 | `make check` | Validate domain, certificates and CA trust |
 | `make down` | Stop containers without removing them |
 | `make clean` | Remove Compose containers and networks, preserving named volumes |
@@ -377,14 +380,15 @@ The local Root CA files and project TLS certificates are preserved.
 
 **Warning:** Removing mkcert CA trust can affect other local development projects using the same CA.
 
-Restore the application CA and, if applicable, the reviewed Vault CA:
+On an initialized native Ubuntu VM with both authorization records intact, restore both NSS entries using the guarded bootstrap:
 
 ```bash
-make setup
-python3 -m scripts.dev.vault_ca_trust setup --apply  # native Ubuntu, existing Vault TLS
+make initialize
 make check
 make health
 ```
+
+No new CA approval or sudo for CA trust is expected. If Vault is sealed, follow the recovery procedure after restoring the required host configuration; do not reinitialize Vault. Legacy host-only workflows use `make setup` instead.
 
 ### Restart after recovery
 
@@ -439,15 +443,9 @@ The expected output is empty.
 
 ### Direct development ports
 
-The current Compose configuration intentionally retains development/debug access to services.
+The guarded Compose configuration publishes only the Nginx HTTP redirect and HTTPS ports on `127.0.0.1` (defaults `8080` and `8443`). Frontend `5173`, backend `3000` and monitoring service ports are internal to Docker networks, not directly published on the host. The optional Vault UI gateway publishes its separate TLS port on loopback (default `8200`) only while enabled.
 
-In particular, Frontend port `5173` and Backend port `3000` are published separately from Nginx.
-
-**These direct HTTP ports bypass TLS termination at Nginx.**
-
-This is a development exception, not a production security configuration.
-
-Production deployment must restrict internal services, remove unnecessary published debug ports, and prevent external clients from bypassing the HTTPS reverse proxy.
+This is still a development configuration, not a production security configuration.
 
 ### HSTS
 
@@ -474,13 +472,15 @@ The current Makefile, certificate scripts and Nginx configuration should not be 
 
 ## 12. Current limitations and follow-up work
 
-The initial implementation has been validated end-to-end on WSL2 with a Windows browser.
+The initial implementation was validated on WSL2 with a Windows browser. The new native Ubuntu workflow was validated on a fresh Ubuntu 26.04 (amd64) VM; it is not a new WSL2 or Windows acceptance result.
 
 The following work remains:
 
-- Complete native Linux and native Windows end-to-end validation.
+- Validate Ubuntu 24.04 (the original issue environment), other native Linux releases and native Windows separately.
+- Validate older Chromium versions, Firefox and sandboxed browser packages separately; they are outside the tested NSS adapter scope.
+- Complete full application functional compatibility tests for the additional-browser module; TLS page loading alone is not sufficient.
 - Implement macOS support.
-- Make the domain and published ports consistently configurable across hosts management, certificate issuance, Vite and Nginx.
+- Validate non-default public hostnames and ports separately across the complete runtime.
 - Add comprehensive dependency and port-conflict preflight diagnostics.
 - Implement safe automatic renewal/replacement of existing invalid or expiring certificates.
 - Verify authenticated secure session cookie attributes when the relevant backend route is available.
@@ -493,7 +493,29 @@ The current release should not claim those capabilities as completed until they 
 
 ## 13. Verified test coverage
 
-The following tests have passed during WSL2 development:
+### Native Ubuntu acceptance (Issue #162)
+
+Validated on commit `dcb62a1`, Ubuntu 26.04 LTS (amd64), ordinary user, `umask 002`, with no project CAs or NSS databases at baseline. Browsers were installed after initialization.
+
+| Browser (native packages) | Version | Application | Grafana | Vault UI |
+|---|---|---|---|---|
+| Chrome | 158.0.8127.88 | PASS | PASS | PASS |
+| Edge | 158.0.4370.45 | PASS | PASS | PASS |
+| Opera | 141.0.6089.33 | PASS | PASS | PASS |
+
+The checks covered HTTPS page loading without visible certificate warnings, not authenticated feature compatibility. Both CA authorization records and NSS entries were prepared automatically before the browsers were installed. The system CA bundle checksum and local CA inventory stayed unchanged, and explicit OpenSSL system-trust checks rejected both project roots.
+
+Additional acceptance results:
+
+- Three repeated startups and two repeated initializations passed without resource or migration-history drift.
+- Recovery after reboot succeeded with manual Shamir unseal; project container IDs, network IDs and volume inventory were preserved. The Docker-managed default bridge ID changed.
+- Both managed NSS entries were removed with confirmation; repeated removal was a no-op. `make initialize` restored both entries without CA approval or sudo, preserving CA and authorization checksums. Browser HTTPS after restoration was confirmed by the operator. A negative browser test while trust was absent was not independently recorded.
+- One transient Prometheus health check failed after trust restoration; subsequent readiness and health checks passed without intervention. The cause was not established.
+- On the development VM, 891 `scripts/dev` tests passed at the same implementation commit.
+
+### Historical WSL2 coverage
+
+The following tests passed during the original WSL2 development:
 
 - 77 Python unit tests.
 - 11 Windows PowerShell hosts tests.
@@ -515,4 +537,4 @@ These results describe the validated development environment and do not substitu
 
 ---
 
-Related issue: [#68 — Automate local domain and HTTPS/TLS setup](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/68).
+Related issues: [#68 — Automate local domain and HTTPS/TLS setup](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/68) and [#162 — Browser CA trust](https://github.com/tigran-sargsyan-w/ft_transcendence/issues/162).
