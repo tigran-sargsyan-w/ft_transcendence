@@ -49,7 +49,7 @@ export default function Topology() {
   }
 
   return (
-    <section className="flex flex-col gap-4 w-screen p-4">
+    <section className="flex flex-col gap-4 w-full p-4">
       <SectionBanner title="Topology" />
       <Card className="py-3 md:hidden">
         <CardContent className="grid grid-cols-5 divide-x divide-border text-center">

@@ -3,7 +3,7 @@ import { toneClasses } from "./statTones";
 
 interface StatCardProps {
   title: string;
-  value: number;
+  value: number | string;
   description?: string;
   tone?: keyof typeof toneClasses;
 }

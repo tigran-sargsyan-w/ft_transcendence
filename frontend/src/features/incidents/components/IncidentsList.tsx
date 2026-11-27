@@ -17,13 +17,17 @@ import { mockTopology } from "@/features/topology/mockTopology";
 
 interface IncidentsListProps {
   incidents: IncidentSummary[];
+  onIncidentClick: (incident: IncidentSummary) => void;
 }
 
 const FILTERS = ["Active", "Resolved", "All"] as const;
 
 type Filter = (typeof FILTERS)[number];
 
-export const IncidentsList = ({ incidents }: IncidentsListProps) => {
+export const IncidentsList = ({
+  incidents,
+  onIncidentClick,
+}: IncidentsListProps) => {
   const [selectedFilter, setSelectedFilter] = useState<Filter>("All");
 
   const visibleIncidents = incidents.filter((incident) => {
@@ -42,6 +46,7 @@ export const IncidentsList = ({ incidents }: IncidentsListProps) => {
               variant={filter === selectedFilter ? "default" : "outline"}
               aria-pressed={filter === selectedFilter}
               onClick={() => setSelectedFilter(filter)}
+              className="cursor-pointer"
             >
               {filter}
             </Button>
@@ -64,7 +69,11 @@ export const IncidentsList = ({ incidents }: IncidentsListProps) => {
           </TableHeader>
           <TableBody>
             {visibleIncidents.map((incident) => (
-              <TableRow key={incident.id} className="cursor-pointer">
+              <TableRow
+                key={incident.id}
+                className="cursor-pointer"
+                onClick={() => onIncidentClick(incident)}
+              >
                 <TableCell>
                   <Badge variant={incident.severity} className="uppercase">
                     {incident.severity}
