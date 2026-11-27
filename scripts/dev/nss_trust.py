@@ -73,20 +73,22 @@ def execute(tool, *args, data=None, allow_no_keys=False):
     return result.stdout
 
 
-def safe_meta(path, *, directory=False):
+def safe_meta(path, *, directory=False, allow_root_owner=False):
     info = path.lstat()
     correct_type = stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)
-    if (not correct_type or info.st_uid != os.getuid() or info.st_mode & 0o002
+    root_owned_public = allow_root_owner and not directory and info.st_uid == 0
+    if (not correct_type or (info.st_uid != os.getuid() and not root_owned_public)
+            or (root_owned_public and info.st_mode & 0o022) or info.st_mode & 0o002
             or (info.st_mode & 0o020 and not private_primary_group(info.st_uid, info.st_gid))
             or (not directory and info.st_nlink != 1)):
         raise NSSError("Unsafe NSS path or CA file; manual review required")
     return info
 
 
-def read_ca(path):
+def read_ca(path, *, allow_root_owner=False):
     """Read exactly one public PEM certificate; private keys are never accepted."""
     try:
-        if safe_meta(path).st_size > 65536:
+        if safe_meta(path, allow_root_owner=allow_root_owner).st_size > 65536:
             raise NSSError("Expected exactly one public PEM certificate")
         raw = path.read_bytes()
         if len(raw) > 65536 or not PEM.fullmatch(raw.strip()):
