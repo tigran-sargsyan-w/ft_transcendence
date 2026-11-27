@@ -21,6 +21,9 @@
 | `make setup` | Configure host-side hostname/Nginx TLS/CA only | Yes: host; **not** a Vault initializer |
 | `make trust-uninstall` | Remove only project-managed application and Vault CA NSS entries on native Ubuntu (explicit confirmations) | Yes: user trust only; preserves CA/key files and system trust |
 | `make acceptance` | Three guarded, non-destructive startup/idempotency runs | May start existing stopped containers; use only on an already healthy VM |
+| `make prisma-ui-enable` | Enable local Prisma Studio over HTTPS | Creates or starts only the optional UI containers if needed |
+| `make prisma-ui-disable` | Disable local Prisma Studio | Stops only the UI containers; retains them |
+| `make prisma-ui-status` | Read-only Prisma Studio state and enabled HTTPS check | No |
 | `./scripts/bootstrap.sh --help` | Show guarded per-stage checks and maintenance | No |
 
 **Important:** Unlike the old documentation, **`make up` is now the recommended daily command**. It does **not** run unrestricted `docker compose up -d --build`. The former `./scripts/dev-start.sh` and raw Compose procedures are not the Issue #115 daily entry point.
@@ -190,6 +193,7 @@ Work on feature branches and follow the team's PR/review/merge rules. Coordinate
 - [Reboot recovery](docs/dev-reboot-recovery.md) — manual Shamir unseal and safe resume.
 - [Health diagnostics](docs/dev-health-report.md) — read-only checks and failure localization.
 - [Final acceptance #115](docs/dev-final-acceptance.md) — validation evidence and limitations.
+- [Prisma Studio](docs/dev-prisma-ui-on-demand.md) — optional database UI, lifecycle and reviewed container recreation.
 - [Vault server runbook](infra/vault/server/vault-server-README.md) — detailed operations, including historical commands; prefer this guide's guarded entry points for Issue #115.
 - [AppRole maintenance](infra/vault/scripts/APPROLE-ROTATION.md) — credential lifecycle for operators.
 

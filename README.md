@@ -47,6 +47,8 @@ After reboot, single-node Vault using Shamir 2-of-3 normally needs **manual unse
 
 Vault Web UI is [optional and on-demand](docs/dev-vault-ui-on-demand.md): `make vault-ui-enable`, `make vault-ui-disable`, `make vault-ui-status`.
 
+Prisma Studio is an [optional, on-demand development database UI](docs/dev-prisma-ui-on-demand.md): `make prisma-ui-enable`, `make prisma-ui-disable`, `make prisma-ui-status`. It uses local HTTPS (default `https://localhost:5555/`).
+
 Useful commands: `make health` (read-only health/diagnostics), `make check-all` (read-only readiness), `make plan` (resource inventory), `make acceptance` (three non-destructive repeated-start checks on an already healthy VM). Do not use raw `docker compose up`, `make down` or `make clean` to troubleshoot the trusted runtime.
 
 **New to the project?** [Team quick start — Vault](docs/dev-team-quickstart.md) (short version) · [Developer commands](COMMANDS.md) (command reference).

@@ -12,6 +12,11 @@ This guide documents the **development VM** startup. Run commands at the reposit
 
 The Vault Web UI is an [optional, on-demand administrative gateway](dev-vault-ui-on-demand.md). Use `make vault-ui-enable` only when needed; `make vault-ui-disable` closes its host-facing access.
 
+[Prisma Studio](dev-prisma-ui-on-demand.md) is an optional local database UI.
+Use `make prisma-ui-enable` on a healthy development stack and
+`make prisma-ui-disable` when finished. It is independent of guarded startup,
+recovery and health checks; use `make prisma-ui-status` to inspect its state.
+
 ## First-time trusted setup: new VM only
 
 1. Check out the project on the dedicated Ubuntu VM, including the intended reviewed commit. Keep local work and sensitive materials outside Git.
