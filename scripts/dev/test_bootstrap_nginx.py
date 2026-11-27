@@ -3,7 +3,9 @@
 import contextlib
 import io
 import json
+import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -51,11 +53,45 @@ def responses():
         b'<div id="root"></div><script src="/src/main.tsx"></script>\n200',
         b"/* Vite */ createRoot(document.querySelector('#root'))\n200",
         b'{"data":{"status":"ok","database":"ok"}}\n200',
-        b'308\nhttps://transcendence.test:8443/',
+        f"308\n{nginx.PUBLIC.app_origin}/".encode("ascii"),
     ]
 
 
+class PublicEndpointRenderingTests(unittest.TestCase):
+    def test_render_preserves_native_nginx_variables(self):
+        with patch.object(nginx, "DOMAIN", "example.test"), \
+             patch.object(nginx, "HTTPS_PORT", 9443):
+            config = nginx.rendered_config().decode("ascii")
+        self.assertIn("server_name example.test;", config)
+        self.assertIn("return 308 https://example.test:9443$request_uri;", config)
+        self.assertIn("proxy_set_header X-Forwarded-Port 9443;", config)
+        self.assertIn("proxy_set_header Host $host;", config)
+        self.assertIn("$http_upgrade", config)
+        self.assertNotIn("${DEV_", config)
+
+
+class DirectEntryPointTests(unittest.TestCase):
+    def test_https_helpers_start_without_pythonpath(self):
+        env = os.environ.copy()
+        env.pop("PYTHONPATH", None)
+        for script in ("bootstrap_nginx.py", "bootstrap_grafana_https.py",
+                       "upgrade_waf.py", "verify_grafana_datasource.py"):
+            with self.subTest(script=script):
+                result = subprocess.run(
+                    [sys.executable, str(nginx.pg.ROOT / "scripts/dev" / script), "--help"],
+                    cwd=nginx.pg.ROOT, env=env, capture_output=True, text=True,
+                    timeout=15, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("usage:", result.stdout.lower())
+
+
 class NginxTests(unittest.TestCase):
+    def setUp(self):
+        mock = patch.object(nginx.certificates, "curl_ca_args", return_value=["--cacert", "/test/rootCA.pem"])
+        mock.start()
+        self.addCleanup(mock.stop)
+
     def test_valid_container(self):
         nginx.verify_identity(fixture())
 
@@ -203,13 +239,17 @@ class NginxTests(unittest.TestCase):
         self.assertTrue(nginx.running(fixture()))
         self.assertFalse(nginx.running(fixture("exited")))
 
-    def test_tls_checks_existing_cert_and_trust_only(self):
+    def test_tls_checks_existing_cert_without_system_trust(self):
         with patch.object(nginx, "run") as cmd:
             nginx.check_local_tls()
-            self.assertEqual(cmd.call_count, 2)
-            self.assertIn("scripts.dev.certificates", cmd.call_args_list[0].args[0])
-            self.assertIn("scripts.dev.ca_trust", cmd.call_args_list[1].args[0])
-            self.assertNotIn("setup", str(cmd.call_args_list))
+            cmd.assert_called_once_with([nginx.sys.executable, "-m", "scripts.dev.certificates", "check"], timeout=45)
+
+    def test_missing_ca_prevents_https_request(self):
+        with patch.object(nginx.certificates, "curl_ca_args", side_effect=nginx.certificates.LocalCAError("missing CA")), \
+             patch.object(nginx, "run") as cmd:
+            with self.assertRaises(nginx.NginxBootstrapError):
+                nginx.curl_bytes(nginx.PUBLIC.app_origin, port=nginx.HTTPS_PORT, path="/")
+            cmd.assert_not_called()
 
     def test_https_probes_and_redirect(self):
         with patch.object(nginx, "run", side_effect=responses()) as cmd:
@@ -222,6 +262,10 @@ class NginxTests(unittest.TestCase):
                 self.assertNotIn("-k", args)
                 self.assertIn("--noproxy", args)
                 self.assertIn("--resolve", args)
+            for call in cmd.call_args_list[1:4]:
+                args = call.args[0]
+                self.assertEqual(args[args.index("--cacert") + 1], "/test/rootCA.pem")
+            self.assertNotIn("--cacert", cmd.call_args_list[4].args[0])
 
     def test_rejects_bad_html(self):
         samples = responses(); samples[1] = b"404\n404"
@@ -238,7 +282,7 @@ class NginxTests(unittest.TestCase):
             with self.subTest(path=path), \
                  patch.object(nginx, "run", return_value=b"SECRET-CANARY\n502"):
                 with self.assertRaises(nginx.NginxReadinessError) as error:
-                    nginx.curl_bytes("https://transcendence.test:8443", port=8443, path=path)
+                    nginx.curl_bytes(nginx.PUBLIC.app_origin, port=nginx.HTTPS_PORT, path=path)
                 self.assertEqual(error.exception.path, path)
                 self.assertNotIn("SECRET-CANARY", str(error.exception))
         for path, status in (("/", b"403"), ("/", b"503"), ("/", b"504"),
@@ -246,7 +290,7 @@ class NginxTests(unittest.TestCase):
             with self.subTest(path=path, status=status), \
                  patch.object(nginx, "run", return_value=b"SECRET-CANARY\n" + status):
                 with self.assertRaises(nginx.NginxBootstrapError) as error:
-                    nginx.curl_bytes("https://transcendence.test:8443", port=8443, path=path)
+                    nginx.curl_bytes(nginx.PUBLIC.app_origin, port=nginx.HTTPS_PORT, path=path)
                 self.assertNotIsInstance(error.exception, nginx.NginxReadinessError)
 
     def test_recovery_probe_runs_full_checks_and_pins_identity(self):
@@ -336,7 +380,7 @@ class NginxTests(unittest.TestCase):
             with self.assertRaises(nginx.NginxBootstrapError): nginx.verify_routes()
 
     def test_rejects_bad_redirect(self):
-        samples = responses(); samples[4] = b"301\nhttps://transcendence.test:8443/"
+        samples = responses(); samples[4] = f"301\n{nginx.PUBLIC.app_origin}/".encode("ascii")
         with patch.object(nginx, "run", side_effect=samples):
             with self.assertRaises(nginx.NginxBootstrapError): nginx.verify_routes()
 

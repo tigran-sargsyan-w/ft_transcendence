@@ -4,12 +4,17 @@ The Vault application, its Raft storage, Vault Agents, Backend, Grafana and Post
 are independent of the browser-facing HAProxy TCP gateway. By default the gateway
 is **disabled**. The operator explicitly enables it only when administering Vault.
 The HAProxy configuration continues to use TLS passthrough to Vault and publishes
-`127.0.0.1:8200` only.
+`127.0.0.1:8200` only (published port configured in `config/development.env`).
+Use the localhost URL printed by the lifecycle command. The canonical URL
+does not change the loopback-only port binding or Vault authentication.
+Browser cookies are scoped by hostname, not port, so application cookies may
+also be sent to Vault UI when both use localhost. Enable the UI only for
+operator sessions and disable it when finished.
 
 ```sh
 make vault-ui-status   # read-only; shows ENABLED or DISABLED
 make vault-ui-enable   # verifies trusted Vault, creates/resumes only HAProxy
-# Open https://localhost:8200/ui/ using the trusted development CA
+# Open https://localhost:8200/ui/ using the trusted Vault development CA
 make vault-ui-disable  # stops only the trusted HAProxy gateway
 make health            # accepts DISABLED as expected, never ignores drift
 ```
@@ -33,6 +38,11 @@ When upgrading a VM that already has a running gateway, run
 No operation rotates Vault tokens or reinitializes/unseals Vault. Disabling
 HAProxy does not disable the built-in Vault UI on the private network and is
 not a substitute for ACL, authentication, TLS, or secure handling of tokens.
+
+HAProxy allows up to five seconds for active connections to drain on soft-stop
+(`hard-stop-after 5s`), before the guarded ten-second Docker stop deadline.
+Remaining gateway connections may be closed at that limit; Vault itself is not
+stopped. The new configuration takes effect when the gateway starts again.
 
 ## Shared V3 progress (Issue #167)
 

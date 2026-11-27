@@ -26,11 +26,12 @@ import sys
 import time
 
 if __package__:
-    from . import bootstrap_cli_progress as cli
+    from . import bootstrap_cli_progress as cli, configuration
     from .bootstrap_progress import Phase, Progress, Status, emit_result
     from .bootstrap_process import Cancellation, ChildRunner, InitializationCancelled, UnexpectedApproval
 else:
     import bootstrap_cli_progress as cli
+    import configuration
     from bootstrap_progress import Phase, Progress, Status, emit_result
     from bootstrap_process import Cancellation, ChildRunner, InitializationCancelled, UnexpectedApproval
 
@@ -843,6 +844,7 @@ def initialize(lock_fd, *, cancellation=None):
             progress.summary()
         raise
     progress.summary()
+    print("INFO: User-level CA trust checked; actual browser HTTPS requires separate verification.", flush=True)
     emit_result("UNIFIED INITIALIZATION READY", Status.DONE)
 
 
@@ -973,7 +975,13 @@ def health_report():
 def exclusive_orchestrator_lock():
     # Separate lock from infra/vault/scripts/run-migrations.sh: child stages
     # acquire that lock themselves, so locking it here would self-deadlock.
-    STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # mkdir(parents=True) uses the ambient umask for intermediate directories.
+    # On a fresh home, do not create group-writable CA/state ancestors.
+    previous_umask = os.umask(0o077)
+    try:
+        STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    finally:
+        os.umask(previous_umask)
     if STATE.is_symlink() or not STATE.is_dir() or STATE.stat().st_uid != os.getuid():
         raise UnifiedStartupError("Unsafe unified startup state directory")
     flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
@@ -1077,7 +1085,8 @@ def main(argv=None, *, render=False):
             import platform
             if platform.system() != "Linux" or "microsoft" in platform.release().lower():
                 raise UnifiedStartupError("Initialization requires native Ubuntu Linux")
-            if os.environ.get("DEV_DOMAIN", "transcendence.test") != "transcendence.test":
+            public = configuration.load()
+            if os.environ.get("DEV_DOMAIN", public.domain) != public.domain:
                 raise UnifiedStartupError("Initialization requires the default development domain")
             with exclusive_orchestrator_lock() as lock_fd, Cancellation().handling() as cancellation:
                 initialize(lock_fd, cancellation=cancellation)
@@ -1111,7 +1120,7 @@ def main(argv=None, *, render=False):
     except OSError:
         print("ERROR: Local bootstrap operation failed; inspect the active stage", file=sys.stderr)
         return 1
-    except UnifiedStartupError as exc:
+    except (UnifiedStartupError, configuration.ConfigurationError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr, flush=True)
         if args.mode == "initialize" or render:
             emit_result("UNIFIED BOOTSTRAP STOPPED (no resources removed)", Status.FAILED, stream=sys.stderr)

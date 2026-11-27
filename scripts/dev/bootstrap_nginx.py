@@ -3,7 +3,7 @@
 
 Requires Phase 5D frontend and all previously verified services. Never
 recreates existing containers; does not modify TLS certificates, credentials,
-volumes, Vault or PostgreSQL. Publishes only loopback 8080/8443.
+volumes, Vault or PostgreSQL. Publishes only configured loopback ports.
 """
 
 if __package__:
@@ -26,19 +26,28 @@ import bootstrap_postgres as pg
 import bootstrap_support_services as support
 import nginx_tls_access as tls_access
 
+# Direct script entry points (including bootstrap.sh) do not set PYTHONPATH.
+# Resolve the package from the repository, just as other runtime helpers do.
+if str(pg.ROOT) not in sys.path:
+    sys.path.insert(0, str(pg.ROOT))
+from scripts.dev import certificates
+
 NAME = f"{pg.PROJECT}-nginx-1"
 SERVICE = "nginx"
 IMAGE = "owasp/modsecurity-crs:4.30.0-nginx-202611090911"
 DEFAULT_NETWORK = f"{pg.PROJECT}_default"
-DOMAIN = "transcendence.test"
+PUBLIC = pg.configuration.load()
+DOMAIN = PUBLIC.domain
+HTTP_PORT = PUBLIC.http_port
+HTTPS_PORT = PUBLIC.https_port
 CERTS = pg.ROOT / "infra/nginx/certs"
 CONFIG = pg.ROOT / "infra/nginx/default.conf.template"
 PROMQL_RULES = pg.ROOT / "infra/nginx/waf/REQUEST-900-FT-GRAFANA-PROMQL.conf"
 PROMQL_RULES_RUNTIME = "/opt/owasp-crs/rules/REQUEST-900-FT-GRAFANA-PROMQL.conf"
 TLS_GROUP_GID = "43043"
 PORTS = {
-    "8080/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8080"}],
-    "8443/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8443"}],
+    "8080/tcp": [{"HostIp": "127.0.0.1", "HostPort": str(HTTP_PORT)}],
+    "8443/tcp": [{"HostIp": "127.0.0.1", "HostPort": str(HTTPS_PORT)}],
 }
 FORBIDDEN_ENV = (
     "DATABASE_URL=", "DATABASE_URL_FILE=", "VAULT_TOKEN=",
@@ -132,17 +141,24 @@ def running(item):
 
 
 def check_local_tls():
-    # Existing Phase 1 checks SAN, key matching, expiry and OS trust. Their
-    # output is withheld; nothing is generated or installed in this phase.
+    # Check the local certificate chain, SAN, key matching and expiry.
+    # Browser/OS trust is separate; no trust-store mutation in this phase.
     run([sys.executable, "-m", "scripts.dev.certificates", "check"], timeout=45)
-    run([sys.executable, "-m", "scripts.dev.ca_trust", "check"], timeout=45)
+
+
+def app_ca_args():
+    try:
+        return certificates.curl_ca_args()
+    except certificates.LocalCAError as exc:
+        raise NginxBootstrapError(str(exc)) from None
 
 
 def curl_bytes(url, *, port, path, timeout=12):
     # -q MUST be curl's first argument: ignore operator ~/.curlrc entirely.
-    # Never use -k/--insecure: require the local mkcert CA to be trusted.
+    # Verify HTTPS using the explicit public application CA, without OS trust.
     raw = run([
         "curl", "-q", "--silent", "--show-error", "--noproxy", "*",
+        *app_ca_args(),
         "--connect-timeout", "3", "--max-time", str(timeout),
         "--resolve", f"{DOMAIN}:{port}:127.0.0.1",
         "--write-out", "\n%{http_code}", url + path,
@@ -158,20 +174,27 @@ def curl_bytes(url, *, port, path, timeout=12):
     return body
 
 
+def rendered_config():
+    """Expected entrypoint envsubst result; retain native Nginx variables."""
+    return (CONFIG.read_bytes()
+            .replace(b"${DEV_DOMAIN}", DOMAIN.encode("ascii"))
+            .replace(b"${DEV_HTTPS_PORT}", str(HTTPS_PORT).encode("ascii")))
+
+
 def verify_routes():
     # Syntax check validates the actual configuration inside the container.
     run(["docker", "exec", NAME, "nginx", "-t"], timeout=20)
 
-    base = f"https://{DOMAIN}:8443"
-    page = curl_bytes(base, port=8443, path="/")
+    base = PUBLIC.app_origin
+    page = curl_bytes(base, port=HTTPS_PORT, path="/")
     if b'id="root"' not in page or b"/src/main.tsx" not in page:
         raise NginxBootstrapError("Nginx HTTPS frontend response invalid")
 
-    module = curl_bytes(base, port=8443, path="/src/main.tsx")
+    module = curl_bytes(base, port=HTTPS_PORT, path="/src/main.tsx")
     if b"createRoot" not in module:
         raise NginxBootstrapError("Nginx HTTPS Vite module unavailable")
 
-    health = curl_bytes(base, port=8443, path="/api/v1/health")
+    health = curl_bytes(base, port=HTTPS_PORT, path="/api/v1/health")
     try:
         body = json.loads(health)
     except (ValueError, UnicodeError, TypeError):
@@ -186,15 +209,15 @@ def verify_routes():
     redirect = run([
         "curl", "-q", "--silent", "--show-error", "--noproxy", "*",
         "--connect-timeout", "3", "--max-time", "8",
-        "--resolve", f"{DOMAIN}:8080:127.0.0.1",
+        "--resolve", f"{DOMAIN}:{HTTP_PORT}:127.0.0.1",
         "--output", "/dev/null", "--write-out", "%{http_code}\n%{redirect_url}",
-        f"http://{DOMAIN}:8080/",
+        PUBLIC.http_origin + "/",
     ], timeout=12)
     if redirect.decode("utf-8", "replace") != f"308\n{base}/":
         raise NginxBootstrapError("Nginx HTTP-to-HTTPS redirect incorrect")
 
     print("PASS: Nginx TLS verified, Vite HTML/module and NestJS API via HTTPS", flush=True)
-    print("PASS: Loopback HTTP 8080 redirects to HTTPS 8443", flush=True)
+    print("PASS: Loopback HTTP redirects to HTTPS", flush=True)
 
 
 def wait_nginx(attempts=45, delay=2):

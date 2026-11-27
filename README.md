@@ -8,7 +8,7 @@ Prometheus collects real Collector and monitoring pipeline metrics.
 Grafana provides two provisioned custom dashboards, historical
 metrics and visibility into alert states.
 
-- Grafana: https://transcendence.test:8443/grafana/
+- Grafana: the configured application origin followed by `/grafana/`.
 - [Monitoring architecture, operations and evaluation](docs/dev-monitoring.md)
 
 Monitoring is included in the guarded startup and recovery workflow.
@@ -22,7 +22,9 @@ make up
 # Equivalent: ./scripts/bootstrap.sh --start
 ```
 
-The guarded entry point verifies the existing Vault-backed stack and starts only known, trusted stopped containers. It does not initialize Vault, create database credentials, run Prisma migrations or recreate persistent volumes. Open `https://transcendence.test:8443` in the browser configured for that VM.
+The guarded entry point verifies the existing Vault-backed stack and starts only known, trusted stopped containers. It does not initialize Vault, create database credentials, run Prisma migrations or recreate persistent volumes. Open the URL printed by `python3 -m scripts.dev.configuration origin` in the browser configured for that VM.
+
+Public development settings are tracked in [`config/development.env`](config/development.env). No root `.env` is required by guarded startup; secrets remain in Vault and protected bootstrap state. Configuration changes require a reviewed runtime cutover; `make up` does not recreate existing containers.
 
 For a new Ubuntu development VM, clone the repository, ensure Git and
 GNU Make are available, then run **one guarded first-install command**:
@@ -39,7 +41,7 @@ may be configured automatically; log out and back in if instructed. Interactive
 terminals show live stage progress; CI and redirected logs are plain text.
 
 Do not use `sudo make initialize`. Existing installations and upgrades
-require separate review; initial setup is not a replacement for recovery.
+require separate review; see [localhost cutover](docs/development/localhost-cutover.md) for the original hostname; initial setup is not a replacement for recovery.
 
 After reboot, single-node Vault using Shamir 2-of-3 normally needs **manual unseal**; run `make recover` from a real terminal, and enter two distinct shares into the hidden Vault CLI prompts. Never provide shares in command arguments, Git, chat, screenshots or logs. This is development-only operator-assisted recovery, **not unattended Auto Unseal**.
 

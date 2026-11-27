@@ -10,6 +10,11 @@ import bootstrap_grafana_https as https
 
 
 class GrafanaHTTPSTests(unittest.TestCase):
+    def setUp(self):
+        mock = patch.object(https.nginx.certificates, "curl_ca_args", return_value=["--cacert", "/test/rootCA.pem"])
+        mock.start()
+        self.addCleanup(mock.stop)
+
 
     def responses(self):
         return [
@@ -123,6 +128,7 @@ class GrafanaHTTPSTests(unittest.TestCase):
         self.assertNotIn("--insecure", command)
         self.assertIn("--noproxy", command)
         self.assertIn("--resolve", command)
+        self.assertEqual(command[command.index("--cacert") + 1], "/test/rootCA.pem")
 
     def test_request_invalid_status(self):
         with patch.object(

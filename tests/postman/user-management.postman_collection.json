@@ -3805,7 +3805,7 @@
   "variable": [
     {
       "key": "base_url",
-      "value": "https://transcendence.test:8443",
+      "value": "",
       "type": "string",
       "description": "Local authorized HTTPS gateway only."
     },

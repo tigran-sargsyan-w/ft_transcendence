@@ -12,6 +12,14 @@ from test_bootstrap_vault_ui import fixture
 
 
 class VaultUiLifecycleTests(unittest.TestCase):
+    def test_gateway_soft_stop_is_bounded_before_docker_timeout(self):
+        config = ui.CONFIG.read_text(encoding="utf-8")
+        global_section = config.split("\ndefaults\n", 1)[0]
+        self.assertEqual(global_section.splitlines()[0], "global")
+        directives = [line.strip() for line in global_section.splitlines()
+                      if line.strip().startswith("hard-stop-after ")]
+        self.assertEqual(directives, ["hard-stop-after 5s"])
+
     def test_unified_core_bootstrap_does_not_resume_ui(self):
         import bootstrap_unified as unified
         self.assertEqual(unified.STAGE_BY_NAME["vault-ui"], ("--check-vault-ui-optional", None))

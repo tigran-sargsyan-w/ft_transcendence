@@ -1,6 +1,8 @@
 """Offline security regression tests for the Vault UI gateway."""
 
 import copy
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -63,6 +65,26 @@ def fixture():
 
 
 class GatewaySecurityTests(unittest.TestCase):
+
+    def test_reviewed_repository_configuration_accepted(self):
+        # Exercise the real source guard, not a mocked Compose call.
+        gateway.verify_source()
+
+    def test_unreviewed_configuration_refused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "haproxy.cfg"
+            for changed in (
+                gateway.EXPECTED_CONFIG.replace("    hard-stop-after 5s\n", ""),
+                gateway.EXPECTED_CONFIG.replace("hard-stop-after 5s", "hard-stop-after 30s"),
+                gateway.EXPECTED_CONFIG.replace("vault:8200 check", "unexpected:8200 check"),
+            ):
+                with self.subTest(config=changed):
+                    path.write_text(changed, encoding="utf-8")
+                    with patch.object(gateway, "CONFIG", path), \
+                         patch.object(gateway, "command") as command:
+                        with self.assertRaisesRegex(gateway.GatewayError, "Unreviewed HAProxy configuration"):
+                            gateway.compose()
+                        command.assert_not_called()
 
     def test_trusted_container_accepted(self):
         gateway.verify_identity(fixture())

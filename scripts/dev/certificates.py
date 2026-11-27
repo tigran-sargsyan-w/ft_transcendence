@@ -11,6 +11,8 @@ import tempfile
 
 from pathlib import Path
 
+from scripts.dev import configuration
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CERT_DIR = PROJECT_ROOT / "infra" / "nginx" / "certs"
@@ -18,7 +20,7 @@ CERT_DIR = PROJECT_ROOT / "infra" / "nginx" / "certs"
 CERT_FILE = CERT_DIR / "cert.pem"
 KEY_FILE = CERT_DIR / "key.pem"
 
-DEFAULT_DOMAIN = "transcendence.test"
+DEFAULT_DOMAIN = configuration.load().domain
 
 
 def get_ca_root() -> Path | None:
@@ -46,6 +48,24 @@ def get_ca_root() -> Path | None:
         return None
 
     return Path(path)
+
+
+class LocalCAError(ValueError):
+    """The explicit application CA is not available for a TLS probe."""
+
+
+def curl_ca_args() -> list[str]:
+    """Use the public mkcert CA, never the CA private key or an insecure flag."""
+    try:
+        root = get_ca_root()
+        if root is None or not root.is_absolute():
+            raise LocalCAError("Application CA directory unavailable")
+        cert = root / "rootCA.pem"
+        if cert.is_symlink() or not cert.is_file() or cert.stat().st_size == 0:
+            raise LocalCAError("Application CA certificate unavailable or unsafe")
+    except OSError:
+        raise LocalCAError("Cannot access application CA certificate") from None
+    return ["--cacert", str(cert)]
 
 
 def validate_certificate(
@@ -85,7 +105,7 @@ def validate_certificate(
     # Verify certificate chain and hostname.
     chain = run(
         "verify",
-        "-CAfile", str(ca_root / "rootCA.pem"),
+        "-no-CApath", "-no-CAstore", "-CAfile", str(ca_root / "rootCA.pem"),
         "-purpose", "sslserver",
         "-verify_hostname", domain,
         str(cert_file),
@@ -251,9 +271,7 @@ def setup() -> int:
                     mkcert,
                     "-cert-file", str(staged_cert),
                     "-key-file", str(staged_key),
-                    DEFAULT_DOMAIN,
-                    "localhost",
-                    "127.0.0.1",
+                    *dict.fromkeys((DEFAULT_DOMAIN, "localhost", "127.0.0.1")),
                 ],
                 capture_output=True,
                 text=True,

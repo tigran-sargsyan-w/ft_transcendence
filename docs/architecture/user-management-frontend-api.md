@@ -2,7 +2,7 @@
 
 **Status:** Backend implemented and tested; frontend integration pending.  
 **Source branch:** `feat/standard-user-management`  
-**API prefix:** `/api/v1` (use the existing same-origin API proxy; local HTTPS: `https://transcendence.test:8443`)
+**API prefix:** `/api/v1` (use the existing same-origin API proxy; local HTTPS: `https://localhost:8443`)
 
 ## 1. Authentication and response conventions
 

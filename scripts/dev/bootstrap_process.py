@@ -65,6 +65,12 @@ NOTICES = {
         'WARNING: Recovery material exists but Vault container is missing; inspect existing state.',
     b'ERROR: Unknown untrusted local CA; use explicit host preparation after review':
         'ERROR: Unknown untrusted local CA; review using --prepare-host.',
+    b'ERROR: Unknown unrecorded local CA; review and run ca_trust setup':
+        'ERROR: Unknown application CA; review and run python3 -m scripts.dev.ca_trust setup.',
+    b'ERROR: Vault CA authorization missing; review and run setup --apply':
+        'ERROR: Unknown Vault CA; review and run python3 -m scripts.dev.vault_ca_trust setup --apply.',
+    b'ERROR: Vault CA differs from its authorization record; manual review required':
+        'ERROR: Vault CA identity differs from the recorded fingerprint; manual review required.',
     b'ERROR: Local CA differs from its initialization record':
         'ERROR: Local CA identity differs from the recorded fingerprint.',
     b'ERROR: Incomplete local CA; refusing replacement':
@@ -96,11 +102,12 @@ EVENTS = {
     "INFO: Starting Docker service": ("Start Docker daemon", Status.RUNNING),
     "RESULT: REQUIRED DOCKER IMAGES READY": ("Verify required images", Status.DONE),
     "KEEP: All required Docker images already available.": ("Reuse existing Docker images", Status.CACHED),
-    "PASS: Local transcendence.test domain": ("Verify development hostname", Status.DONE),
+    "PASS: Local development domain": ("Verify development hostname", Status.DONE),
     "PASS: Browser-facing Nginx TLS certificate": ("Verify browser TLS certificate", Status.DONE),
     "PASS: Local CA trust": ("Verify local CA trust", Status.DONE),
     "PASS: Dedicated Nginx TLS group and ACL": ("Verify Nginx TLS permissions", Status.DONE),
     "PASS: Existing Vault TLS chain, hostname and expiry": ("Verify Vault TLS", Status.DONE),
+    "PASS: Vault CA authorization and user-level NSS trust": ("Verify Vault CA trust", Status.DONE),
     "RESULT: HOST PREPARATION READY": ("Verify host preparation", Status.DONE),
     "PASS: Compose resource inventory and external network contract": ("Verify Compose resource inventory", Status.DONE),
     "RESULT: DOCKER RESOURCES READY (read-only)": ("Verify Docker resources", Status.DONE),
@@ -141,7 +148,7 @@ EVENTS = {
     "PASS: Backend can reach Collector and Graph Engine": ("Verify backend service connectivity", Status.DONE),
     "PASS: React/Vite HTML, entry module and backend API proxy": ("Verify React frontend", Status.DONE),
     "PASS: Nginx TLS verified, Vite HTML/module and NestJS API via HTTPS": ("Verify Nginx HTTPS application routing", Status.DONE),
-    "PASS: Loopback HTTP 8080 redirects to HTTPS 8443": ("Verify HTTP to HTTPS redirect", Status.DONE),
+    "PASS: Loopback HTTP redirects to HTTPS": ("Verify HTTP to HTTPS redirect", Status.DONE),
     "RESULT: PROMETHEUS READY (read-only)": ("Verify Prometheus metrics readiness", Status.DONE),
     "RETRY: Prometheus HTTP readiness": ("Retry Prometheus metrics readiness", Status.RUNNING),
     "PASS: Prometheus HTTP readiness retry": ("Retry Prometheus metrics readiness", Status.DONE),

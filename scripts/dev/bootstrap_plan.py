@@ -9,6 +9,7 @@ import importlib
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import subprocess
 import sys
@@ -126,7 +127,7 @@ def host_plan(session):
     elif present != len(paths):
         raise PlanError("Incomplete Vault TLS state: refuse to overwrite or regenerate keys")
     else:
-        if command(["openssl", "verify", "-purpose", "sslserver", "-verify_hostname", "vault",
+        if command(["openssl", "verify", "-no-CApath", "-no-CAstore", "-purpose", "sslserver", "-verify_hostname", "vault",
                     "-CAfile", str(paths[0]), str(paths[1])]).returncode:
             raise PlanError("Vault TLS certificate validation failed")
         if command(["openssl", "x509", "-in", str(paths[1]), "-noout", "-checkend", "0"]).returncode:
@@ -134,6 +135,16 @@ def host_plan(session):
         status = Status.READY
     show(session, label, status)
     results.append(status)
+    if "microsoft" not in platform.release().lower():
+        label = "Vault CA authorization and NSS trust"
+        cli.substep(label, Status.RUNNING)
+        if present == 0:
+            status = Status.MISSING
+        else:
+            result = command([sys.executable, "-m", "scripts.dev.vault_ca_trust", "check-authorized"])
+            status = Status.READY if result.returncode == 0 else Status.NOT_READY
+        show(session, label, status)
+        results.append(status)
     ready = all(s is Status.READY for s in results)
     cli.notice("RESULT: HOST PREPARATION ALREADY READY" if ready else
                "RESULT: HOST PREPARATION NEEDED")

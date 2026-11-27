@@ -61,10 +61,10 @@ v1.2.1 switched to `--no-recreate` for dependency-preserving operations and chec
 ./demo-lab/demo.sh up
 
 # Terminal 2 — User A (existing dedicated test account)
-node backend/scripts/demo-watch.mjs --email demo-tester@example.com
+make demo-watch-plain EMAIL=demo-tester@example.com
 
 # Terminal 3 — User B (independent dedicated test account)
-node backend/scripts/demo-watch.mjs --email demo-evaluator-2@example.com
+make demo-watch-plain EMAIL=demo-evaluator-2@example.com
 
 # Once both clients are connected, Terminal 1
 ./demo-lab/demo.sh fail db

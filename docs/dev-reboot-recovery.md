@@ -96,7 +96,7 @@ After an authorized controlled reboot, record:
 3. The same named data volumes are retained, and existing migration/grant
    checks pass without replaying or changing migration history.
 4. `--check-all` and two successive `--start` invocations succeed.
-5. Browser access via `https://transcendence.test:8443` works, with no backend
+5. Browser access via `https://localhost:8443` works, with no backend
    errors. Confirm the site and API are healthy; do not rely on HTTP 200 alone.
 6. Any failure message contains no shares, tokens or rendered DSNs.
 

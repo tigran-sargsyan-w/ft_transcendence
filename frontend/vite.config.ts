@@ -13,7 +13,7 @@ export default defineConfig({
     },
   },
   server: {
-    allowedHosts: ["transcendence.test"],
+    allowedHosts: process.env.DEV_DOMAIN ? [process.env.DEV_DOMAIN] : [],
     proxy: {
       "/api": {
         target: backendUrl,

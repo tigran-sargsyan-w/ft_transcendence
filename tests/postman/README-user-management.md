@@ -2,13 +2,13 @@
 
 **Branch:** `feat/standard-user-management`  
 **Collection:** `tests/postman/user-management.postman_collection.json`  
-**Target:** Authorized local development instance only (`https://transcendence.test:8443`).
+**Target:** Authorized local development instance only (use `python3 -m scripts.dev.configuration origin` from the repository root).
 
 ## Quick start
 
 1. Import `user-management.postman_collection.json` into Postman. No backend or database reset is needed.
 2. In **Collection → Variables**, verify two values:
-   - `base_url` = `https://transcendence.test:8443`
+   - `base_url` = the configured `APP_ORIGIN` (copy from `python3 -m scripts.dev.configuration origin`; no trailing slash)
    - **`fixtures_dir` = `tests/postman/fixtures`** (the only fixture setting)
 3. Set the **Postman working directory to the repository root** (`ft_transcendence/`), so `tests/postman/fixtures/...` resolves to real files. Files must be present on the machine/runtime **where Postman sends requests**. The VS Code extension and desktop runner can resolve filesystem paths differently; verify their actual working directory. If you cannot set the working directory, edit **only `fixtures_dir`** to an accessible absolute folder path (if your runner permits it). Postman may restrict reading files outside its working directory; do not enable unrestricted file access unless you trust the collection and local paths.
 4. Run folders `00` → `08` **sequentially** in Collection Runner. Ensure certificate verification remains enabled with the local trusted CA.

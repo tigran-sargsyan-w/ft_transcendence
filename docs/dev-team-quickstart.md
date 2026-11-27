@@ -11,7 +11,7 @@ make up
 make health
 ```
 
-Open **https://transcendence.test:8443** in the browser configured on that host.
+Open the URL printed by `python3 -m scripts.dev.configuration origin` in the browser configured on that host. The public settings are in `config/development.env`; do not create a root `.env` for this workflow.
 
 If Vault is **sealed** (typically after a reboot), use `make recover` in an interactive terminal and enter **two different Shamir shares** into the hidden Vault CLI prompts. Then run `make health` again. Do **not** run `make initialize` to recover a sealed Vault.
 

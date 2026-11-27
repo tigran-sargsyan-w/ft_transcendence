@@ -2,11 +2,12 @@
 """Guarded local Vault Web UI gateway bootstrap."""
 
 if __package__:
-    from . import bootstrap_plan_events as plan_events, bootstrap_cli_progress as cli
+    from . import bootstrap_plan_events as plan_events, bootstrap_cli_progress as cli, configuration
     from .bootstrap_progress import Phase, Status
 else:
     import bootstrap_plan_events as plan_events
     import bootstrap_cli_progress as cli
+    import configuration
     from bootstrap_progress import Phase, Status
 
 import argparse
@@ -36,7 +37,9 @@ CA = (
 TARGET = "/usr/local/etc/haproxy/haproxy.cfg"
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "transcendence/dev"
 ENABLED = STATE / "vault-ui.enabled"
-UI_URL = "https://localhost:8200/ui/"
+PUBLIC = configuration.load()
+UI_URL = PUBLIC.vault_ui_url
+UI_PORT = str(PUBLIC.vault_ui_port)
 
 PRESENTATION = {
     "enable": ("Enabling Vault UI", (
@@ -54,6 +57,8 @@ PRESENTATION = {
 
 EXPECTED_CONFIG = """global
     maxconn 64
+    # Finish soft-stop before the guarded Docker stop timeout (10s).
+    hard-stop-after 5s
 
 defaults
     mode tcp
@@ -116,6 +121,8 @@ def compose():
         )
     }
 
+    env["DEV_VAULT_UI_PORT"] = UI_PORT
+
     args = [
         "docker", "compose", "--env-file", "/dev/null",
         "-p", PROJECT, "-f", str(COMPOSE),
@@ -157,7 +164,7 @@ def compose():
 
     if (
         port.get("host_ip") != "127.0.0.1"
-        or str(port.get("published")) != "8200"
+        or str(port.get("published")) != UI_PORT
         or port.get("target") != 8200
         or port.get("protocol", "tcp") != "tcp"
         or volume.get("type") != "bind"
@@ -234,7 +241,7 @@ def verify_identity(item):
 
     port = {
         "8200/tcp": [
-            {"HostIp": "127.0.0.1", "HostPort": "8200"}
+            {"HostIp": "127.0.0.1", "HostPort": UI_PORT}
         ]
     }
 

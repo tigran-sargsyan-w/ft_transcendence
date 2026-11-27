@@ -58,7 +58,7 @@ Usage: ./scripts/bootstrap.sh [--initialize|--start|--recover|--check-all|--heal
   --check-support-services    Check their networks, mounts and HTTP readiness.
   --prepare-frontend       Build/start ONLY React/Vite frontend, without Nginx.
   --check-frontend         Verify frontend Compose identity and local HTTP/API proxy.
-  --prepare-nginx          Start only trusted Nginx on loopback 8080/8443 (HTTPS).
+  --prepare-nginx          Start only trusted Nginx on configured loopback ports.
   --check-nginx            Verify Nginx identity, TLS, redirect and HTTPS routes.
   --prepare-prometheus     Explicitly create/start only trusted Prometheus.
   --check-prometheus       Read-only Prometheus identity and readiness verification.
@@ -142,6 +142,11 @@ if [[ -n ${FT_DEV_TLS_DIR:-} && ${FT_DEV_TLS_DIR%/} != "${TLS_DIR%/}" ]]; then
 fi
 export FT_DEV_TLS_DIR="$TLS_DIR"
 
+# The new shared NSS adapter is native Linux only. Preserve legacy WSL trust.
+kernel_release=$(uname -r) || fail "Cannot determine kernel release"
+NATIVE_CA_TRUST=1
+if [[ ${kernel_release,,} == *microsoft* ]]; then NATIVE_CA_TRUST=0; fi
+
 # Never follow an unexpected symbolic link to host key material.
 for path in "$TLS_DIR" "$CA_DIR" \
   "$TLS_DIR/ca.crt" "$TLS_DIR/vault.crt" "$TLS_DIR/vault.key" \
@@ -163,7 +168,7 @@ vault_tls_status() {
     return 1
   fi
   (( present == 4 )) || fail "Incomplete Vault TLS state: refuse to overwrite or regenerate keys"
-  openssl verify -purpose sslserver -verify_hostname vault \
+  openssl verify -no-CApath -no-CAstore -purpose sslserver -verify_hostname vault \
     -CAfile "$TLS_DIR/ca.crt" "$TLS_DIR/vault.crt" >/dev/null 2>&1 \
     || fail "Vault TLS certificate validation failed"
   openssl x509 -in "$TLS_DIR/vault.crt" -noout -checkend 0 >/dev/null 2>&1 \
@@ -176,9 +181,9 @@ host_check() {
   local missing=0
   say "=== Local host setup ==="
   if python3 -m scripts.dev.domains check >/dev/null 2>&1; then
-    say "PASS: Local transcendence.test domain"
+    say "PASS: Local development domain"
   else
-    say "TODO: Local transcendence.test domain"
+    say "TODO: Local development domain"
     missing=1
   fi
   if python3 -m scripts.dev.certificates check >/dev/null 2>&1; then
@@ -199,7 +204,18 @@ host_check() {
     say "TODO: Dedicated Nginx TLS group and ACL"
     missing=1
   fi
-  if vault_tls_status; then :; else missing=1; fi
+  if vault_tls_status; then
+    if (( NATIVE_CA_TRUST )); then
+      if python3 -m scripts.dev.vault_ca_trust check-authorized >/dev/null 2>&1; then
+        say "PASS: Vault CA authorization and user-level NSS trust"
+      else
+        say "TODO: Vault CA trust; inspect python3 -m scripts.dev.vault_ca_trust check-authorized"
+        missing=1
+      fi
+    fi
+  else
+    missing=1
+  fi
   (( missing == 0 ))
 }
 
@@ -440,7 +456,7 @@ case "$MODE" in
     python3 scripts/dev/bootstrap_frontend.py check || fail "Frontend is not ready"
     python3 scripts/dev/bootstrap_nginx.py plan
     say ""
-    say "This stage starts ONLY Nginx on 127.0.0.1:8080/8443."
+    say "This stage starts ONLY Nginx on configured loopback ports."
     say "It verifies the existing mkcert TLS chain without generating/replacing keys."
     say "Existing trusted containers are preserved and NEVER recreated."
     say "No Vault, PostgreSQL, migrations or application services are changed."
@@ -589,6 +605,9 @@ case "$MODE" in
     say "This stage can modify /etc/hosts, local CA trust and local TLS files."
     say "It does not create/start Docker containers, networks or volumes."
     stage_confirm "Prepare local domain and TLS on this VM?" || fail "Cancelled; no preparation started"
+    if (( NATIVE_CA_TRUST )); then
+      python3 -m scripts.dev.vault_ca_trust preflight
+    fi
     if (( INITIALIZE_STAGE )); then
       python3 -m scripts.dev.bootstrap_linux_ca
       python3 -m scripts.dev.nginx_tls_access apply
@@ -598,7 +617,9 @@ case "$MODE" in
       python3 -m scripts.dev.nginx_tls_access apply
       python3 -m scripts.dev.ca_trust setup
     fi
-    if vault_tls_status; then
+    if (( NATIVE_CA_TRUST )); then
+      python3 -m scripts.dev.vault_ca_trust prepare
+    elif vault_tls_status; then
       say "KEEP: Existing valid Vault TLS material"
     else
       say "=== Initialize new local Vault CA and certificate ==="

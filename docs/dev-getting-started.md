@@ -33,7 +33,7 @@ The Vault Web UI is an [optional, on-demand administrative gateway](dev-vault-ui
    # Equivalent: ./scripts/bootstrap.sh --initialize
    ```
 
-   Invoking the command authorizes the fixed development provisioning stages; no additional approval prompts are required. This automatic path supports native Ubuntu Linux only, not Windows/WSL trust installation or a remote Docker daemon. Existing valid resources are retained and conflicting state is refused. Unknown untrusted browser CAs require explicit review. A sudo password request, if needed, is ordinary OS authentication, not a bootstrap confirmation. See [initialization progress and cancellation](dev-initialize-reliability.md#issue-160-initialization-progress-and-cancellation). **Do not use initialization to recover from a reboot or as a blind repair for an unhealthy stack.**
+   Invoking the command authorizes the fixed development provisioning stages; no additional approval prompts are required. This automatic path supports native Ubuntu Linux only, not Windows/WSL trust installation or a remote Docker daemon. Existing valid resources are retained and conflicting state is refused. Both newly generated development CAs are pinned and imported into the ordinary user’s shared Chromium NSS store without sudo or approval prompts. Unrecorded existing CAs require explicit review. The system CA store is preserved. Browser executables are optional; NSS verification is not a browser smoke test. A sudo password request, if needed, is ordinary OS authentication, not a bootstrap confirmation. See [initialization progress and cancellation](dev-initialize-reliability.md#issue-160-initialization-progress-and-cancellation). **Do not use initialization to recover from a reboot or as a blind repair for an unhealthy stack.**
 
 4. Secure the generated Vault recovery material according to the local procedure and retain **two distinct Shamir shares in approved secure storage outside the VM**. The protected local `vault-init.json` contains root-level recovery material: never print it, commit it or paste it into an issue. Maintain an independent backup of persistent application data.
 5. Validate readiness:
@@ -43,7 +43,7 @@ The Vault Web UI is an [optional, on-demand administrative gateway](dev-vault-ui
    make check-all
    ```
 
-   Open `https://transcendence.test:8443` from the configured VM browser and verify that the actual application works. A green infrastructure check does not substitute for login, session or WebSocket functional E2E tests.
+   Open `https://localhost:8443` from the configured VM browser and verify that the actual application works. A green infrastructure check does not substitute for login, session or WebSocket functional E2E tests.
 
 ### Independent fresh-VM verification (2026-11-22)
 
@@ -88,7 +88,7 @@ make health
 make check-all
 ```
 
-`make check` checks **only** the host domain, Nginx certificate and OS CA trust; use `make health` for the full runtime. `make acceptance` is an **opt-in** validation that repeatedly calls safe `--start` on an already healthy VM and compares container, persistent volume, network and Prisma migration-history metadata. It is not needed on every login.
+`make check` checks **only** the host domain, Nginx certificate and application CA trust; `make health` and `make plan` also inspect the authorized Vault CA and NSS trust on native Ubuntu; use `make health` for the full runtime. `make acceptance` is an **opt-in** validation that repeatedly calls safe `--start` on an already healthy VM and compares container, persistent volume, network and Prisma migration-history metadata. It is not needed on every login.
 
 ### Shared bootstrap progress (Issue #165)
 
@@ -262,7 +262,7 @@ Only enter shares when the Vault CLI itself requests them with hidden input. The
 Prometheus and Grafana are part of the guarded startup,
 readiness and recovery contract.
 
-Use https://transcendence.test:8443/grafana/ from an
+Use https://localhost:8443/grafana/ from an
 authorized browser with trusted TLS.
 
 The monitoring guide documents initial image prerequisites,

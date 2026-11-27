@@ -1,5 +1,5 @@
 
-"""Tests for Linux CA trust uninstall."""
+"""Tests for the legacy WSL Linux CA trust uninstall."""
 
 import io
 import tempfile
@@ -53,6 +53,8 @@ class LinuxCATrustUninstallTests(unittest.TestCase):
                 return_value="A" * 40,
             )
         )
+
+        self.stack.enter_context(patch.object(ca_trust.domains, "is_wsl", return_value=True))
 
         self.check_linux = self.stack.enter_context(
             patch.object(

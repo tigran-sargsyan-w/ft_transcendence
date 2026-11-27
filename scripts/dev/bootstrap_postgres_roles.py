@@ -78,6 +78,10 @@ def safe_env():
     env["FT_DEV_TLS_DIR"] = str(config.vault.STATE / "tls")
     env["FT_APP_COMPOSE_PROJECT"] = pg.PROJECT
     env["FT_EXISTING_RUNTIME_ONLY"] = "1"
+    try:
+        env.update(pg.configuration.load().public_environment())
+    except pg.configuration.ConfigurationError as exc:
+        raise RolesBootstrapError(str(exc)) from None
     return env
 
 

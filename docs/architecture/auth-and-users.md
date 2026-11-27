@@ -39,7 +39,7 @@ Server-side sessions with an opaque `HttpOnly` cookie, see [ADR 0002](../adr/000
 
 ### Cookie in development and production
 
-The `sid` cookie is `HttpOnly`, `Secure` and `SameSite=Lax`. `Secure` is only turned off with `COOKIE_SECURE=false`, for local development over plain HTTP; in production (HTTPS) keep the default. `SESSION_TTL_HOURS` sets the session lifetime (default `168`, 7 days). Both variables are in `.env.example`. Chrome accepts a `Secure` cookie on `http://localhost`, so `COOKIE_SECURE=false` is only needed if a browser refuses it. `compose.yml` does not pass these variables to the backend yet, so the defaults apply.
+The `sid` cookie is `HttpOnly`, `Secure` and `SameSite=Lax`. `Secure` is only turned off with `COOKIE_SECURE=false`, for local development over plain HTTP; in production (HTTPS) keep the default. `SESSION_TTL_HOURS` sets the session lifetime (default `168`, 7 days). The guarded Docker deployment supplies both variables from `config/development.env` via the validated configuration loader and requires `COOKIE_SECURE=true`. The backend defaults apply to isolated tests or standalone runs without these variables.
 
 ### Error codes
 

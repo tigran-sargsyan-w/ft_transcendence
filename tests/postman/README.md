@@ -11,19 +11,19 @@ The requests exercise normal traffic, suspicious HTTP payloads, protocol enforce
 ## Prerequisites
 
 1. Start the trusted development stack and confirm it is healthy (`make health`).
-2. Use **Postman Desktop** on a machine that can reach `transcendence.test` on ports **8443** (HTTPS) and, optionally, **8080** (HTTP redirect). On WSL/VS Code, check that the necessary ports are forwarded to the host.
-3. Ensure `transcendence.test` resolves to the appropriate local development host, and **trust the local `mkcert` root CA** in Postman/the operating system. Keep TLS certificate verification enabled.
+2. Use **Postman Desktop** on a machine that can reach the configured domain and HTTPS port (and optionally the HTTP redirect port). Run `python3 -m scripts.dev.configuration` to read the public settings. On WSL/VS Code, check that the necessary ports are forwarded to the host.
+3. Ensure the configured domain resolves to the appropriate local development host, and **trust the local `mkcert` root CA** in Postman/the operating system. Keep TLS certificate verification enabled.
 4. Run these tests **only against your own authorized local development environment**. Do not point the collection at public or production services.
 
 ## Import and run
 
 1. In Postman, select **Import** and choose `waf-security.postman_collection.json`.
-2. Check the collection variables:
+2. Set the collection variables (the imported values intentionally start blank):
 
-   | Variable | Default | Purpose |
+   | Variable | Configured value (no trailing slash) | Purpose |
    | --- | --- | --- |
-   | `base_url` | `https://transcendence.test:8443` | HTTPS endpoint through the WAF |
-   | `http_base_url` | `http://transcendence.test:8080` | Optional HTTP-to-HTTPS redirect test |
+   | `base_url` | `APP_ORIGIN` from the configuration command | HTTPS endpoint through the WAF |
+   | `http_base_url` | `http://DEV_DOMAIN:DEV_HTTP_PORT` using the configured values | Optional HTTP-to-HTTPS redirect test |
 
 3. Select a request and click **Send** to inspect the response and **Test Results**, or use the **Collection Runner** to execute the whole collection **in order**.
 4. For **09 — HTTP redirect**, turn off **automatic redirect following** in Postman for that request/run so the original `308` response is visible.

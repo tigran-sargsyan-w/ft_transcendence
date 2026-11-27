@@ -34,7 +34,7 @@ FRONTEND_HTTP = r"""
 (async () => {
   const get = async (path) => {
     const response = await fetch('http://127.0.0.1:5173' + path, {
-      headers: { Host: 'transcendence.test' },
+      headers: { Host: '__FT_DEV_DOMAIN__' },
       signal: AbortSignal.timeout(7000),
     });
     if (response.status !== 200) throw new Error('HTTP response not 200');
@@ -49,7 +49,7 @@ FRONTEND_HTTP = r"""
   if (health?.data?.status !== 'ok' || health?.data?.database !== 'ok')
     throw new Error('Frontend backend proxy health failed');
 })().catch(() => { process.exitCode = 1; });
-"""
+""".replace("__FT_DEV_DOMAIN__", pg.configuration.load().domain)
 
 
 class FrontendBootstrapError(Exception):

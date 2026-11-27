@@ -68,7 +68,7 @@ Collector also joins. The dedicated Grafana Vault Agent uses
 | `http://prometheus:9090` | Internal application network |
 | `http://grafana:3000/grafana/` | Internal application network |
 | `https://vault:8200` | Private Vault network |
-| `https://transcendence.test:8443/grafana/` | Operator access through Nginx |
+| `https://localhost:8443/grafana/` | Operator access through Nginx |
 
 Neither Grafana nor Prometheus publishes a direct host port.
 The Nginx gateway binds to VM loopback only. Browser access
@@ -302,7 +302,7 @@ password rotation procedure for an existing Grafana database.
 
 Open:
 
-https://transcendence.test:8443/grafana/
+https://localhost:8443/grafana/
 
 Use the `admin` account and the securely provisioned
 Grafana password. The infrastructure operator must provide

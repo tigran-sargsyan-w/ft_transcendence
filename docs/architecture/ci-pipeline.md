@@ -43,15 +43,15 @@ npm --prefix services/collector run build
   docker build -t graph-engine:ci .
 )
 
+FT_DEV_TLS_DIR=/tmp/transcendence-ci-tls \
 POSTGRES_USER=transcendence_ci \
-POSTGRES_PASSWORD=placeholder_for_ci_only \
 POSTGRES_DB=transcendence_ci \
-  docker compose -f compose.yml config --quiet
+  python3 -m scripts.dev.configuration compose -f compose.yml config --quiet
 
+FT_DEV_TLS_DIR=/tmp/transcendence-ci-tls \
 POSTGRES_USER=transcendence_ci \
-POSTGRES_PASSWORD=placeholder_for_ci_only \
 POSTGRES_DB=transcendence_ci \
-  docker compose -f compose.yml config --services | grep -qx graph-engine
+  python3 -m scripts.dev.configuration compose -f compose.yml config --services | grep -qx graph-engine
 ```
 
 ## How to interpret a CI result

@@ -141,7 +141,8 @@ def validate_target():
     # Lock down the published ports and all three read-only bind mounts.
     ports = {(str(p.get("target")), str(p.get("published")), p.get("host_ip"))
              for p in svc.get("ports") or []}
-    if ports != {("8080", "8080", "127.0.0.1"), ("8443", "8443", "127.0.0.1")}:
+    if ports != {("8080", str(nginx.HTTP_PORT), "127.0.0.1"),
+                 ("8443", str(nginx.HTTPS_PORT), "127.0.0.1")}:
         raise UpgradeError("Unexpected WAF published ports")
     expected_mounts = {
         (str(nginx.CONFIG), "/etc/nginx/templates/conf.d/default.conf.template"),
@@ -211,10 +212,11 @@ def snapshot_other_containers():
 
 
 def curl_status(path="/", query=None):
-    url = f"https://{nginx.DOMAIN}:8443{path}"
+    url = nginx.PUBLIC.app_origin + path
     args = ["curl", "-q", "--silent", "--show-error", "--noproxy", "*",
+            *nginx.app_ca_args(),
             "--connect-timeout", "3", "--max-time", "12",
-            "--resolve", f"{nginx.DOMAIN}:8443:127.0.0.1",
+            "--resolve", f"{nginx.DOMAIN}:{nginx.HTTPS_PORT}:127.0.0.1",
             "-o", "/dev/null", "-w", "%{http_code}"]
     if query is not None:
         args += ["-G", "--data-urlencode", query]
@@ -255,7 +257,6 @@ def verify_target():
 
 def read_only_checks():
     command([sys.executable, "-m", "scripts.dev.certificates", "check"], timeout=45)
-    command([sys.executable, "-m", "scripts.dev.ca_trust", "check"], timeout=45)
     if frontend.main(["check"]) != 0:
         raise UpgradeError("Other services not ready; do not upgrade gateway")
     if curl_status("/") != "200" or curl_status("/api/v1/health") != "200":

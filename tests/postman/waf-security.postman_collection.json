@@ -864,7 +864,7 @@
             "method": "GET",
             "header": [],
             "url": "{{http_base_url}}/",
-            "description": "Expected 308 with Location https://transcendence.test:8443/. Follow redirects disabled on this request. If no connection, forward local 8080 via VS Code Ports."
+            "description": "Expected 308 with Location equal to base_url followed by /. Follow redirects disabled on this request. If no connection, forward local 8080 via VS Code Ports."
           },
           "response": [],
           "event": [
@@ -874,7 +874,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"HTTP 308 redirect to HTTPS\", function () { pm.response.to.have.status(308); });",
-                  "pm.test(\"Location points to local HTTPS\", function () { pm.expect(pm.response.headers.get(\"Location\") || \"\").to.include(\"https://transcendence.test:8443/\"); });"
+                  "pm.test(\"Location points to local HTTPS\", function () { pm.expect(pm.response.headers.get(\"Location\") || \"\").to.eql(pm.variables.get(\"base_url\") + \"/\"); });"
                 ]
               }
             }
@@ -892,13 +892,13 @@
   "variable": [
     {
       "key": "base_url",
-      "value": "https://transcendence.test:8443",
+      "value": "",
       "type": "string",
       "description": "Only your own local development WAF HTTPS gateway. Do NOT use production."
     },
     {
       "key": "http_base_url",
-      "value": "http://transcendence.test:8080",
+      "value": "",
       "type": "string",
       "description": "Optional HTTP redirect test; port 8080 must be forwarded."
     }

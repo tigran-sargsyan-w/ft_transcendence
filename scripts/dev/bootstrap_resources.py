@@ -7,8 +7,10 @@ Does not initialize Vault or PostgreSQL. All modifications are explicit via appl
 
 if __package__:
     from . import bootstrap_plan_events as plan_events
+    from . import configuration
 else:
     import bootstrap_plan_events as plan_events
+    import configuration
 
 import argparse
 import json
@@ -103,6 +105,10 @@ def compose_model(project, relative_path):
         "POSTGRES_USER": "transcendence",
         "POSTGRES_DB": "transcendence",
     })
+    try:
+        safe_env.update(configuration.load().public_environment())
+    except configuration.ConfigurationError as exc:
+        raise ResourceError(str(exc)) from None
     output = command([
         "docker", "compose", "--env-file", "/dev/null", "-p", project,
         "-f", str(ROOT / relative_path), "--profile", "*",

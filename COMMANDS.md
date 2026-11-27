@@ -11,7 +11,7 @@
 | --- | --- | --- |
 | `./scripts/install-deps.sh --check` | Verify development prerequisites | No |
 | `./scripts/install-deps.sh` | Install prerequisites (interactive) | Yes: host packages/configuration |
-| `make initialize` | **First-time only** install prerequisites/images and initialize the complete trusted stack | **Yes**: OS/Docker preparation, host, Vault, database, app and monitoring; confirmations required |
+| `make initialize` | **First-time only** install prerequisites/images and initialize the complete trusted stack | **Yes**: OS/Docker preparation, host, Vault, database, app and monitoring; OS authentication may be required, no CA confirmation |
 | `make up` / `make start` | Start/check **existing** trusted containers | Starts stopped containers only |
 | `make recover` | Resume existing sealed Vault using **manual** unseal prompts | Unseals Vault; resumes existing containers |
 | `make health` | Read-only health report, with failing dependency | No |
@@ -19,6 +19,7 @@
 | `make plan` | Read-only inventory and pending setup | No |
 | `make check` | Check **host-side** hostname/Nginx TLS/CA only | No |
 | `make setup` | Configure host-side hostname/Nginx TLS/CA only | Yes: host; **not** a Vault initializer |
+| `make trust-uninstall` | Remove only project-managed application and Vault CA NSS entries on native Ubuntu (explicit confirmations) | Yes: user trust only; preserves CA/key files and system trust |
 | `make acceptance` | Three guarded, non-destructive startup/idempotency runs | May start existing stopped containers; use only on an already healthy VM |
 | `./scripts/bootstrap.sh --help` | Show guarded per-stage checks and maintenance | No |
 
@@ -74,13 +75,15 @@ make health
 
 **Never** paste keys into shell command arguments, environment variables, tickets or chat; do not attempt `vault operator init` on an initialized volume. Recovery never silently recreates missing Docker resources or runs migrations.
 
-Open the UI: **https://transcendence.test:8443** (on the configured VM/browser). Backend health: **https://transcendence.test:8443/api/v1/health**. For a local terminal-only check:
+Print the configured application URL and verify the backend with strict TLS:
 
 ```bash
-curl -k -I https://127.0.0.1:8443
+APP_ORIGIN=$(python3 -m scripts.dev.configuration origin)
+printf '%s\n' "$APP_ORIGIN"
+curl -q --cacert "$(mkcert -CAROOT)/rootCA.pem" "$APP_ORIGIN/api/v1/health"
 ```
 
-`-k` disables TLS verification and is only a local diagnostic fallback; it is not proof that the application's login/WebSocket flow works. The localhost gateway is bound to the VM loopback interface.
+The gateway is bound to the VM loopback interface. A successful health probe is not proof that the login/WebSocket flow works.
 
 ## D. After pulling changes / migrations
 
@@ -124,7 +127,7 @@ make health
 ./scripts/bootstrap.sh --check-grafana-https
 ```
 
-Open Grafana at https://transcendence.test:8443/grafana/
+Open Grafana at the configured application origin followed by `/grafana/`
 using authorized credentials on the configured trusted host.
 
 For initial provisioning, recovery limitations, dashboards
