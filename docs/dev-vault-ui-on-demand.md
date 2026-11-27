@@ -39,6 +39,11 @@ No operation rotates Vault tokens or reinitializes/unseals Vault. Disabling
 HAProxy does not disable the built-in Vault UI on the private network and is
 not a substitute for ACL, authentication, TLS, or secure handling of tokens.
 
+HAProxy allows up to five seconds for active connections to drain on soft-stop
+(`hard-stop-after 5s`), before the guarded ten-second Docker stop deadline.
+Remaining gateway connections may be closed at that limit; Vault itself is not
+stopped. The new configuration takes effect when the gateway starts again.
+
 ## Shared V3 progress (Issue #167)
 
 The three public Makefile commands use the same V3 presentation as

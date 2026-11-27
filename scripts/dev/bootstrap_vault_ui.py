@@ -57,6 +57,8 @@ PRESENTATION = {
 
 EXPECTED_CONFIG = """global
     maxconn 64
+    # Finish soft-stop before the guarded Docker stop timeout (10s).
+    hard-stop-after 5s
 
 defaults
     mode tcp
