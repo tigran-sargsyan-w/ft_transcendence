@@ -1,0 +1,94 @@
+# Nest ↔ Graph Engine smoke
+
+Manual checks that the live analyses path works end to end:
+
+Compose → topology → Nest `POST /api/v1/environments/{id}/analyses` → Graph Engine → results + freshness.
+
+## Prerequisites
+
+- Root `.env` present (copy from `.env.example` if needed).
+- Compose services up: at least `postgres`, `backend`, `collector`, `docker-proxy`, `graph-engine`.
+- Environment id: `env_local_compose` (`ENVIRONMENT_ID` on the collector).
+- Nest reaches the engine via `GRAPH_ENGINE_URL` (`http://graph-engine:8000` in Compose).
+- Host ports for debugging: Nest `127.0.0.1:3000`, Graph Engine `127.0.0.1:8000`, collector `127.0.0.1:3001`.
+
+## Health checks
+
+```bash
+docker compose up -d --build postgres backend collector docker-proxy graph-engine
+
+curl -sS http://127.0.0.1:8000/api/v1/health
+curl -sS http://127.0.0.1:3000/api/v1/health
+```
+
+Both should return a success envelope (not connection refused). If Nest health fails, check `postgres` and backend logs before going further.
+
+## Session (required for analyses)
+
+Analyses need a session cookie (`sid`). Against plain `http://127.0.0.1:3000`, set `COOKIE_SECURE=false` on the backend (Compose does not pass it today; default is secure-only).
+
+```bash
+# once per machine / when the user does not exist yet
+curl -sS -X POST http://127.0.0.1:3000/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"smoke@example.com","password":"smokepass1"}'
+
+curl -sS -c /tmp/iip-smoke.cookies -X POST http://127.0.0.1:3000/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"smoke@example.com","password":"smokepass1"}'
+
+curl -sS -b /tmp/iip-smoke.cookies http://127.0.0.1:3000/api/v1/auth/me
+```
+
+`/auth/me` should return the user. If login succeeds but `/auth/me` is `401`, the cookie was not sent — almost always `COOKIE_SECURE` (browsers are stricter than `curl -b`).
+
+## Analyses: `critical_nodes`
+
+No seeds. Needs a live topology for `env_local_compose`.
+
+```bash
+curl -sS -b /tmp/iip-smoke.cookies \
+  -X POST http://127.0.0.1:3000/api/v1/environments/env_local_compose/analyses \
+  -H 'Content-Type: application/json' \
+  -d '{"analyses":["critical_nodes"]}'
+```
+
+Expect `200` with `data.results.criticalNodes`, plus `topologyRevision` and `freshness` (`current` / `stale` / `unverifiable`).  
+If you get `TOPOLOGY_*` / empty topology errors, the collector path is not ready (Nest/Nathan side, not Graph Engine).
+
+## Analyses: `blast_radius`
+
+Needs `seedNodeIds` that exist in the live topology. Pick one from the previous `critical_nodes` list (example below uses postgres from a local Compose run).
+
+```bash
+curl -sS -b /tmp/iip-smoke.cookies \
+  -X POST http://127.0.0.1:3000/api/v1/environments/env_local_compose/analyses \
+  -H 'Content-Type: application/json' \
+  -d '{"analyses":["blast_radius"],"seedNodeIds":["svc:ft_transcendence:postgres"]}'
+```
+
+Expect `200` with `data.results.blastRadius` (`seedNodeIds`, `affectedNodeIds`, …). The seed itself should appear in `affectedNodeIds` at depth 0.  
+If the seed id is wrong: `VALIDATION_ERROR` on `seedNodeIds`. Re-check ids from `critical_nodes` or the topology snapshot.
+
+## Analyses: `attack_paths`
+
+Needs `seedNodeIds`. Today the engine walks **forward** on `depends_on` only, so seed a service that depends on something (example: backend → postgres). `ext:internet` alone will not walk `exposes` yet.
+
+```bash
+curl -sS -b /tmp/iip-smoke.cookies \
+  -X POST http://127.0.0.1:3000/api/v1/environments/env_local_compose/analyses \
+  -H 'Content-Type: application/json' \
+  -d '{"analyses":["attack_paths"],"seedNodeIds":["svc:ft_transcendence:backend"]}'
+```
+
+Expect `200` with `data.results.attackPaths` (paths with `nodeIds` / edge ids as in the contract).  
+Empty `paths` can still be a valid answer if the seed has no outbound `depends_on`; that is not the same as an engine failure.
+
+## Status / known limits
+
+Verified on a local Compose stack : health → session → `critical_nodes` / `blast_radius` / `attack_paths` with `freshness: current`.
+
+- Seed node ids change with the Compose project name. Copy them from `critical_nodes` (or the topology), do not hard-code foreign examples.
+- `COOKIE_SECURE`: browsers on plain HTTP may drop `sid`, `curl -b` often still works.
+- `attack_paths` / `blast_radius` traversal is still `depends_on`-centric, seeding `ext:internet` does not walk `exposes` yet.
+- This doc is a manual smoke, not a CI `docker compose up` job.
