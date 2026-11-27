@@ -1,11 +1,5 @@
 import { Card, CardHeader, CardTitle, CardContent } from "../ui/card";
-
-const toneClasses = {
-  default: "",
-  danger: "text-severity-sev1",
-  warning: "text-amber-400",
-  success: "text-emerald-400",
-} as const;
+import { toneClasses } from "./statTones";
 
 interface StatCardProps {
   title: string;

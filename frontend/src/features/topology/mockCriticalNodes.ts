@@ -1,59 +1,86 @@
 import type { CriticalNodeRow } from "./types";
 
-// Sorted like the engine: score descending, then id.
-// Reasons follow the engine order: high_betweenness, many_dependents,
-// exposed_to_internet (structural_role and single_node are always alone).
+/**
+ * What the critical_nodes analysis returns for mockTopology
+ * (services/graph-engine/app/critical_nodes.py), joined with the label and
+ * status of each service.
+ *
+ * score = 0.6 × betweenness + 0.4 × dependents / max dependents, on the
+ * depends_on edges only: nginx → frontend, nginx → backend,
+ * frontend → backend, backend → postgres, backend → vault.
+ * - betweenness: backend is on 4 of the 12 shortest paths (1/3), others 0
+ * - dependents: postgres 3, vault 3, backend 2, frontend 1 (max 3)
+ *
+ * Sorted like the engine: score descending, then id. The engine also returns
+ * the host, network, volume and internet nodes (score 0, no reason): left out
+ * here, as a row is a service.
+ */
 export const mockCriticalNodes: CriticalNodeRow[] = [
   {
-    // 3 reasons: the maximum the engine can send
-    id: "svc:demo:api-gateway",
-    label: "api-gateway",
-    status: "healthy",
-    score: 0.91,
-    reasons: ["high_betweenness", "many_dependents", "exposed_to_internet"],
-  },
-  {
-    id: "svc:demo:db",
-    label: "postgres",
-    status: "healthy",
-    score: 0.82,
+    id: "svc:transcendence:backend",
+    label: "backend",
+    status: "degraded",
+    score: 0.4667,
     reasons: ["high_betweenness", "many_dependents"],
   },
   {
-    id: "svc:demo:api",
-    label: "api",
-    status: "degraded",
-    score: 0.64,
-    reasons: ["many_dependents", "exposed_to_internet"],
+    // backend, frontend and nginx fail with it
+    id: "svc:transcendence:postgres",
+    label: "postgres",
+    status: "down",
+    score: 0.4,
+    reasons: ["many_dependents"],
   },
   {
-    id: "svc:demo:cache",
-    label: "redis",
+    id: "svc:transcendence:vault",
+    label: "vault",
     status: "healthy",
     score: 0.4,
     reasons: ["many_dependents"],
   },
   {
-    // Unknown code: the engine may add new ones, the UI needs a fallback label
-    id: "svc:demo:queue",
-    label: "rabbitmq",
-    status: "unknown",
-    score: 0.27,
-    reasons: ["high_betweenness", "single_point_of_failure"],
-  },
-  {
-    id: "svc:demo:worker",
-    label: "worker",
-    status: "down",
-    score: 0.12,
+    // Only nginx depends on it: below the many_dependents threshold (1.5)
+    id: "svc:transcendence:frontend",
+    label: "frontend",
+    status: "healthy",
+    score: 0.1333,
     reasons: ["structural_role"],
   },
   {
+    // Not on any depends_on path; services with no depends_on edge get 0 too
+    id: "svc:transcendence:auth",
+    label: "auth",
+    status: "compromised",
+    score: 0,
+    reasons: [],
+  },
+  {
+    id: "svc:transcendence:collector",
+    label: "collector",
+    status: "down",
+    score: 0,
+    reasons: [],
+  },
+  {
+    id: "svc:transcendence:graph-engine",
+    label: "graph-engine",
+    status: "healthy",
+    score: 0,
+    reasons: [],
+  },
+  {
     // exposed_to_internet is not part of the score: score 0 with a reason
-    id: "svc:demo:nginx",
+    id: "svc:transcendence:nginx",
     label: "nginx",
     status: "healthy",
     score: 0,
     reasons: ["exposed_to_internet"],
+  },
+  {
+    id: "svc:transcendence:redis",
+    label: "redis",
+    status: "unknown",
+    score: 0,
+    reasons: [],
   },
 ];

@@ -12,6 +12,7 @@ import { WelcomeDashboardBanner } from "@/components/WelcomeDashboardBanner";
 import { mockCriticalNodes } from "@/features/topology/mockCriticalNodes";
 import { mockTeam } from "@/features/team/mockTeam";
 import { useAuth } from "@/features/auth/AuthContext";
+import { mockTopology } from "@/features/topology/mockTopology";
 
 export default function Dashboard() {
   const { auth } = useAuth();
@@ -23,13 +24,15 @@ export default function Dashboard() {
       <WelcomeDashboardBanner displayName={displayName} />
       <DashboardIncidentsBanners incidents={mockIncidents} />
       <div className="flex flex-col md:flex-row gap-4">
-        <OpenIncidents /> <ServicesDown /> <ServicesImpacted />
+        <OpenIncidents incidents={mockIncidents} />{" "}
+        <ServicesDown topology={mockTopology} />
+        <ServicesImpacted topology={mockTopology} />
         <ResolvedIncidents />
       </div>
       <div className="flex flex-col md:flex-row gap-4">
         <div className="flex flex-col gap-4 md:w-3/5">
           <ActiveIncidents incidents={mockIncidents} />
-          <ServicesHealth />
+          <ServicesHealth topology={mockTopology} />
         </div>
         <div className="flex flex-col gap-4 md:w-2/5">
           <CriticalNodes criticalNodes={mockCriticalNodes} />

@@ -1,53 +1,58 @@
-import { memo } from 'react'
-import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
+import { memo } from "react";
+import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 
-import type { NodeKind, NodeStatus } from './types'
+import { cn } from "@/lib/utils";
+import type { NodeKind, NodeStatus } from "./types";
 
 export type ServiceNodeData = {
-  label: string
-  kind: NodeKind
-  status: NodeStatus
-}
+  label: string;
+  kind: NodeKind;
+  status: NodeStatus;
+};
 
-export type ServiceFlowNode = Node<ServiceNodeData, 'service'>
+export type ServiceFlowNode = Node<ServiceNodeData, "service">;
 
-function statusColor(status: NodeStatus): string {
-  switch (status) {
-    case 'healthy':
-      return '#2f9e44'
-    case 'degraded':
-      return '#f59f00'
-    case 'down':
-      return '#e03131'
-    case 'compromised':
-      return '#9c36b5'
-    default:
-      return '#868e96'
-  }
-}
+const statusStyles: Record<NodeStatus, { border: string; dot: string }> = {
+  healthy: { border: "border-l-health-healthy", dot: "bg-health-healthy" },
+  degraded: { border: "border-l-health-degraded", dot: "bg-health-degraded" },
+  down: { border: "border-l-health-down", dot: "bg-health-down" },
+  unknown: { border: "border-l-health-unknown", dot: "bg-health-unknown" },
+  compromised: {
+    border: "border-l-health-compromised",
+    dot: "bg-health-compromised",
+  },
+};
 
-function ServiceNodeComponent({ data }: NodeProps<ServiceFlowNode>) {
+function ServiceNodeComponent({ data, selected }: NodeProps<ServiceFlowNode>) {
+  const styles = statusStyles[data.status];
+
   return (
     <div
-      style={{
-        minWidth: 140,
-        padding: '10px 12px',
-        borderRadius: 8,
-        border: '1px solid #ced4da',
-        background: '#fff',
-        fontSize: 12,
-        boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
-      }}
+      className={cn(
+        "min-w-36 rounded-md border border-l-4 border-border bg-muted px-3 py-2 text-xs text-card-foreground shadow-md",
+        styles.border,
+        selected && "ring-2 ring-primary",
+      )}
     >
-      <Handle type="target" position={Position.Left} />
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>{data.label}</div>
-      <div style={{ color: '#495057' }}>{data.kind}</div>
-      <div style={{ marginTop: 6, color: statusColor(data.status) }}>
-        {data.status}
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="opacity-0!"
+        isConnectable={false}
+      />
+      <div className="flex items-center gap-2 font-semibold">
+        <span className={cn("size-2 shrink-0 rounded-full", styles.dot)} />
+        {data.label}
       </div>
-      <Handle type="source" position={Position.Right} />
+      <div className="mt-0.5 text-muted-foreground">{data.status}</div>
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="opacity-0!"
+        isConnectable={false}
+      />
     </div>
-  )
+  );
 }
 
-export const ServiceNode = memo(ServiceNodeComponent)
+export const ServiceNode = memo(ServiceNodeComponent);
