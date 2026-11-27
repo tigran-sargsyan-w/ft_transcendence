@@ -1,0 +1,77 @@
+name: transcendence-prisma-ui-dev
+
+# Optional local operator tool. Neither service belongs to the core stack.
+services:
+  gateway:
+    image: haproxy:3.2.27-alpine
+    user: "99:99"
+    group_add:
+      - "43043"
+    environment:
+      DEV_PRISMA_UI_PORT: ${DEV_PRISMA_UI_PORT:?Validated Prisma UI port required}
+    ports:
+      - "127.0.0.1:${DEV_PRISMA_UI_PORT:?Validated Prisma UI port required}:5556"
+    volumes:
+      - type: bind
+        source: ./haproxy.cfg
+        target: /usr/local/etc/haproxy/haproxy.cfg
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../../nginx/certs
+        target: /etc/haproxy/certs
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - app_private
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+    stop_grace_period: 10s
+
+  studio:
+    # Reuse the deployed backend image, never its default migration command.
+    image: ${FT_PRISMA_BACKEND_IMAGE:?Existing backend image required}
+    pull_policy: never
+    user: "10001:20000"
+    working_dir: /app
+    command: ["/app/node_modules/.bin/prisma", "studio", "--port", "5555", "--browser", "none"]
+    environment:
+      DATABASE_URL_FILE: /run/secrets/backend/database_url
+      HOME: /tmp
+      XDG_CACHE_HOME: /tmp/.cache
+      CHECKPOINT_DISABLE: "1"
+      PRISMA_HIDE_UPDATE_MESSAGE: "1"
+    volumes:
+      - backend_vault_rendered:/run/secrets/backend:ro
+    # Prisma Studio 7.10 binds to loopback. Share only the gateway's network
+    # namespace, not its filesystem, TLS keys or process namespace.
+    network_mode: service:gateway
+    depends_on:
+      - gateway
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+    stop_grace_period: 10s
+
+networks:
+  app_private:
+    external: true
+    name: transcendence-app-dev_default
+
+volumes:
+  backend_vault_rendered:
+    external: true
+    name: transcendence-vault-dev_backend_rendered

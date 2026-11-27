@@ -445,6 +445,12 @@ The expected output is empty.
 
 The guarded Compose configuration publishes only the Nginx HTTP redirect and HTTPS ports on `127.0.0.1` (defaults `8080` and `8443`). Frontend `5173`, backend `3000` and monitoring service ports are internal to Docker networks, not directly published on the host. The optional Vault UI gateway publishes its separate TLS port on loopback (default `8200`) only while enabled.
 
+[Prisma Studio](../dev-prisma-ui-on-demand.md) uses a separate on-demand HAProxy
+HTTPS gateway on loopback (default `5555`, configured by `DEV_PRISMA_UI_PORT`).
+It reuses the application development certificate and CA. Studio itself is
+not published directly; HTTP to Studio stays inside the shared gateway
+network namespace. This endpoint is separate from the Nginx/WAF gateway.
+
 This is still a development configuration, not a production security configuration.
 
 ### HSTS

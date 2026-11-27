@@ -19,7 +19,7 @@ class DevelopmentConfigurationTests(unittest.TestCase):
         self.path = Path(self.temp.name) / "development.env"
         self.sample = (
             "DEV_DOMAIN=transcendence.test\nDEV_HTTP_PORT=8080\n"
-            "DEV_HTTPS_PORT=8443\nDEV_VAULT_UI_PORT=8200\n"
+            "DEV_HTTPS_PORT=8443\nDEV_VAULT_UI_PORT=8200\nDEV_PRISMA_UI_PORT=5555\n"
             "SESSION_TTL_HOURS=168\nCOOKIE_SECURE=true\n"
         )
 
@@ -81,6 +81,8 @@ class DevelopmentConfigurationTests(unittest.TestCase):
         self.assertEqual(config.http_origin, "http://transcendence.test:8080")
         self.assertEqual(config.vault_ui_url, "https://localhost:8200/ui/")
         self.assertEqual(config.session_ttl_hours, 168)
+        self.assertEqual(config.prisma_ui_url, "https://localhost:5555/")
+        self.assertEqual(config.public_environment()["DEV_PRISMA_UI_PORT"], "5555")
 
     def test_localhost_and_changed_ports(self):
         config = self.load(self.sample.replace("transcendence.test", "localhost")
@@ -143,6 +145,13 @@ class DevelopmentConfigurationTests(unittest.TestCase):
     def test_duplicate_ports(self):
         with self.assertRaises(cfg.ConfigurationError):
             self.load(self.sample.replace("=8443", "=8080"))
+
+    def test_prisma_port_validation(self):
+        for value in ("8200", "8443", "8080", "80", "65536", "invalid"):
+            with self.subTest(value=value), self.assertRaises(cfg.ConfigurationError):
+                self.load(self.sample.replace("=5555", "=" + value))
+        self.assertEqual(self.load(self.sample.replace("=5555", "=9555")).prisma_ui_url,
+                         "https://localhost:9555/")
 
     def test_invalid_session_lifetime(self):
         for value in ("0", "-1", "NaN", "1.5", "99999999999999999", "9999999999"):

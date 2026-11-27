@@ -53,6 +53,11 @@ For a **reviewed, explicitly approved** migration (with a database backup), the 
 | `make plan` | Read-only inventory and pending work |
 | `./scripts/bootstrap.sh --help` | List operator-only maintenance steps |
 
+Optional database browsing: `make prisma-ui-enable` opens access to
+Prisma Studio at the configured local HTTPS URL (default `https://localhost:5555/`).
+Use `make prisma-ui-status` to inspect it and `make prisma-ui-disable` when
+finished. See [Prisma Studio administration](dev-prisma-ui-on-demand.md).
+
 **Never use** `docker compose down -v`, `make clean`, `vault operator init`, or arbitrary `docker compose up --force-recreate` to fix a failed startup. Stop and inspect the failing `--check-*` stage first.
 
 **More detail:** [Team command reference](../COMMANDS.md) · [Developer onboarding](dev-getting-started.md) · [Reboot recovery](dev-reboot-recovery.md).

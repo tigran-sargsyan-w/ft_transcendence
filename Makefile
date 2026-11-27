@@ -6,7 +6,8 @@ BOOTSTRAP := ./scripts/bootstrap.sh
 
 .PHONY: up start initialize recover health check-all plan acceptance \
         setup check down clean domain-cleanup cert-cleanup trust-uninstall \
-        vault-ui-enable vault-ui-disable vault-ui-status
+        vault-ui-enable vault-ui-disable vault-ui-status \
+        prisma-ui-enable prisma-ui-disable prisma-ui-status
 
 # Default entry point: use the guarded Vault-only startup, never raw Compose up.
 up start:
@@ -43,6 +44,16 @@ vault-ui-disable:
 
 vault-ui-status:
 	$(PYTHON) scripts/dev/bootstrap_vault_ui.py status --progress
+
+# Optional development database UI; never provisions the database.
+prisma-ui-enable:
+	$(PYTHON) scripts/dev/bootstrap_prisma_ui.py enable
+
+prisma-ui-disable:
+	$(PYTHON) scripts/dev/bootstrap_prisma_ui.py disable
+
+prisma-ui-status:
+	$(PYTHON) scripts/dev/bootstrap_prisma_ui.py status
 
 # Legacy host-only helpers (not a substitute for --initialize).
 setup:
