@@ -68,7 +68,7 @@ def fingerprint(root):
             raise LinuxCAError("Local CA cryptographic validation failed")
         return result.stdout
 
-    openssl("verify", "-check_ss_sig", "-CAfile", str(cert), str(cert))
+    openssl("verify", "-check_ss_sig", "-no-CApath", "-no-CAstore", "-CAfile", str(cert), str(cert))
     constraints = openssl("x509", "-in", str(cert), "-noout", "-ext", "basicConstraints")
     if b"CA:TRUE" not in constraints:
         raise LinuxCAError("Local certificate is not a CA")
@@ -97,6 +97,16 @@ def present(path):
     return path.exists() or path.is_symlink()
 
 
+def verify_record(root, value):
+    marker = root / MARKER
+    if not present(marker):
+        return False
+    safe_file(marker, private=True)
+    if marker.read_text(encoding="ascii") != value + "\n":
+        raise LinuxCAError("Local CA differs from its initialization record")
+    return True
+
+
 def inspect_ca(root):
     cert = root / "rootCA.pem"
     key = root / "rootCA-key.pem"
@@ -108,11 +118,7 @@ def inspect_ca(root):
     if not present(cert) or not present(key):
         raise LinuxCAError("Incomplete local CA; refusing replacement")
     value = fingerprint(root)
-    if present(marker):
-        safe_file(marker, private=True)
-        if marker.read_text(encoding="ascii") != value + "\n":
-            raise LinuxCAError("Local CA differs from its initialization record")
-    elif not ca_trust.check_linux(cert):
+    if not verify_record(root, value) and not ca_trust.check_linux(cert):
         raise LinuxCAError("Unknown untrusted local CA; use explicit host preparation after review")
     return value
 
@@ -146,16 +152,16 @@ def prepare():
     if ca_root() != root:
         raise LinuxCAError("CA location changed during preparation")
     value = fingerprint(root)
-    if previous is None:
-        record_fingerprint(root, value)
-    elif value != previous:
+    if previous is not None and value != previous:
         raise LinuxCAError("CA identity changed during preparation")
+    if not verify_record(root, value):
+        # A fresh CA, or an existing CA already accepted by the legacy guard.
+        record_fingerprint(root, value)
     cert = root / "rootCA.pem"
-    if not ca_trust.check_linux(cert):
-        if inspect_ca(root) != value or ca_trust.install_linux(cert) != 0:
-            raise LinuxCAError("Linux CA trust installation failed")
-        if fingerprint(root) != value:
-            raise LinuxCAError("CA identity changed during trust installation")
+    if inspect_ca(root) != value or ca_trust.install_linux(cert) != 0:
+        raise LinuxCAError("Linux user-level CA trust installation failed")
+    if fingerprint(root) != value:
+        raise LinuxCAError("CA identity changed during trust installation")
     if (domains.DEFAULT_DOMAIN != "localhost"
             and linux_hosts.setup(domains.DEFAULT_DOMAIN, initializing=True) != 0):
         raise LinuxCAError("Linux hosts preparation failed")

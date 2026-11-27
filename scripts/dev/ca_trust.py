@@ -2,12 +2,15 @@
 """Local CA trust management for ft_transcendence."""
 
 import argparse
+import hashlib
 import platform
 import re
+import ssl
 import subprocess
+import tempfile
 from pathlib import Path
 
-from scripts.dev import certificates, domains
+from scripts.dev import certificates, chromium_trust, domains, nss_trust
 
 
 def run(*args: str):
@@ -49,7 +52,7 @@ def check_linux(ca_file: Path) -> bool:
 
     result = run(
         "openssl", "verify",
-        "-CApath", "/etc/ssl/certs",
+        "-no-CAfile", "-no-CAstore", "-CApath", "/etc/ssl/certs",
         str(ca_file),
     )
 
@@ -59,6 +62,125 @@ def check_linux(ca_file: Path) -> bool:
 
     print("[MISSING] Linux OpenSSL: CA not trusted")
     return False
+
+
+def native_review():
+    """Validate application CA identity without trusting ambient system roots."""
+    from scripts.dev import bootstrap_linux_ca as guard
+
+    guard.native_linux()
+    root = guard.ca_root()
+    if not guard.present(root / "rootCA.pem") or not guard.present(root / "rootCA-key.pem"):
+        raise guard.LinuxCAError("Application CA files missing; prepare host first")
+    value = guard.fingerprint(root)
+    recorded = guard.verify_record(root, value)
+    valid, _ = certificates.validate_certificate(root)
+    if not valid:
+        raise guard.LinuxCAError("Application TLS certificate validation failed")
+    return root, value, recorded
+
+
+def native_status(root, recorded):
+    status = chromium_trust.check(root / "rootCA.pem")
+    print("[NSS]", chromium_trust.selected_database())
+    print("Application CA authorization:", "recorded" if recorded else "unrecorded")
+    print("Application CA NSS trust:", status)
+    print("Detected browsers:", ", ".join(chromium_trust.installed_browsers()) or "none")
+    print("Browser HTTPS readiness: requires browser verification")
+    print("[PRESERVED] System CA store")
+    return status
+
+
+def install_reviewed_native(root, value):
+    """Import only the public bytes matching the authorized application CA."""
+    from scripts.dev import bootstrap_linux_ca as guard
+
+    if guard.fingerprint(root) != value or not guard.verify_record(root, value):
+        raise guard.LinuxCAError("Application CA identity changed before import")
+    raw = (root / "rootCA.pem").read_bytes()
+    if hashlib.sha256(raw).hexdigest() != value:
+        raise guard.LinuxCAError("Application CA identity changed before import")
+    with tempfile.TemporaryDirectory(prefix="ft-app-ca-") as directory:
+        public = Path(directory) / "ca.pem"
+        public.write_bytes(raw)
+        return chromium_trust.install(public)
+
+
+def native_operation(action, ca_file=None):
+    """Native Linux trust operations; no privileged or system trust writes."""
+    from scripts.dev import bootstrap_linux_ca as guard
+
+    try:
+        if action in ("uninstall", "uninstall-plan"):
+            # Removal must also work after the leaf expires or is cleaned up.
+            guard.native_linux()
+            root = guard.ca_root()
+            public = root / "rootCA.pem"
+            ca = nss_trust.read_ca(public)
+            path = chromium_trust.selected_database()
+            item = nss_trust.matching(path, ca)
+            print("[NSS]", path)
+            print("[PRESERVED] System CA store, CA files, TLS files and external aliases")
+            if item is None or item.nickname != ca.nickname:
+                print("[OK] No managed application CA entry to remove")
+                return 0
+            if item.trust != nss_trust.TRUST:
+                raise nss_trust.NSSError("Managed CA trust changed; refusing removal")
+            print("[PLAN] Remove managed application CA from selected NSS database")
+            if action == "uninstall-plan":
+                return 0
+            if not confirm_native("Remove this application CA trust from NSS? [y/N]: "):
+                return 1
+            if chromium_trust.selected_database() != path or nss_trust.read_ca(public) != ca:
+                raise nss_trust.NSSError("NSS location or CA changed; review before retrying")
+            with tempfile.TemporaryDirectory(prefix="ft-app-ca-remove-") as directory:
+                snapshot = Path(directory) / "ca.pem"
+                snapshot.write_text(ssl.DER_cert_to_PEM_cert(ca.der), encoding="ascii")
+                print("Operation:", nss_trust.uninstall(path, snapshot))
+            return 0
+
+        root, value, recorded = native_review()
+        public = root / "rootCA.pem"
+        if action == "install":
+            if ca_file != public or not recorded:
+                raise guard.LinuxCAError("Automatic application CA import requires recorded authorization")
+            print("Operation:", install_reviewed_native(root, value))
+        else:
+            status = native_status(root, recorded)
+            if action == "check":
+                return 0 if recorded and status == "trusted" else 1
+            if action == "plan":
+                if not recorded or status != "trusted":
+                    print("[PLAN] Review application CA and configure user-level NSS trust")
+                return 0
+            if recorded and status == "trusted":
+                return 0
+            if status == "untrusted":
+                raise nss_trust.NSSError("Existing CA has unexpected trust; manual review required")
+            print("[CA SHA-256]", nss_trust.read_ca(public).fingerprint)
+            if not confirm_native("Authorize this application CA for user-level NSS trust? [y/N]: "):
+                return 1
+            if native_review() != (root, value, recorded):
+                raise guard.LinuxCAError("Application CA identity changed during authorization")
+            if not recorded:
+                guard.record_fingerprint(root, value)
+            print("Operation:", install_reviewed_native(root, value))
+        if guard.fingerprint(root) != value or not guard.verify_record(root, value):
+            raise guard.LinuxCAError("Application CA identity changed during trust installation")
+        return 0 if native_status(root, True) == "trusted" else 2
+    except (guard.LinuxCAError, nss_trust.NSSError) as exc:
+        print("[ERROR]", exc)
+        return 2
+    except (OSError, ValueError, subprocess.SubprocessError):
+        print("[ERROR] Application CA trust operation failed; manual review required")
+        return 2
+
+
+def confirm_native(prompt):
+    try:
+        return input(prompt).strip().lower() == "y"
+    except EOFError:
+        return False
 
 
 def check_windows(thumbprint: str) -> bool | None:
@@ -108,6 +230,8 @@ def check_windows(thumbprint: str) -> bool | None:
 
 
 def inspect(action: str) -> int:
+    if platform.system() == "Linux" and not domains.is_wsl():
+        return native_operation(action)
     print("[TRUST] Local CA trust management")
 
     system = platform.system()
@@ -191,11 +315,14 @@ def inspect(action: str) -> int:
 
 
 def setup_linux() -> int:
-    """Install local mkcert CA into Linux trust stores."""
+    """Install application CA trust; WSL retains the legacy adapter."""
 
     if platform.system() != "Linux":
         print("[ERROR] Linux trust setup requires Linux")
         return 2
+
+    if not domains.is_wsl():
+        return native_operation("setup")
 
     ca_root = certificates.get_ca_root()
 
@@ -243,6 +370,8 @@ def install_linux(ca_file: Path) -> int:
     if platform.system() != "Linux" or certificates.get_ca_root() != ca_file.parent:
         print("[ERROR] Unexpected Linux CA location")
         return 2
+    if not domains.is_wsl():
+        return native_operation("install", ca_file)
     try:
         result = subprocess.run(
             ["mkcert", "-install"],
@@ -339,6 +468,8 @@ def setup() -> int:
     """Configure CA trust for the current environment."""
 
     system = platform.system()
+    if system == "Linux" and not domains.is_wsl():
+        return setup_linux()
 
     if system not in ("Linux", "Windows"):
         print("[ERROR] Unsupported platform")
@@ -404,6 +535,9 @@ def uninstall_plan() -> int:
         print("[ERROR] Uninstall preview currently supports Linux/WSL")
         return 2
 
+    if not domains.is_wsl():
+        return native_operation("uninstall-plan")
+
     ca_root = certificates.get_ca_root()
 
     if ca_root is None:
@@ -455,11 +589,14 @@ def uninstall_plan() -> int:
 
 
 def uninstall_linux() -> int:
-    """Remove mkcert CA trust from Linux without deleting CA files."""
+    """Remove managed native NSS trust, or legacy WSL trust."""
 
     if platform.system() != "Linux":
         print("[ERROR] Linux trust uninstall requires Linux")
         return 2
+
+    if not domains.is_wsl():
+        return native_operation("uninstall")
 
     ca_root = certificates.get_ca_root()
 
@@ -673,6 +810,8 @@ def uninstall() -> int:
     """Remove CA trust for the current environment."""
 
     system = platform.system()
+    if system == "Linux" and not domains.is_wsl():
+        return uninstall_linux()
 
     if system not in ("Linux", "Windows"):
         print("[ERROR] Unsupported platform")

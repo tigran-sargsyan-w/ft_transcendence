@@ -105,7 +105,7 @@ def validate_certificate(
     # Verify certificate chain and hostname.
     chain = run(
         "verify",
-        "-CAfile", str(ca_root / "rootCA.pem"),
+        "-no-CApath", "-no-CAstore", "-CAfile", str(ca_root / "rootCA.pem"),
         "-purpose", "sslserver",
         "-verify_hostname", domain,
         str(cert_file),

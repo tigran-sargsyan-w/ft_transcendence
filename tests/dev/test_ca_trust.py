@@ -140,8 +140,9 @@ class UnifiedCATrustTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
 
-        self.check_linux.assert_called_once()
+        self.check_linux.assert_not_called()
         self.check_windows.assert_not_called()
+        self.setup_linux.assert_called_once_with()
         self.setup_windows.assert_not_called()
 
     def test_native_windows_skips_linux(self):

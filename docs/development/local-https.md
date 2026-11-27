@@ -117,6 +117,10 @@ Expected backend response:
 }
 ```
 
+On native Ubuntu, application CA trust is installed in the current user's shared Chromium NSS database, not the operating-system trust store. Chrome, Edge and Opera use the same store in the tested versions. The adapter selects an existing `~/.pki/nssdb` first, otherwise `${XDG_DATA_HOME:-$HOME/.local/share}/pki/nssdb`. It does not create a legacy database, install browsers or modify Firefox profiles. NSS trust is verified separately from browser compatibility; if no browser is installed, browser readiness remains unverified.
+
+For an existing deployment with an unrecorded CA, review its fingerprint and run `python3 -m scripts.dev.ca_trust setup` as the ordinary user to authorize it. A changed authorization record is refused. No sudo is needed for this operation. Already installed system trust is preserved.
+
 The browser should accept the development certificate without a certificate warning once the relevant CA trust has been installed.
 
 If a browser was open before trust installation, restart it if necessary.
@@ -156,7 +160,7 @@ The reverse proxy also forwards appropriate HTTP headers, including `Host`, `X-F
 | `make clean` | Remove Compose containers and networks, preserving named volumes |
 | `make domain-cleanup` | Remove managed hosts entries with confirmation |
 | `make cert-cleanup` | Remove project TLS certificate and private key with confirmation |
-| `make trust-uninstall` | Remove local mkcert CA trust with confirmation |
+| `make trust-uninstall` | Remove managed application CA trust with confirmation |
 
 `make check` validates the local domain and TLS prerequisites. It does not replace Docker container health checks or application endpoint tests.
 
@@ -361,7 +365,9 @@ New project certificates will be generated using the existing local CA.
 make trust-uninstall
 ```
 
-On WSL2, Linux and Windows trust removal require independent confirmation.
+On native Ubuntu, removal targets only the matching project-managed application CA in the selected NSS database. System CA trust, third-party aliases, other stores and CA/key files are preserved. Removal from NSS does not guarantee that a browser no longer trusts the CA through another mechanism.
+
+On WSL2, the legacy Linux and Windows trust removal adapters still require independent confirmation.
 
 The Windows helper removes the matching CA from `CurrentUser\Root`; it preserves `LocalMachine\Root`.
 
