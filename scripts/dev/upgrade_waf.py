@@ -214,6 +214,7 @@ def snapshot_other_containers():
 def curl_status(path="/", query=None):
     url = nginx.PUBLIC.app_origin + path
     args = ["curl", "-q", "--silent", "--show-error", "--noproxy", "*",
+            *nginx.app_ca_args(),
             "--connect-timeout", "3", "--max-time", "12",
             "--resolve", f"{nginx.DOMAIN}:{nginx.HTTPS_PORT}:127.0.0.1",
             "-o", "/dev/null", "-w", "%{http_code}"]
@@ -256,7 +257,6 @@ def verify_target():
 
 def read_only_checks():
     command([sys.executable, "-m", "scripts.dev.certificates", "check"], timeout=45)
-    command([sys.executable, "-m", "scripts.dev.ca_trust", "check"], timeout=45)
     if frontend.main(["check"]) != 0:
         raise UpgradeError("Other services not ready; do not upgrade gateway")
     if curl_status("/") != "200" or curl_status("/api/v1/health") != "200":

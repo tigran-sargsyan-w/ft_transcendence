@@ -115,7 +115,7 @@ Expected: `db`, `api`, and `web` all eventually report `healthy`.
 **Terminal B** — observe the actual authenticated backend topology and analyses:
 
 ```bash
-node backend/scripts/demo-watch.mjs --analyze
+make demo-watch
 ```
 
 The watcher prompts for demo-account email and password, logs in over HTTPS, connects to Socket.IO using the session cookie, then prints only Demo Lab service nodes by default. `--analyze` requests the backend's real `blast_radius` + `critical_nodes` analyses on `degraded`/`down` transitions. Adding/removing `worker` also prints its real `depends_on` edge update; no analysis is automatically triggered for a newly healthy node.

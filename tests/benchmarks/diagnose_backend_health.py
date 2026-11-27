@@ -13,7 +13,7 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scripts.dev import configuration
+from scripts.dev import certificates, configuration
 
 PUBLIC = configuration.load()
 NAME = "transcendence-app-dev-backend-1"
@@ -46,6 +46,8 @@ CASES = (
 def probe(name, argv, timeout):
     started = time.perf_counter()
     try:
+        if name == "https-nginx":
+            argv = [*argv[:2], *certificates.curl_ca_args(), *argv[2:]]
         result = subprocess.run(
             argv, check=False, timeout=timeout,
             stdout=subprocess.PIPE if name == "https-nginx" else subprocess.DEVNULL,
@@ -56,6 +58,8 @@ def probe(name, argv, timeout):
             status = "HTTP_NOT_200"
         else:
             status = "PASS" if code == 0 else f"EXIT_{code}"
+    except certificates.LocalCAError:
+        status = "CA_UNAVAILABLE"
     except subprocess.TimeoutExpired:
         status = "TIMEOUT"
     except OSError:

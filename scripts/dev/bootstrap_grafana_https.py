@@ -114,6 +114,7 @@ def request(path, *, query=None):
         "curl", "-q",
         "--silent", "--show-error",
         "--noproxy", "*",
+        *nginx.app_ca_args(),
         "--connect-timeout", "3",
         "--max-time", "12",
         "--resolve", f"{nginx.DOMAIN}:{nginx.HTTPS_PORT}:127.0.0.1",

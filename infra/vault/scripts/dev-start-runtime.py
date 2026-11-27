@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-from scripts.dev import configuration
+from scripts.dev import certificates, configuration
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dev_migration_audit import audit_migrations, MigrationAuditError
 APP = "transcendence-app-dev"
@@ -338,6 +338,10 @@ def verify_vault():
 def wait_https_route(suffix, attempts=20, delay=2):
     """Wait for reverse-proxy HTTP readiness without response bodies."""
     public = configuration.load()
+    try:
+        ca_args = certificates.curl_ca_args()
+    except certificates.LocalCAError as exc:
+        raise StartupError(str(exc)) from None
     last_status = "unavailable"
 
     for attempt in range(attempts):
@@ -348,6 +352,7 @@ def wait_https_route(suffix, attempts=20, delay=2):
                     "-q",
                     "--silent",
                     "--noproxy", "*",
+                    *ca_args,
                     "--connect-timeout", "3",
                     "--max-time", "8",
                     "--resolve",

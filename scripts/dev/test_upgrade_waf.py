@@ -41,6 +41,16 @@ def legacy_fixture():
 
 
 class UpgradeWAFTests(unittest.TestCase):
+    def test_https_status_uses_application_ca(self):
+        with patch.object(nginx.certificates, "curl_ca_args", return_value=["--cacert", "/test/rootCA.pem"]), \
+             patch.object(upgr, "command", return_value=b"200") as command:
+            self.assertEqual(upgr.curl_status(), "200")
+        args = command.call_args.args[0]
+        self.assertEqual(args[:2], ["curl", "-q"])
+        self.assertEqual(args[args.index("--cacert") + 1], "/test/rootCA.pem")
+        self.assertNotIn("--insecure", args)
+        self.assertNotIn("-k", args)
+
     def test_already_waf_is_idempotent(self):
         with tempfile.TemporaryDirectory() as root:
             lock = Path(root) / 'lock'

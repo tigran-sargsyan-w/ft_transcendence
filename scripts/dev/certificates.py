@@ -50,6 +50,24 @@ def get_ca_root() -> Path | None:
     return Path(path)
 
 
+class LocalCAError(ValueError):
+    """The explicit application CA is not available for a TLS probe."""
+
+
+def curl_ca_args() -> list[str]:
+    """Use the public mkcert CA, never the CA private key or an insecure flag."""
+    try:
+        root = get_ca_root()
+        if root is None or not root.is_absolute():
+            raise LocalCAError("Application CA directory unavailable")
+        cert = root / "rootCA.pem"
+        if cert.is_symlink() or not cert.is_file() or cert.stat().st_size == 0:
+            raise LocalCAError("Application CA certificate unavailable or unsafe")
+    except OSError:
+        raise LocalCAError("Cannot access application CA certificate") from None
+    return ["--cacert", str(cert)]
+
+
 def validate_certificate(
     ca_root: Path,
     domain: str = DEFAULT_DOMAIN,

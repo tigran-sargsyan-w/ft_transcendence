@@ -133,7 +133,9 @@ demo-down:
 # By default show real Graph Engine summaries; EMAIL skips the email prompt.
 # Passwords are still entered interactively and are never passed as arguments.
 demo-watch:
-	@if [ -n "$$EMAIL" ]; then \
+	@ca_root=$$(mkcert -CAROOT) && [ -n "$$ca_root" ] && [ -s "$$ca_root/rootCA.pem" ] || { echo "ERROR: Application CA unavailable" >&2; exit 1; }; \
+	export NODE_EXTRA_CA_CERTS="$$ca_root/rootCA.pem"; \
+	if [ -n "$$EMAIL" ]; then \
 		node $(DEMO_WATCH) --analyze --email "$$EMAIL"; \
 	else \
 		node $(DEMO_WATCH) --analyze; \
@@ -141,7 +143,9 @@ demo-watch:
 
 # Plain Socket.IO observation, useful when testing two independent sessions.
 demo-watch-plain:
-	@if [ -n "$$EMAIL" ]; then \
+	@ca_root=$$(mkcert -CAROOT) && [ -n "$$ca_root" ] && [ -s "$$ca_root/rootCA.pem" ] || { echo "ERROR: Application CA unavailable" >&2; exit 1; }; \
+	export NODE_EXTRA_CA_CERTS="$$ca_root/rootCA.pem"; \
+	if [ -n "$$EMAIL" ]; then \
 		node $(DEMO_WATCH) --email "$$EMAIL"; \
 	else \
 		node $(DEMO_WATCH); \

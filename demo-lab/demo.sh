@@ -31,7 +31,7 @@ Usage: ./demo-lab/demo.sh <command> [service]
   down                Remove only ft-demo-lab containers + its network (no volumes)
   help                Show this help
 
-Monitor: node backend/scripts/demo-watch.mjs --analyze
+Monitor: make demo-watch
 All changes are scoped to the ft-demo-lab Docker Compose project.
 HELP
 }

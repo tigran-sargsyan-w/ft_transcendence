@@ -201,8 +201,13 @@ https://localhost:8443/api/v1/health?test=1
 
 ### 6.5 Check HTTPS frontend
 
+CLI HTTPS checks use the public application CA explicitly. They do not require
+installation of that CA into the OS trust store. Browser trust is a separate
+concern. The demo observer's `make demo-watch` and `make demo-watch-plain`
+targets provide `NODE_EXTRA_CA_CERTS` at Node startup for HTTPS and Socket.IO.
+
 ```bash
-curl -sS -o /dev/null \
+curl -q --cacert "$(mkcert -CAROOT)/rootCA.pem" -sS -o /dev/null \
   -w 'HTTP: %{http_code}, TLS verification: %{ssl_verify_result}\n' \
   https://localhost:8443/
 ```
@@ -214,7 +219,7 @@ Do not use `curl -k` or `--insecure` for normal verification, since bypassing ce
 ### 6.6 Check HTTPS backend
 
 ```bash
-curl -sS -i \
+curl -q --cacert "$(mkcert -CAROOT)/rootCA.pem" -sS -i \
   https://localhost:8443/api/v1/health
 ```
 
@@ -223,7 +228,7 @@ Expected: HTTP `200` with the backend health response.
 For an invalid API path, use:
 
 ```bash
-curl -sS -i \
+curl -q --cacert "$(mkcert -CAROOT)/rootCA.pem" -sS -i \
   https://localhost:8443/api/v1/nonexistent
 ```
 
@@ -235,6 +240,8 @@ The application should handle the invalid route rather than returning an Nginx u
 openssl s_client \
   -connect localhost:8443 \
   -servername localhost \
+  -CAfile "$(mkcert -CAROOT)/rootCA.pem" \
+  -verify_hostname localhost \
   -verify_return_error \
   -brief </dev/null
 ```

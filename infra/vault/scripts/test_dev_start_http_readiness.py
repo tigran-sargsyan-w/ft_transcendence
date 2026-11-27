@@ -10,6 +10,11 @@ spec.loader.exec_module(startup)
 
 
 class HTTPReadinessTests(unittest.TestCase):
+    def setUp(self):
+        mock = patch.object(startup.certificates, "curl_ca_args", return_value=["--cacert", "/test/rootCA.pem"])
+        mock.start()
+        self.addCleanup(mock.stop)
+
 
     @patch.object(startup.time, "sleep")
     @patch.object(startup, "execute")
@@ -46,6 +51,7 @@ class HTTPReadinessTests(unittest.TestCase):
         self.assertNotIn("--insecure", command)
         self.assertNotIn("-k", command)
         self.assertIn("--noproxy", command)
+        self.assertEqual(command[command.index("--cacert") + 1], "/test/rootCA.pem")
         self.assertIn(
             startup.configuration.load().health_url,
             command,

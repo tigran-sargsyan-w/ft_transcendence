@@ -12,6 +12,11 @@ spec.loader.exec_module(mod)
 
 
 class DiagnosisTests(unittest.TestCase):
+    def setUp(self):
+        mock = patch.object(mod.certificates, "curl_ca_args", return_value=["--cacert", "/test/rootCA.pem"])
+        mock.start()
+        self.addCleanup(mock.stop)
+
     def test_commands_are_fixed_read_only(self):
         self.assertEqual(len(mod.CASES), 3)
         self.assertEqual(mod.CASES[0][1][1], "-q")
@@ -29,6 +34,15 @@ class DiagnosisTests(unittest.TestCase):
             run.return_value = subprocess.CompletedProcess([], 0, stdout=b"503", stderr=b"")
             _, status = mod.probe("https-nginx", mod.CASES[0][1], 12)
         self.assertEqual(status, "HTTP_NOT_200")
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[argv.index("--cacert") + 1], "/test/rootCA.pem")
+
+    def test_missing_ca_is_reported_without_request(self):
+        with patch.object(mod.certificates, "curl_ca_args", side_effect=mod.certificates.LocalCAError("missing")), \
+             patch.object(mod.subprocess, "run") as run:
+            _, status = mod.probe("https-nginx", mod.CASES[0][1], 12)
+        self.assertEqual(status, "CA_UNAVAILABLE")
+        run.assert_not_called()
 
     def test_success(self):
         with patch.object(mod.subprocess, "run") as run:

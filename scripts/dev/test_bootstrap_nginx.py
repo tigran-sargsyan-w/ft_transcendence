@@ -3,7 +3,9 @@
 import contextlib
 import io
 import json
+import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -68,7 +70,28 @@ class PublicEndpointRenderingTests(unittest.TestCase):
         self.assertNotIn("${DEV_", config)
 
 
+class DirectEntryPointTests(unittest.TestCase):
+    def test_https_helpers_start_without_pythonpath(self):
+        env = os.environ.copy()
+        env.pop("PYTHONPATH", None)
+        for script in ("bootstrap_nginx.py", "bootstrap_grafana_https.py",
+                       "upgrade_waf.py", "verify_grafana_datasource.py"):
+            with self.subTest(script=script):
+                result = subprocess.run(
+                    [sys.executable, str(nginx.pg.ROOT / "scripts/dev" / script), "--help"],
+                    cwd=nginx.pg.ROOT, env=env, capture_output=True, text=True,
+                    timeout=15, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("usage:", result.stdout.lower())
+
+
 class NginxTests(unittest.TestCase):
+    def setUp(self):
+        mock = patch.object(nginx.certificates, "curl_ca_args", return_value=["--cacert", "/test/rootCA.pem"])
+        mock.start()
+        self.addCleanup(mock.stop)
+
     def test_valid_container(self):
         nginx.verify_identity(fixture())
 
@@ -216,13 +239,17 @@ class NginxTests(unittest.TestCase):
         self.assertTrue(nginx.running(fixture()))
         self.assertFalse(nginx.running(fixture("exited")))
 
-    def test_tls_checks_existing_cert_and_trust_only(self):
+    def test_tls_checks_existing_cert_without_system_trust(self):
         with patch.object(nginx, "run") as cmd:
             nginx.check_local_tls()
-            self.assertEqual(cmd.call_count, 2)
-            self.assertIn("scripts.dev.certificates", cmd.call_args_list[0].args[0])
-            self.assertIn("scripts.dev.ca_trust", cmd.call_args_list[1].args[0])
-            self.assertNotIn("setup", str(cmd.call_args_list))
+            cmd.assert_called_once_with([nginx.sys.executable, "-m", "scripts.dev.certificates", "check"], timeout=45)
+
+    def test_missing_ca_prevents_https_request(self):
+        with patch.object(nginx.certificates, "curl_ca_args", side_effect=nginx.certificates.LocalCAError("missing CA")), \
+             patch.object(nginx, "run") as cmd:
+            with self.assertRaises(nginx.NginxBootstrapError):
+                nginx.curl_bytes(nginx.PUBLIC.app_origin, port=nginx.HTTPS_PORT, path="/")
+            cmd.assert_not_called()
 
     def test_https_probes_and_redirect(self):
         with patch.object(nginx, "run", side_effect=responses()) as cmd:
@@ -235,6 +262,10 @@ class NginxTests(unittest.TestCase):
                 self.assertNotIn("-k", args)
                 self.assertIn("--noproxy", args)
                 self.assertIn("--resolve", args)
+            for call in cmd.call_args_list[1:4]:
+                args = call.args[0]
+                self.assertEqual(args[args.index("--cacert") + 1], "/test/rootCA.pem")
+            self.assertNotIn("--cacert", cmd.call_args_list[4].args[0])
 
     def test_rejects_bad_html(self):
         samples = responses(); samples[1] = b"404\n404"

@@ -26,6 +26,12 @@ import bootstrap_postgres as pg
 import bootstrap_support_services as support
 import nginx_tls_access as tls_access
 
+# Direct script entry points (including bootstrap.sh) do not set PYTHONPATH.
+# Resolve the package from the repository, just as other runtime helpers do.
+if str(pg.ROOT) not in sys.path:
+    sys.path.insert(0, str(pg.ROOT))
+from scripts.dev import certificates
+
 NAME = f"{pg.PROJECT}-nginx-1"
 SERVICE = "nginx"
 IMAGE = "owasp/modsecurity-crs:4.30.0-nginx-202611090911"
@@ -135,17 +141,24 @@ def running(item):
 
 
 def check_local_tls():
-    # Existing Phase 1 checks SAN, key matching, expiry and OS trust. Their
-    # output is withheld; nothing is generated or installed in this phase.
+    # Check the local certificate chain, SAN, key matching and expiry.
+    # Browser/OS trust is separate; no trust-store mutation in this phase.
     run([sys.executable, "-m", "scripts.dev.certificates", "check"], timeout=45)
-    run([sys.executable, "-m", "scripts.dev.ca_trust", "check"], timeout=45)
+
+
+def app_ca_args():
+    try:
+        return certificates.curl_ca_args()
+    except certificates.LocalCAError as exc:
+        raise NginxBootstrapError(str(exc)) from None
 
 
 def curl_bytes(url, *, port, path, timeout=12):
     # -q MUST be curl's first argument: ignore operator ~/.curlrc entirely.
-    # Never use -k/--insecure: require the local mkcert CA to be trusted.
+    # Verify HTTPS using the explicit public application CA, without OS trust.
     raw = run([
         "curl", "-q", "--silent", "--show-error", "--noproxy", "*",
+        *app_ca_args(),
         "--connect-timeout", "3", "--max-time", str(timeout),
         "--resolve", f"{DOMAIN}:{port}:127.0.0.1",
         "--write-out", "\n%{http_code}", url + path,
