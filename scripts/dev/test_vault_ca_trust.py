@@ -166,6 +166,52 @@ class VaultCATests(unittest.TestCase):
             trust.install()
         self.assertFalse(self.db.exists())
 
+    def test_automatic_import_requires_authorization_even_when_nss_trusted(self):
+        chromium_trust.install(self.ca)
+        marker = self.key.parent / trust.MARKER
+        with self.assertRaisesRegex(nss.NSSError, 'authorization missing'):
+            trust.install(require_authorized=True)
+        with self.assertRaisesRegex(nss.NSSError, 'authorization missing'):
+            trust.check(require_authorized=True)
+        self.assertFalse(marker.exists())
+        self.assertEqual(trust.install(), 'unchanged')
+        self.assertEqual(marker.stat().st_mode & 0o777, 0o600)
+        before = marker.stat().st_mtime_ns
+        self.assertEqual(trust.install(require_authorized=True), 'unchanged')
+        self.assertEqual(trust.check(require_authorized=True), 'trusted')
+        self.assertEqual(marker.stat().st_mtime_ns, before)
+
+    def test_authorized_ca_can_be_imported_into_fresh_database(self):
+        self.assertEqual(trust.install(), 'installed')
+        shutil.rmtree(self.db)
+        self.assertEqual(trust.check(require_authorized=True), 'missing')
+        self.assertFalse(self.db.exists())
+        self.assertEqual(trust.install(require_authorized=True), 'installed')
+
+    def test_mismatched_authorization_is_never_replaced(self):
+        marker = self.key.parent / trust.MARKER
+        marker.write_text('0' * 64 + '\n')
+        marker.chmod(0o600)
+        before = marker.read_bytes()
+        for operation in (trust.check, trust.install,
+                          lambda: trust.install(require_authorized=True)):
+            with self.assertRaisesRegex(nss.NSSError, 'differs'):
+                operation()
+        self.assertEqual(marker.read_bytes(), before)
+        self.assertFalse(self.db.exists())
+
+    def test_unsafe_authorization_record_is_refused(self):
+        marker = self.key.parent / trust.MARKER
+        marker.symlink_to(self.ca)
+        with self.assertRaises(nss.NSSError):
+            trust.install()
+        marker.unlink()
+        marker.write_text('0' * 64 + '\n')
+        marker.chmod(0o644)
+        with self.assertRaises(nss.NSSError):
+            trust.install()
+        self.assertFalse(self.db.exists())
+
     def test_cli_requires_explicit_apply(self):
         with self.assertRaises(SystemExit) as ctx:
             trust.main(['setup'])

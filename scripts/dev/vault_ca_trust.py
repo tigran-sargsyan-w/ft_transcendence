@@ -3,7 +3,7 @@
 No Docker operations, system trust changes, key permission changes or TLS
 regeneration. The operator authorizes setup; validation is not proof of the
 historical origin of an already existing CA. Automatic bootstrap integration
-must separately authorize newly generated or previously recorded CA material.
+may only import newly generated or previously authorized CA material.
 """
 import argparse
 from contextlib import contextmanager
@@ -13,6 +13,8 @@ import ssl
 import tempfile
 
 from scripts.dev import chromium_trust, nss_trust as nss
+
+MARKER = ".ft-transcendence-vault-ca.sha256"
 
 
 def owned_path(path, *, directory=False, private=False, allow_root_owner=False):
@@ -88,13 +90,49 @@ def reviewed_ca():
         raise nss.NSSError("Vault CA or TLS material missing or unsafe") from None
 
 
-def check():
-    with reviewed_ca() as (public, _):
+def authorization(fingerprint, *, record=False, required=False):
+    """Pin the reviewed CA identity; never replace an existing record.
+
+    The record protects against accidental drift, not a malicious account owner.
+    Only an explicit operator action or guarded fresh generation may record it.
+    """
+    marker = material_paths()[2].parent / MARKER
+    expected = (fingerprint + "\n").encode("ascii")
+    try:
+        owned_path(marker.parent, directory=True)
+        if not marker.exists() and not marker.is_symlink():
+            if not record:
+                if required:
+                    raise nss.NSSError("Vault CA authorization missing; review and run setup --apply")
+                return "unrecorded"
+            fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(expected)
+                stream.flush()
+                os.fsync(stream.fileno())
+            fd = os.open(marker.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        owned_path(marker, private=True)
+        if marker.lstat().st_size != len(expected) or marker.read_bytes() != expected:
+            raise nss.NSSError("Vault CA differs from its authorization record; manual review required")
+        return "recorded"
+    except OSError:
+        raise nss.NSSError("Cannot safely access Vault CA authorization record") from None
+
+
+def check(*, require_authorized=False):
+    with reviewed_ca() as (public, fingerprint):
+        authorization(fingerprint, required=require_authorized)
         return chromium_trust.check(public)
 
 
-def install():
-    with reviewed_ca() as (public, _):
+def install(*, require_authorized=False):
+    """Explicitly authorized setup, or automatic import of a pinned CA only."""
+    with reviewed_ca() as (public, fingerprint):
+        authorization(fingerprint, record=not require_authorized, required=require_authorized)
         return chromium_trust.install(public)
 
 
@@ -108,6 +146,8 @@ def main(argv=None):
     try:
         with reviewed_ca() as (public, fingerprint):
             print('Vault CA SHA-256:', fingerprint)
+            status = authorization(fingerprint, record=args.action == 'setup')
+            print('Vault CA authorization:', status)
             if args.action == 'setup':
                 print('Operation:', chromium_trust.install(public))
             status = chromium_trust.check(public)
