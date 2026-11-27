@@ -536,7 +536,9 @@ def uninstall_plan() -> int:
         return 2
 
     if not domains.is_wsl():
-        return native_operation("uninstall-plan")
+        from scripts.dev import vault_ca_trust
+        result = native_operation("uninstall-plan")
+        return result or vault_ca_trust.main(["uninstall-plan"])
 
     ca_root = certificates.get_ca_root()
 
@@ -811,7 +813,14 @@ def uninstall() -> int:
 
     system = platform.system()
     if system == "Linux" and not domains.is_wsl():
-        return uninstall_linux()
+        from scripts.dev import vault_ca_trust
+        # Review Vault removal before touching either entry. Each actual removal
+        # requires explicit confirmation; refusal can leave partial removal.
+        result = vault_ca_trust.main(["uninstall-plan"])
+        if result:
+            return result
+        result = uninstall_linux()
+        return result or vault_ca_trust.main(["uninstall"])
 
     if system not in ("Linux", "Windows"):
         print("[ERROR] Unsupported platform")

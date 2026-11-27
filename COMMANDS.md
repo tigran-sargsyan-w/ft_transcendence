@@ -11,7 +11,7 @@
 | --- | --- | --- |
 | `./scripts/install-deps.sh --check` | Verify development prerequisites | No |
 | `./scripts/install-deps.sh` | Install prerequisites (interactive) | Yes: host packages/configuration |
-| `make initialize` | **First-time only** install prerequisites/images and initialize the complete trusted stack | **Yes**: OS/Docker preparation, host, Vault, database, app and monitoring; confirmations required |
+| `make initialize` | **First-time only** install prerequisites/images and initialize the complete trusted stack | **Yes**: OS/Docker preparation, host, Vault, database, app and monitoring; OS authentication may be required, no CA confirmation |
 | `make up` / `make start` | Start/check **existing** trusted containers | Starts stopped containers only |
 | `make recover` | Resume existing sealed Vault using **manual** unseal prompts | Unseals Vault; resumes existing containers |
 | `make health` | Read-only health report, with failing dependency | No |
@@ -19,6 +19,7 @@
 | `make plan` | Read-only inventory and pending setup | No |
 | `make check` | Check **host-side** hostname/Nginx TLS/CA only | No |
 | `make setup` | Configure host-side hostname/Nginx TLS/CA only | Yes: host; **not** a Vault initializer |
+| `make trust-uninstall` | Remove only project-managed application and Vault CA NSS entries on native Ubuntu (explicit confirmations) | Yes: user trust only; preserves CA/key files and system trust |
 | `make acceptance` | Three guarded, non-destructive startup/idempotency runs | May start existing stopped containers; use only on an already healthy VM |
 | `./scripts/bootstrap.sh --help` | Show guarded per-stage checks and maintenance | No |
 

@@ -19,7 +19,7 @@ class VaultCATests(unittest.TestCase):
         cls.addClassCleanup(temp.cleanup)
         cls.root = Path(temp.name)
         cls.fixture = cls.root / 'fixture'
-        cls.fixture.mkdir()
+        cls.fixture.mkdir(mode=0o700)
         root = Path(__file__).resolve().parents[2]
         env = {**os.environ, 'HOME': str(cls.fixture), 'XDG_STATE_HOME': '', 'XDG_DATA_HOME': ''}
         env.update(XDG_STATE_HOME=str(cls.fixture / '.local/state'),
@@ -32,6 +32,7 @@ class VaultCATests(unittest.TestCase):
                         '-subj', '/CN=Application test CA', '-addext', 'basicConstraints=critical,CA:TRUE',
                         '-keyout', str(cls.root / 'other.key'), '-out', str(cls.other)],
                        check=True, capture_output=True, timeout=20)
+        cls.other.chmod(0o644)
 
     def setUp(self):
         temp = tempfile.TemporaryDirectory(dir=self.root)
@@ -211,6 +212,79 @@ class VaultCATests(unittest.TestCase):
         with self.assertRaises(nss.NSSError):
             trust.install()
         self.assertFalse(self.db.exists())
+
+    def test_fresh_prepare_generates_pins_and_imports_without_confirmation(self):
+        # Only disposable fixture material is removed. Run the actual TLS generator.
+        shutil.rmtree(self.home / '.local')
+        self.assertFalse(trust.preflight())
+        self.assertFalse(self.db.exists())
+        with patch('builtins.input', side_effect=AssertionError('unexpected confirmation')):
+            self.assertEqual(trust.prepare(), 'installed')
+            files = (*trust.material_paths(), self.leaf.with_suffix('.key'), self.key.parent / trust.MARKER)
+            before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in files}
+            self.assertTrue(trust.preflight())
+            with patch.object(trust.subprocess, 'run', wraps=subprocess.run) as run:
+                self.assertEqual(trust.prepare(), 'unchanged')
+            self.assertFalse(any(call.args[0][0] == 'bash' for call in run.call_args_list))
+        self.assertEqual(before, {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in files})
+        self.assertEqual(trust.check(require_authorized=True), 'trusted')
+
+    def test_prepare_does_not_adopt_unknown_ca_even_if_trusted(self):
+        chromium_trust.install(self.ca)
+        marker = self.key.parent / trust.MARKER
+        with self.assertRaisesRegex(nss.NSSError, 'authorization missing'):
+            trust.prepare()
+        self.assertFalse(marker.exists())
+        self.assertEqual(trust.main(['check-authorized']), 2)
+
+    def test_prepare_refuses_partial_and_orphaned_material(self):
+        self.leaf.unlink()
+        with self.assertRaisesRegex(nss.NSSError, 'Incomplete'):
+            trust.prepare()
+        shutil.rmtree(self.home / '.local/state')
+        self.key.unlink()
+        marker = self.key.parent / trust.MARKER
+        marker.write_text('0' * 64 + '\n')
+        marker.chmod(0o600)
+        with self.assertRaisesRegex(nss.NSSError, 'authorization exists without'):
+            trust.prepare()
+        self.assertFalse(self.ca.exists())
+        self.assertFalse(self.db.exists())
+
+    def test_prepare_refuses_symlink_in_missing_tls_parent(self):
+        shutil.rmtree(self.home / '.local/state')
+        (self.home / '.local/state').symlink_to(self.home / '.local/share', target_is_directory=True)
+        with self.assertRaises(nss.NSSError):
+            trust.prepare()
+        self.assertFalse(self.db.exists())
+
+    def test_remove_only_managed_vault_ca_and_preserve_files(self):
+        chromium_trust.install(self.other)
+        trust.install()
+        self.leaf.unlink()
+        before = {p: p.read_bytes() for p in (self.ca, self.key, self.key.parent / trust.MARKER)}
+        entries = nss.entries(self.db)
+        self.assertEqual(trust.removal('uninstall-plan'), 0)
+        self.assertEqual(nss.entries(self.db), entries)
+        with patch('builtins.input', return_value='n'):
+            self.assertEqual(trust.removal('uninstall'), 1)
+        self.assertEqual(nss.entries(self.db), entries)
+        with patch('builtins.input', return_value='y') as confirm:
+            self.assertEqual(trust.removal('uninstall'), 0)
+            self.assertEqual(trust.removal('uninstall'), 0)
+        confirm.assert_called_once()
+        self.assertEqual(chromium_trust.check(self.ca), 'missing')
+        self.assertEqual(chromium_trust.check(self.other), 'trusted')
+        self.assertEqual(before, {p: p.read_bytes() for p in before})
+
+    def test_removal_refuses_mismatched_authorization(self):
+        trust.install()
+        marker = self.key.parent / trust.MARKER
+        marker.write_text('0' * 64 + '\n')
+        before = nss.entries(self.db)
+        with self.assertRaisesRegex(nss.NSSError, 'differs'):
+            trust.removal('uninstall-plan')
+        self.assertEqual(nss.entries(self.db), before)
 
     def test_cli_requires_explicit_apply(self):
         with self.assertRaises(SystemExit) as ctx:

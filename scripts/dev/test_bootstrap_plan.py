@@ -138,9 +138,10 @@ class PlanProgressTests(unittest.TestCase):
             self.assertEqual(command.call_count, 8)
         self.assertIn("HOST PREPARATION NEEDED", out.getvalue())
 
-    def test_complete_tls_keeps_original_verification_order(self):
+    def test_complete_tls_checks_authorized_nss_after_chain(self):
         with tempfile.TemporaryDirectory() as temp, \
                 patch.dict(os.environ, {"FT_DEV_TLS_DIR": temp, "XDG_DATA_HOME": temp}), \
+                patch.object(plan.platform, "release", return_value="6.8.0"), \
                 patch.object(plan, "command", return_value=completed()) as command, \
                 redirect_stdout(io.StringIO()):
             tls = Path(temp)
@@ -149,11 +150,14 @@ class PlanProgressTests(unittest.TestCase):
             for path in (tls / "ca.crt", tls / "vault.crt", tls / "vault.key", ca / "ca.key"):
                 path.write_text("fixture")
             self.assertIs(plan.host_plan(None), Status.READY)
-            self.assertEqual(command.call_args_list[-2:], [
-                call(["openssl", "verify", "-purpose", "sslserver", "-verify_hostname", "vault",
+            self.assertEqual(command.call_args_list[-3:], [
+                call(["openssl", "verify", "-no-CApath", "-no-CAstore", "-purpose", "sslserver", "-verify_hostname", "vault",
                       "-CAfile", str(tls / "ca.crt"), str(tls / "vault.crt")]),
-                call(["openssl", "x509", "-in", str(tls / "vault.crt"), "-noout", "-checkend", "0"])])
-            self.assertEqual(command.call_count, 6)
+                call(["openssl", "x509", "-in", str(tls / "vault.crt"), "-noout", "-checkend", "0"]),
+                call([plan.sys.executable, "-m", "scripts.dev.vault_ca_trust", "check-authorized"])])
+            self.assertEqual(command.call_count, 7)
+            command.side_effect = [completed()] * 6 + [completed(1)]
+            self.assertIs(plan.host_plan(None), Status.NOT_READY)
 
     def test_inventory_uses_original_names_and_does_not_expose_ids(self):
         def command(args, *, output=False):

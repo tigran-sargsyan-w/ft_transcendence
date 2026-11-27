@@ -844,6 +844,7 @@ def initialize(lock_fd, *, cancellation=None):
             progress.summary()
         raise
     progress.summary()
+    print("INFO: User-level CA trust checked; actual browser HTTPS requires separate verification.", flush=True)
     emit_result("UNIFIED INITIALIZATION READY", Status.DONE)
 
 
@@ -974,7 +975,13 @@ def health_report():
 def exclusive_orchestrator_lock():
     # Separate lock from infra/vault/scripts/run-migrations.sh: child stages
     # acquire that lock themselves, so locking it here would self-deadlock.
-    STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # mkdir(parents=True) uses the ambient umask for intermediate directories.
+    # On a fresh home, do not create group-writable CA/state ancestors.
+    previous_umask = os.umask(0o077)
+    try:
+        STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    finally:
+        os.umask(previous_umask)
     if STATE.is_symlink() or not STATE.is_dir() or STATE.stat().st_uid != os.getuid():
         raise UnifiedStartupError("Unsafe unified startup state directory")
     flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)

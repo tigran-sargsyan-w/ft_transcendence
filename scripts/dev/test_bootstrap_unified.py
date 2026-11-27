@@ -117,6 +117,21 @@ class UnifiedTests(unittest.TestCase):
             progress.begin(index)
             progress.finish(unified.Status.DONE)
 
+    def test_startup_lock_creates_private_parents_under_ubuntu_umask(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / '.local/state/transcendence/dev'
+            old = os.umask(0o002)
+            try:
+                with patch.object(unified, 'STATE', state), \
+                        patch.object(unified, 'LOCK', state / 'unified-startup.lock'):
+                    with unified.exclusive_orchestrator_lock():
+                        for path in (state, *list(state.parents)[:3]):
+                            self.assertEqual(path.stat().st_mode & 0o777, 0o700)
+                    actual = os.umask(old)
+                    self.assertEqual(actual, 0o002)
+            finally:
+                os.umask(old)
+
     def test_ready_prerequisites_are_cached_without_privileged_install(self):
         runner = MagicMock()
         runner.run.return_value = 0

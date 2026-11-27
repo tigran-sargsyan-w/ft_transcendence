@@ -33,14 +33,16 @@ class LinuxCATests(unittest.TestCase):
         self.pair()
         with patch.object(ca, "fingerprint", return_value="a"*64), \
              patch.object(ca.ca_trust, "check_linux", return_value=False):
-            with self.assertRaisesRegex(ca.LinuxCAError, "Unknown untrusted"):
+            with self.assertRaisesRegex(ca.LinuxCAError, "Unknown unrecorded"):
                 ca.inspect_ca(self.root)
 
-    def test_existing_trusted_ca_is_kept(self):
+    def test_unrecorded_system_trusted_ca_is_refused(self):
         self.pair()
         with patch.object(ca, "fingerprint", return_value="a"*64), \
-             patch.object(ca.ca_trust, "check_linux", return_value=True):
-            self.assertEqual(ca.inspect_ca(self.root), "a"*64)
+             patch.object(ca.ca_trust, "check_linux", return_value=True) as system:
+            with self.assertRaisesRegex(ca.LinuxCAError, "Unknown unrecorded"):
+                ca.inspect_ca(self.root)
+            system.assert_not_called()
 
     def test_recorded_ca_can_resume(self):
         self.pair()

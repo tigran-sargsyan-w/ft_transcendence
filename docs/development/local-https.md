@@ -121,6 +121,8 @@ On native Ubuntu, application CA trust is installed in the current user's shared
 
 For an existing deployment with an unrecorded CA, review its fingerprint and run `python3 -m scripts.dev.ca_trust setup` as the ordinary user to authorize it. A changed authorization record is refused. No sudo is needed for this operation. Already installed system trust is preserved.
 
+On native Ubuntu, `make initialize` automatically records and imports both freshly generated application and Vault CAs. It refuses an unrecorded existing CA, even if it is already trusted elsewhere. For a reviewed existing Vault CA, run `python3 -m scripts.dev.vault_ca_trust setup --apply` explicitly. Read-only `make health` and `make plan` require recorded NSS trust for both CAs; `make check` retains its application-only host scope.
+
 The browser should accept the development certificate without a certificate warning once the relevant CA trust has been installed.
 
 If a browser was open before trust installation, restart it if necessary.
@@ -160,7 +162,7 @@ The reverse proxy also forwards appropriate HTTP headers, including `Host`, `X-F
 | `make clean` | Remove Compose containers and networks, preserving named volumes |
 | `make domain-cleanup` | Remove managed hosts entries with confirmation |
 | `make cert-cleanup` | Remove project TLS certificate and private key with confirmation |
-| `make trust-uninstall` | Remove managed application CA trust with confirmation |
+| `make trust-uninstall` | Remove managed application and Vault CA NSS trust with confirmation (native Ubuntu) |
 
 `make check` validates the local domain and TLS prerequisites. It does not replace Docker container health checks or application endpoint tests.
 
@@ -365,7 +367,7 @@ New project certificates will be generated using the existing local CA.
 make trust-uninstall
 ```
 
-On native Ubuntu, removal targets only the matching project-managed application CA in the selected NSS database. System CA trust, third-party aliases, other stores and CA/key files are preserved. Removal from NSS does not guarantee that a browser no longer trusts the CA through another mechanism.
+On native Ubuntu, removal targets only the matching project-managed application and authorized Vault CA entries in the selected NSS database. Each removal requires explicit confirmation; declining the second may leave only the first removed. System CA trust, third-party aliases, other stores and CA/key files are preserved. Removal from NSS does not guarantee that a browser no longer trusts the CA through another mechanism.
 
 On WSL2, the legacy Linux and Windows trust removal adapters still require independent confirmation.
 
@@ -375,11 +377,13 @@ The local Root CA files and project TLS certificates are preserved.
 
 **Warning:** Removing mkcert CA trust can affect other local development projects using the same CA.
 
-Restore:
+Restore the application CA and, if applicable, the reviewed Vault CA:
 
 ```bash
 make setup
+python3 -m scripts.dev.vault_ca_trust setup --apply  # native Ubuntu, existing Vault TLS
 make check
+make health
 ```
 
 ### Restart after recovery

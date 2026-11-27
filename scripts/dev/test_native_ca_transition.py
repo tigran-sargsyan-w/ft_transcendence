@@ -9,7 +9,7 @@ import unittest
 from contextlib import ExitStack, redirect_stdout
 from unittest.mock import patch
 
-from scripts.dev import bootstrap_linux_ca as guard, ca_trust, certificates, chromium_trust, nss_trust
+from scripts.dev import bootstrap_linux_ca as guard, ca_trust, certificates, chromium_trust, nss_trust, vault_ca_trust
 
 
 @unittest.skipUnless(os.getuid() != 0 and shutil.which("openssl") and shutil.which("certutil"),
@@ -108,6 +108,9 @@ class NativeTrustTests(unittest.TestCase):
     def test_automatic_prepare_pins_fresh_ca_and_imports_without_system_trust(self):
         # Simulate only the mkcert generation step using genuine TLS material.
         def generate():
+            active = os.umask(0o077)
+            os.umask(active)
+            self.assertEqual(active, 0o077)
             self.material()
             return 0
         with patch.object(guard, "guard_existing", return_value=(self.root, None)), \
@@ -149,6 +152,33 @@ class NativeTrustTests(unittest.TestCase):
         self.assertEqual(nss_trust.entries(self.db), [e for e in before if e.nickname == "other certificate"])
         self.assertEqual([p.read_bytes() for p in files], original)
         self.assertEqual(ca_trust.inspect("check"), 1)
+
+    def test_combined_trust_preview_and_uninstall_preserve_both_ca_materials(self):
+        self.material()
+        self.authorize()
+        self.assertEqual(ca_trust.install_linux(self.public), 0)
+        with patch.dict(os.environ, {"XDG_STATE_HOME": "", "FT_DEV_TLS_DIR": ""}):
+            with patch("builtins.input", side_effect=AssertionError("unexpected confirmation")):
+                self.assertEqual(vault_ca_trust.prepare(), "installed")
+            vault_public, vault_leaf, vault_key = vault_ca_trust.material_paths()
+            self.assertFalse(ca_trust.check_linux(vault_public))
+            nss_trust.certutil(self.db, "-A", "-n", "external certificate", "-t", ",,",
+                              data=nss_trust.read_ca(self.leaf).der)
+            paths = (self.public, self.root / "rootCA-key.pem", self.root / guard.MARKER,
+                     self.leaf, self.key, vault_public, vault_leaf, vault_key,
+                     vault_leaf.with_suffix(".key"), vault_key.parent / vault_ca_trust.MARKER)
+            before = {p: p.read_bytes() for p in paths}
+            entries = nss_trust.entries(self.db)
+            self.assertEqual(ca_trust.uninstall_plan(), 0)
+            self.assertEqual(nss_trust.entries(self.db), entries)
+            with patch("builtins.input", return_value="y") as confirm:
+                self.assertEqual(ca_trust.uninstall(), 0)
+                self.assertEqual(ca_trust.uninstall(), 0)
+            self.assertEqual(confirm.call_count, 2)
+            self.assertEqual(nss_trust.entries(self.db), [e for e in entries if e.nickname == "external certificate"])
+            self.assertEqual(before, {p: p.read_bytes() for p in paths})
+            self.assertEqual(ca_trust.inspect("check"), 1)
+            self.assertEqual(vault_ca_trust.check(require_authorized=True), "missing")
 
     def test_no_installed_browser_is_explicit_not_a_false_browser_pass(self):
         self.material()
