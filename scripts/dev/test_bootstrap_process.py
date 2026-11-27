@@ -44,6 +44,22 @@ class ChildRunnerTests(unittest.TestCase):
         self.assertEqual(d.notices, ["ERROR: Prometheus incomplete"])
         self.assertEqual(d.counts["error"], 2)
 
+    def test_native_ca_diagnostics_are_exact_and_safe(self):
+        d = Diagnostics()
+        d.feed(0, b"ERROR: Unknown unrecorded local CA; review and run ca_trust setup\n"
+                  b"ERROR: Vault CA authorization missing; review and run setup --apply\n"
+                  b"ERROR: Vault CA differs from its authorization record; manual review required\n"
+                  b"ERROR: Vault CA authorization missing; review and run setup --apply secret=value\n"
+                  b"PASS: Vault CA authorization and user-level NSS trust\n")
+        self.assertEqual(d.notices, [
+            "ERROR: Unknown application CA; review and run python3 -m scripts.dev.ca_trust setup.",
+            "ERROR: Unknown Vault CA; review and run python3 -m scripts.dev.vault_ca_trust setup --apply.",
+            "ERROR: Vault CA identity differs from the recorded fingerprint; manual review required.",
+        ])
+        self.assertEqual(d.counts["error"], 4)
+        self.assertEqual(d.counts["reviewed_error"], 3)
+        self.assertEqual(d.events, [("Verify Vault CA trust", Status.DONE)])
+
     def test_expected_missing_and_guard_failure_are_distinct(self):
         for code, message, guard_codes, expected in (
             (1, "MISSING: mkcert", (3,), Status.MISSING),
