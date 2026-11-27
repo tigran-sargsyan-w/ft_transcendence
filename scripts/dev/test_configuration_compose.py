@@ -22,7 +22,7 @@ SPEC.loader.exec_module(preflight)
 class PublicComposeEnvironmentTests(unittest.TestCase):
     def setUp(self):
         self.config = configuration.DevelopmentConfiguration(
-            "example.test", 9080, 9443, 9200, 24
+            "example.test", 9080, 9443, 9200, 9555, 24
         )
         self.hostile = {
             "APP_ORIGIN": "https://unexpected.test",

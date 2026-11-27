@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CONFIG_FILE = ROOT / "config" / "development.env"
 KEYS = frozenset({
     "DEV_DOMAIN", "DEV_HTTP_PORT", "DEV_HTTPS_PORT", "DEV_VAULT_UI_PORT",
+    "DEV_PRISMA_UI_PORT",
     "SESSION_TTL_HOURS", "COOKIE_SECURE",
 })
 MAX_SESSION_TTL_HOURS = (2**53 - 1) // 3_600_000
@@ -67,6 +68,7 @@ class DevelopmentConfiguration:
     http_port: int
     https_port: int
     vault_ui_port: int
+    prisma_ui_port: int
     session_ttl_hours: int
 
     @property
@@ -90,6 +92,10 @@ class DevelopmentConfiguration:
         # Vault TLS covers localhost independently of the configurable app domain.
         return f"https://localhost:{self.vault_ui_port}/ui/"
 
+    @property
+    def prisma_ui_url(self) -> str:
+        return f"https://localhost:{self.prisma_ui_port}/"
+
     def public_environment(self) -> dict[str, str]:
         """Explicit allowlist for future guarded Compose/template consumers."""
         return {
@@ -97,6 +103,7 @@ class DevelopmentConfiguration:
             "DEV_HTTP_PORT": str(self.http_port),
             "DEV_HTTPS_PORT": str(self.https_port),
             "DEV_VAULT_UI_PORT": str(self.vault_ui_port),
+            "DEV_PRISMA_UI_PORT": str(self.prisma_ui_port),
             "SESSION_TTL_HOURS": str(self.session_ttl_hours),
             "COOKIE_SECURE": "true",
             "APP_ORIGIN": self.app_origin,
@@ -151,7 +158,7 @@ def load(path: Path = CONFIG_FILE) -> DevelopmentConfiguration:
 def from_text(text: str) -> DevelopmentConfiguration:
     values = parse(text)
     ports = [integer(values[key], key, 1024, 65535) for key in (
-        "DEV_HTTP_PORT", "DEV_HTTPS_PORT", "DEV_VAULT_UI_PORT",
+        "DEV_HTTP_PORT", "DEV_HTTPS_PORT", "DEV_VAULT_UI_PORT", "DEV_PRISMA_UI_PORT",
     )]
     if len(set(ports)) != len(ports):
         raise ConfigurationError("Development host ports must be distinct")

@@ -13,7 +13,7 @@ import migrate_localhost as migration
 class LocalhostMigrationTests(unittest.TestCase):
     def setUp(self):
         self.current = migration.configuration.DevelopmentConfiguration(
-            "transcendence.test", 8080, 8443, 8200, 168)
+            "transcendence.test", 8080, 8443, 8200, 5555, 168)
         self.target = replace(self.current, domain="localhost")
         self.original = "# Existing comments\nDEV_DOMAIN=transcendence.test\nCOOKIE_SECURE=true"
 
@@ -115,7 +115,7 @@ class LocalhostMigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "development.env"
             original = (self.original + "\nDEV_HTTP_PORT=8080\nDEV_HTTPS_PORT=8443\n"
-                        "DEV_VAULT_UI_PORT=8200\nSESSION_TTL_HOURS=168\n")
+                        "DEV_VAULT_UI_PORT=8200\nDEV_PRISMA_UI_PORT=5555\nSESSION_TTL_HOURS=168\n")
             path.write_text(original, encoding="utf-8")
             path.chmod(0o664)
             with patch.object(migration.configuration, "CONFIG_FILE", path), \
